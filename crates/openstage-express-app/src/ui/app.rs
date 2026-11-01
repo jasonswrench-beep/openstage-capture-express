@@ -3,8 +3,10 @@
 //! the tests can run the whole window without opening one.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use eframe::egui;
+use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
 
@@ -12,10 +14,15 @@ use super::bar::{self, BarAction, BarView};
 use super::capture::{cannot_capture, CaptureControl, HotkeyAction, Outcome, Starter};
 use super::editor::{self, Leave};
 use super::editor_state::EditorState;
+use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
 use super::rows::{step_count, steps_words};
 use super::widgets::{self, Status};
+use crate::export_run::{self, Job, Report};
 use crate::library;
+
+/// Asks the person for a folder (Windows' own dialog), starting at the one given; None when they cancel.
+pub type FolderChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
 
 /// The height of the line at the foot of the window.
 const STATUS_HEIGHT: f32 = 34.0;
@@ -24,6 +31,8 @@ const STATUS_HEIGHT: f32 = 34.0;
 pub enum Screen {
     Home,
     Editor,
+    /// Choosing formats and a folder, and exporting the open guide.
+    Export,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
 }
@@ -48,6 +57,12 @@ pub struct App {
     /// The hotkeys in a sentence, for the bar.
     hotkey_words: String,
     is_running: Box<dyn Fn(u32) -> bool>,
+    pub export: ExportState,
+    export_job: Option<Receiver<Result<Report, String>>>,
+    /// Asks the person for a folder (Windows' own dialog), starting at the one given.
+    chooser: FolderChooser,
+    /// Shows a folder to the person (opens it in Explorer).
+    opener: Box<dyn Fn(&Path)>,
 }
 
 impl App {
@@ -65,10 +80,18 @@ impl App {
             what: "the whole screen".to_string(),
             hotkey_words: String::new(),
             is_running: Box::new(|_| false),
+            export: ExportState::new(PathBuf::new(), false),
+            export_job: None,
+            chooser: Box::new(|_| None),
+            opener: Box::new(|_| {}),
         };
         match screen {
             Screen::Editor => app.open_example(),
             Screen::Bar => app.screen = Screen::Bar,
+            Screen::Export => {
+                app.open_example();
+                app.screen = Screen::Export;
+            }
             Screen::Home => {}
         }
         app
@@ -87,6 +110,21 @@ impl App {
         self.what = what.to_string();
         self.is_running = is_running;
         self.refresh_home();
+        self
+    }
+
+    /// Give the program what Export needs from the computer: the folder exports go into, whether a PDF can be made, a way to ask
+    /// for another folder, and a way to show a folder.
+    pub fn with_system(
+        mut self,
+        exports: PathBuf,
+        can_pdf: bool,
+        chooser: FolderChooser,
+        opener: Box<dyn Fn(&Path)>,
+    ) -> App {
+        self.export = ExportState::new(exports, can_pdf);
+        self.chooser = chooser;
+        self.opener = opener;
         self
     }
 
@@ -113,6 +151,11 @@ impl App {
     /// Whether a capture is running (or paused), so the window must keep checking for what it has to say.
     pub fn is_capturing(&self) -> bool {
         self.capture.is_some()
+    }
+
+    /// Whether an export is being made on its thread.
+    pub fn is_exporting(&self) -> bool {
+        self.export_job.is_some()
     }
 
     fn open_example(&mut self) {
@@ -180,7 +223,7 @@ impl App {
         match (action, self.capture.is_some()) {
             (HotkeyAction::StartOrFinish, false) => match self.screen {
                 Screen::Home | Screen::Bar => self.begin_capture(),
-                Screen::Editor => {
+                Screen::Editor | Screen::Export => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
             },
@@ -210,8 +253,59 @@ impl App {
         }
     }
 
+    /// Take what the export has said, if it has finished.
+    fn poll_export(&mut self) {
+        let Some(job) = &self.export_job else { return };
+        let answer = match job.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("The export stopped without an answer.".to_string()),
+        };
+        self.export_job = None;
+        self.export.working = false;
+        match answer {
+            Ok(report) => {
+                let sentence = report.sentence();
+                if self.export.open_after && !report.made.is_empty() {
+                    (self.opener)(&report.folder);
+                }
+                self.export.said = Some(sentence.clone());
+                self.status.say(sentence);
+            }
+            Err(why) => {
+                let words = format!("The export did not work. {why}");
+                self.export.said = Some(words.clone());
+                self.status.say(words);
+            }
+        }
+    }
+
+    fn start_export(&mut self) {
+        if self.export_job.is_some() {
+            return;
+        }
+        if self.export.selection.is_empty() {
+            self.status.say("Choose at least one format.");
+            return;
+        }
+        let Some(editor) = self.editor.as_ref() else { return };
+        let guide = editor.doc().guide.clone();
+        let folder = self
+            .export
+            .folder
+            .join(sanitise_folder_name(&guide.title))
+            .join(export_run::run_folder_name(&utc_now_iso()));
+        let job = Job { guide, pictures: editor.pictures(), selection: self.export.selection.clone(), folder };
+        let n = job.selection.count();
+        self.export_job = Some(export_run::spawn(job));
+        self.export.working = true;
+        self.export.said = None;
+        self.status.say(format!("Exporting {n} format{}. Please wait.", if n == 1 { "" } else { "s" }));
+    }
+
     /// Take what the capture has to say, and open the guide when it has finished. Call it every frame.
     pub fn poll(&mut self) {
+        self.poll_export();
         let Some(capture) = self.capture.as_mut() else { return };
         let said = capture.poll();
         if !said.is_empty() {
@@ -282,12 +376,38 @@ impl App {
                 let action = bar::show(ui, &view);
                 self.bar_action(action);
             }
+            Screen::Export => {
+                if self.editor.is_none() {
+                    self.screen = Screen::Home;
+                    return;
+                }
+                match export::show(ui, &mut self.export) {
+                    ExportAction::None => {}
+                    ExportAction::Back => {
+                        self.screen = Screen::Editor;
+                        self.status.say("Back at the guide.");
+                    }
+                    ExportAction::ChooseFolder => {
+                        if let Some(chosen) = (self.chooser)(&self.export.folder) {
+                            self.status.say(format!("Exports will go into {}.", chosen.display()));
+                            self.export.folder = chosen;
+                        }
+                    }
+                    ExportAction::Export => self.start_export(),
+                }
+            }
             Screen::Editor => {
                 let Some(editor_state) = self.editor.as_mut() else {
                     self.screen = Screen::Home;
                     return;
                 };
-                if editor::show(ui, editor_state, &mut self.status) == Leave::ToHome {
+                let left = editor::show(ui, editor_state, &mut self.status);
+                if left == Leave::ToExport {
+                    self.screen = Screen::Export;
+                    self.status.say("Export. Choose the formats and the folder, then press Export.");
+                    return;
+                }
+                if left == Leave::ToHome {
                     let saved_to_disk = editor_state.is_saved_to_disk();
                     if let Some(why) = editor_state.save_if_changed() {
                         self.status.say(why);

@@ -12,6 +12,7 @@ pub mod bar;
 pub mod capture;
 pub mod editor;
 pub mod editor_state;
+pub mod export;
 pub mod fonts;
 pub mod home;
 pub mod rows;
@@ -45,7 +46,7 @@ pub struct DevOptions {
 }
 
 impl DevOptions {
-    /// Read `--screen home|editor|bar`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
+    /// Read `--screen home|editor|export|bar`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
     pub fn parse(args: &[String]) -> Result<DevOptions, String> {
         let mut options = DevOptions::default();
         let mut it = args.iter();
@@ -53,11 +54,12 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor or bar")?.as_str() {
+                    options.screen = Some(match value("home, editor, export or bar")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
+                        "export" => Screen::Export,
                         "bar" => Screen::Bar,
-                        other => return Err(format!("--screen is home, editor or bar, not {other:?}.")),
+                        other => return Err(format!("--screen is home, editor, export or bar, not {other:?}.")),
                     })
                 }
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value("a file name ending in .png")?)),
@@ -118,9 +120,9 @@ impl eframe::App for ExpressApp {
         self.apply_window_mode(ui.ctx());
         self.protect_own_windows();
         self.dev_tick(ui.ctx());
-        if self.app.is_capturing() {
+        if self.app.is_capturing() || self.app.is_exporting() {
             // The window may be in the background while someone works in another program: keep looking for what the capture
-            // has to say.
+            // or the export has to say.
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -281,12 +283,23 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 let dev_run = options.screenshot.is_some() || options.close_after.is_some();
                 let hotkeys = (!dev_run).then(|| listen_for_hotkeys(cc.egui_ctx.clone()));
                 let words = crate::capture_win::hotkey_sentence(&[]);
-                let mut app = App::new(screen).with_capture(
-                    library,
-                    crate::capture_win::starter(words.clone()),
-                    &crate::capture_win::ready_words(),
-                    Box::new(openstage_express_windows::system::process_is_running),
-                );
+                let mut app = App::new(screen)
+                    .with_capture(
+                        library,
+                        crate::capture_win::starter(words.clone()),
+                        &crate::capture_win::ready_words(),
+                        Box::new(openstage_express_windows::system::process_is_running),
+                    )
+                    .with_system(
+                        crate::library::default_exports_folder(),
+                        crate::export_run::system_pdf().is_some(),
+                        Box::new(|start| {
+                            openstage_express_windows::dialogs::choose_folder(start, "Choose where to put the exports")
+                        }),
+                        Box::new(|folder| {
+                            let _ = std::process::Command::new("explorer").arg(folder).spawn();
+                        }),
+                    );
                 app.set_hotkey_words(&words);
                 (app, hotkeys)
             };

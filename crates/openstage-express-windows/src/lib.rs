@@ -14,6 +14,8 @@ pub mod affinity;
 #[cfg(windows)]
 pub mod console;
 #[cfg(windows)]
+pub mod dialogs;
+#[cfg(windows)]
 pub mod hotkeys;
 #[cfg(windows)]
 pub mod input;

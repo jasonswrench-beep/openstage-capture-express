@@ -9,6 +9,7 @@ mod check_computer;
 #[cfg(windows)]
 mod clicks_test;
 mod demo_run;
+mod export_run;
 mod guide_writer;
 mod library;
 mod ui;

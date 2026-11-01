@@ -5,6 +5,8 @@
 //! What is typed into the title, the description or the picture description is held in a buffer and kept as *one* change when
 //! the person leaves the box, picks another step, or does anything else, so undo takes back a whole edit and never one letter.
 
+use std::sync::Arc;
+
 use eframe::egui;
 use openstage_capture_render::BlockText;
 use openstage_express_core::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
@@ -28,7 +30,7 @@ pub struct Buffer {
 
 pub struct EditorState {
     session: Session,
-    pictures: Box<dyn PictureSource>,
+    pictures: Arc<dyn PictureSource + Send + Sync>,
     /// The guide folder this guide lives in, if it is a real guide (the example guide has none). Changes are saved to it.
     folder: Option<GuideFolder>,
     /// What the document looked like when it was last saved, to know when to save again.
@@ -59,7 +61,7 @@ impl EditorState {
     pub fn new(demo: Demo) -> EditorState {
         let mut state = EditorState {
             session: Session::new(demo.document),
-            pictures: Box::new(demo.pictures),
+            pictures: Arc::new(demo.pictures),
             folder: None,
             saved_stamp: None,
             selected: None,
@@ -84,7 +86,7 @@ impl EditorState {
         let pictures = DiskPictures { root: folder.path().to_path_buf() };
         let mut state = EditorState {
             session: Session::new(doc),
-            pictures: Box::new(pictures),
+            pictures: Arc::new(pictures),
             folder: Some(folder),
             saved_stamp: None,
             selected: None,
@@ -107,6 +109,11 @@ impl EditorState {
             can_redo: self.session.can_redo(),
             updated_at: self.session.doc().guide.updated_at.clone(),
         }
+    }
+
+    /// The guide's pictures, to share with the thread that makes an export.
+    pub fn pictures(&self) -> Arc<dyn PictureSource + Send + Sync> {
+        Arc::clone(&self.pictures)
     }
 
     /// Whether this editor saves to a guide folder.

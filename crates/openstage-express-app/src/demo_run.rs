@@ -3,26 +3,16 @@
 //! Express makes without capturing anything. Used by `EXPORT DEMO.bat`.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use openstage_capture_render::BlockText;
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_export::demo::demo;
-use openstage_express_export::docx::{export_docx, DocxOptions};
-use openstage_express_export::gif::{export_gif, GifOptions};
-use openstage_express_export::html::export_html;
-use openstage_express_export::images::{export_images, export_images_as, ImageFormat, DEFAULT_JPEG_QUALITY};
-use openstage_express_export::json::export_json;
-use openstage_express_export::markdown::export_markdown;
-use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
+use openstage_express_export::gif::GifOptions;
+use openstage_express_export::pdf::PdfRenderer;
 use openstage_express_export::plan::{plan, ExportOptions};
-use openstage_express_export::pptx::{export_pptx, PptxOptions};
-use openstage_express_export::Export;
 
-/// A folder name for this run, from the time: `2026-11-01 10-30-05`.
-fn run_folder_name(now_iso: &str) -> String {
-    now_iso.trim_end_matches('Z').replace('T', " ").replace(':', "-")
-}
+use crate::export_run::{make, run_folder_name, Selection};
 
 /// Make every export in a new folder inside `out`. Returns what to tell the person.
 pub fn run(out: &Path) -> Result<String, String> {
@@ -40,35 +30,10 @@ pub fn run(out: &Path) -> Result<String, String> {
 fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<String, String> {
     let guide = demo();
     let the_plan = plan(&guide.document.guide, &guide.pictures, &BlockText, &ExportOptions::default());
-    let folder: PathBuf = out.join(run_folder_name(now_iso));
-    let mut skipped = String::new();
-    let mut exports: Vec<(&str, Export)> = vec![
-        ("html", export_html(&the_plan)),
-        ("markdown", export_markdown(&the_plan)),
-        ("json", export_json(&the_plan)),
-        ("images", export_images(&the_plan)),
-        ("jpg", export_images_as(&the_plan, ImageFormat::Jpeg { quality: DEFAULT_JPEG_QUALITY })),
-        (
-            "gif",
-            export_gif(
-                &the_plan,
-                &GifOptions { progress_bar: true, title_card: true, ..GifOptions::default() },
-                &BlockText,
-            ),
-        ),
-    ];
-    exports.push(("word", export_docx(&the_plan, &DocxOptions::default()).map_err(|e| format!("word: {e}"))?));
-    exports
-        .push(("powerpoint", export_pptx(&the_plan, &PptxOptions::default()).map_err(|e| format!("powerpoint: {e}"))?));
-    match pdf {
-        Some(renderer) => {
-            let export = export_pdf(&the_plan, &PdfOptions::default(), renderer).map_err(|e| format!("pdf: {e}"))?;
-            exports.push(("pdf", export));
-        }
-        None => skipped.push_str(
-            "  pdf: skipped, because this computer has no Microsoft Edge WebView2 Runtime (it comes with Windows 11)\n",
-        ),
-    }
+    let folder = out.join(run_folder_name(now_iso));
+    // The demo turns on the title card and the progress bar, to show them.
+    let gif = GifOptions { progress_bar: true, title_card: true, ..GifOptions::default() };
+    let made = make(&the_plan, &Selection::all(), &gif, &BlockText, pdf, &folder)?;
     let mut report = String::new();
     writeln!(
         report,
@@ -77,13 +42,14 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
         the_plan.steps.len()
     )
     .ok();
-    report.push_str(&skipped);
-    for (name, export) in &exports {
-        let written = export.write_to(&folder.join(name)).map_err(|e| e.to_string())?;
-        writeln!(report, "  {name}: {} file(s)", written.len()).ok();
-        for warning in &export.warnings {
-            writeln!(report, "    warning: {warning}").ok();
-        }
+    for (format, why) in &made.skipped {
+        writeln!(report, "  {}: skipped, because {why}", format.folder()).ok();
+    }
+    for (format, files) in &made.made {
+        writeln!(report, "  {}: {files} file(s)", format.folder()).ok();
+    }
+    for warning in &made.warnings {
+        writeln!(report, "    warning: {warning}").ok();
     }
     writeln!(report, "\nEverything is in:\n  {}", folder.display()).ok();
     writeln!(
@@ -93,7 +59,6 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
     .ok();
     Ok(report)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

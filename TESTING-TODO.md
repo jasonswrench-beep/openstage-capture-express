@@ -134,6 +134,20 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 - [ ] Open a guide in the folder `Documents\OpenStage Express\Guides` after a capture: is that the place you want guides kept? Is
       "Guide 2026-11-01 09.38" a good first title? The editor cannot rename a guide yet (steps only), so every guide keeps it.
 
+## Milestone M7 (so far: the Export screen)
+
+- [ ] OneDrive: on this PC Documents is inside OneDrive (`C:\Users\Jason\OneDrive\Documents`), so the default guides folder and the
+      default exports folder are both inside OneDrive and their pictures (screenshots of your screen, about 0.7 MB each) would be
+      uploaded to it. Is that what you want? There is no settings screen yet to move them; until there is, set the environment
+      variable `EXPRESS_GUIDES_FOLDER` to another folder to keep guides elsewhere.
+- [ ] The Export screen by hand: open a guide you captured, press Export, choose a few formats, press `Choose folder...` (Windows' own
+      folder dialog: has never been opened by a person; does it appear in front, start in the right place, and work with the keyboard
+      and Narrator?), press Export. Does the window stay usable while a PDF is made? Is the new folder opened? Open each file.
+- [ ] The export options (GIF speed and size, JPG quality, PDF paper and margins, Word and PowerPoint choices) exist in the code and
+      are tested, but the Export screen offers only the formats, with the default options. Say which options you want on the screen.
+- [ ] The exports of a captured guide have only been checked by their tests and by reading the files, not by opening each in Word,
+      PowerPoint and a PDF reader as was done for the demo.
+
 ## PDF export (WebView2)
 
 - [ ] Open the PDF from `EXPORT DEMO.bat` (the `pdf` folder) in a desktop PDF reader and in Edge. It has been looked at only as pictures drawn
