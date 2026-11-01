@@ -695,6 +695,11 @@ fn the_steps_list_is_one_stop_for_the_tab_key_however_long_it_is() {
 struct FakeState {
     phase: Option<BarPhase>,
     steps: usize,
+    /// The step count the capture reaches the next time it is polled (a step is counted when the capture is looked at, as the
+    /// real one does when the saving thread answers).
+    step_to: Option<usize>,
+    /// Something went wrong since the capture was last asked.
+    trouble: bool,
     acts: Vec<BarAction>,
     said: Vec<String>,
     outcome: Option<Outcome>,
@@ -728,11 +733,19 @@ impl CaptureControl for FakeCapture {
     }
 
     fn poll(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.0.borrow_mut().said)
+        let mut s = self.0.borrow_mut();
+        if let Some(n) = s.step_to.take() {
+            s.steps = n;
+        }
+        std::mem::take(&mut s.said)
     }
 
     fn finished(&mut self) -> Option<Outcome> {
         self.0.borrow_mut().outcome.take()
+    }
+
+    fn trouble(&mut self) -> bool {
+        std::mem::take(&mut self.0.borrow_mut().trouble)
     }
 }
 
@@ -1820,4 +1833,324 @@ fn back_from_drawing_the_area_returns_to_the_bar_without_choosing() {
     h.invoke(Role::Button, "Back");
     assert_eq!(h.app.screen, Screen::Bar);
     assert!(h.app.target.area.is_none());
+}
+
+// ---- changing the hotkeys, and the cue sounds
+
+use openstage_express_core::cues::Cue;
+use openstage_express_core::hotkey::{HotkeySet, KeyCombo};
+
+/// Writes down every sound it is asked to play. Nothing is ever played from a test.
+struct RecordedCues(Rc<RefCell<Vec<Cue>>>);
+
+impl super::capture::CuePlayer for RecordedCues {
+    fn play(&self, cue: Cue) {
+        self.0.borrow_mut().push(cue);
+    }
+}
+
+/// The window, the stand-in capture that steers it, and what the sounds were asked to play.
+type SoundHarness = (Harness, Rc<RefCell<FakeState>>, Rc<RefCell<Vec<Cue>>>);
+
+/// A window with a stand-in capture and a recorder for the sounds, with the given sounds turned on.
+fn sound_harness(sounds: crate::settings::SoundSettings) -> SoundHarness {
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let played: Rc<RefCell<Vec<Cue>>> = Rc::default();
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(std::path::PathBuf::new(), fake_starter(&state));
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_cues(Box::new(RecordedCues(Rc::clone(&played))));
+    h.app.settings.sounds = sounds;
+    h.settle();
+    (h, state, played)
+}
+
+fn all_sounds() -> crate::settings::SoundSettings {
+    crate::settings::SoundSettings { start_and_stop: true, step: true, problem: true }
+}
+
+/// Type `text` into the box named `name` and leave it with Tab, as a keyboard user would.
+fn type_into(h: &mut Harness, name: &str, text: &str) {
+    h.focus_on(Role::TextInput, name);
+    h.key(Key::A, ctrl());
+    h.type_text(text);
+    h.key(Key::Tab, NO_MODS);
+}
+
+#[test]
+fn every_hotkey_has_a_named_box_that_shows_its_keys_and_the_usual_ones_button() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    for (name, keys) in
+        [("Start or finish", "Ctrl+Shift+F7"), ("Pause or resume", "Ctrl+Shift+F8"), ("Capture now", "Ctrl+Shift+F9")]
+    {
+        let id = h.find(Role::TextInput, name);
+        assert_eq!(h.node(id).value(), Some(keys), "{name}");
+    }
+    h.find(Role::Button, "Use the usual hotkeys");
+    h.find(Role::Heading, "Sounds");
+}
+
+#[test]
+fn a_hotkey_is_changed_by_typing_it_and_the_change_is_saved_said_and_handed_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    type_into(&mut h, "Capture now", "alt + shift + k");
+    assert_eq!(h.app.settings.hotkeys.capture_now.describe(), "Alt+Shift+K");
+    assert_eq!(
+        h.app.settings.hotkeys.start_or_finish,
+        HotkeySet::default().start_or_finish,
+        "the others are left alone"
+    );
+    assert_eq!(
+        h.status(),
+        "Saved. Hotkeys: Ctrl+Shift+F7 start or finish, Ctrl+Shift+F8 pause or resume, Alt+Shift+K capture now."
+    );
+    let id = h.find(Role::TextInput, "Capture now");
+    assert_eq!(h.node(id).value(), Some("Alt+Shift+K"), "what was typed is tidied into the usual way of writing it");
+    // Whoever listens for the keys is told once, and the file has the change.
+    let told = h.app.take_hotkey_change().expect("the listener is told");
+    assert_eq!(told.capture_now.describe(), "Alt+Shift+K");
+    assert!(h.app.take_hotkey_change().is_none(), "only once");
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(back.hotkeys, told);
+    h.find(
+        Role::Label,
+        "Hotkeys: Ctrl+Shift+F7 start or finish, Ctrl+Shift+F8 pause or resume, Alt+Shift+K capture now.",
+    );
+}
+
+#[test]
+fn a_hotkey_that_is_not_allowed_is_refused_in_words_and_nothing_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    type_into(&mut h, "Capture now", "Ctrl+Alt+K");
+    assert!(h.status().starts_with("Capture now was not changed."), "{}", h.status());
+    assert!(h.status().contains("AltGr"), "{}", h.status());
+    assert_eq!(h.app.settings.hotkeys, HotkeySet::default());
+    assert!(h.app.take_hotkey_change().is_none(), "the listener is not troubled");
+    assert!(!dir.path().join("settings.json").exists(), "nothing was saved");
+    // What was typed stays in the box to be fixed, and the reason is on the screen next to it.
+    let id = h.find(Role::TextInput, "Capture now");
+    assert_eq!(h.node(id).value(), Some("Ctrl+Alt+K"));
+    let reason = h.status().replace("Capture now was not changed. ", "");
+    assert!(h.has(Role::Label, &reason), "the reason is shown beside the box");
+    // A key that cannot be read is also said.
+    type_into(&mut h, "Pause or resume", "banana");
+    assert!(h.status().starts_with("Pause or resume was not changed."), "{}", h.status());
+    assert!(h.status().contains("not a key Express can use"), "{}", h.status());
+    // And one that another hotkey already has.
+    type_into(&mut h, "Pause or resume", "ctrl+shift+f7");
+    assert!(h.status().contains("already the hotkey to start or finish"), "{}", h.status());
+    assert_eq!(h.app.settings.hotkeys, HotkeySet::default());
+}
+
+#[test]
+fn a_good_key_after_a_refused_one_works_and_the_refusal_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    type_into(&mut h, "Capture now", "F7");
+    let refusal = h.status().replace("Capture now was not changed. ", "");
+    assert!(h.has(Role::Label, &refusal));
+    type_into(&mut h, "Capture now", "Ctrl+Shift+Q");
+    assert_eq!(h.app.settings.hotkeys.capture_now.describe(), "Ctrl+Shift+Q");
+    assert!(!h.has(Role::Label, &refusal), "the old refusal is gone");
+}
+
+#[test]
+fn leaving_a_box_without_changing_it_changes_nothing_and_says_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    let before = h.status();
+    h.focus_on(Role::TextInput, "Start or finish");
+    h.key(Key::Tab, NO_MODS);
+    assert!(h.app.take_hotkey_change().is_none());
+    assert_eq!(h.status(), before);
+    assert!(!dir.path().join("settings.json").exists());
+    // Writing the same key in other words is tidied but is not a change.
+    type_into(&mut h, "Start or finish", "SHIFT+ctrl+f7");
+    assert!(h.app.take_hotkey_change().is_none());
+    let id = h.find(Role::TextInput, "Start or finish");
+    assert_eq!(h.node(id).value(), Some("Ctrl+Shift+F7"));
+}
+
+#[test]
+fn the_usual_hotkeys_button_puts_every_box_and_key_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    type_into(&mut h, "Capture now", "Alt+Shift+K");
+    type_into(&mut h, "Start or finish", "Ctrl+Shift+F1");
+    let _ = h.app.take_hotkey_change();
+    // A refused try is left in a box too.
+    type_into(&mut h, "Pause or resume", "q");
+    h.invoke(Role::Button, "Use the usual hotkeys");
+    assert_eq!(h.app.settings.hotkeys, HotkeySet::default());
+    assert_eq!(h.app.take_hotkey_change(), Some(HotkeySet::default()));
+    for (name, keys) in
+        [("Start or finish", "Ctrl+Shift+F7"), ("Pause or resume", "Ctrl+Shift+F8"), ("Capture now", "Ctrl+Shift+F9")]
+    {
+        h.settle();
+        let id = h.find(Role::TextInput, name);
+        assert_eq!(h.node(id).value(), Some(keys), "{name}");
+    }
+    assert!(h.status().starts_with("Saved. Hotkeys: Ctrl+Shift+F7"), "{}", h.status());
+    // With the usual keys already in use the button still clears a refused try, without troubling the listener.
+    type_into(&mut h, "Capture now", "x");
+    h.invoke(Role::Button, "Use the usual hotkeys");
+    h.settle();
+    assert!(h.app.take_hotkey_change().is_none());
+    let id = h.find(Role::TextInput, "Capture now");
+    assert_eq!(h.node(id).value(), Some("Ctrl+Shift+F9"));
+}
+
+#[test]
+fn the_bar_names_the_hotkeys_that_are_set_now_and_leaves_out_one_that_could_not_be_set() {
+    let (mut h, _state, _) = sound_harness(Default::default());
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    let chosen = KeyCombo::parse("Alt+Shift+K").unwrap();
+    let usual = HotkeySet::default().entries();
+    h.app.set_hotkeys_working(&[usual[0], (HotkeyAction::CaptureNow, chosen)]);
+    h.settle();
+    h.find(Role::Label, "Hotkeys: Ctrl+Shift+F7 start or finish, Alt+Shift+K capture now.");
+    h.app.set_hotkeys_working(&[]);
+    h.settle();
+    assert!(!h.has(Role::Label, "Hotkeys: Ctrl+Shift+F7 start or finish, Alt+Shift+K capture now."));
+}
+
+#[test]
+fn every_sound_is_off_until_turned_on_so_nothing_is_played() {
+    let (mut h, state, played) = sound_harness(Default::default());
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    state.borrow_mut().step_to = Some(1);
+    h.settle();
+    state.borrow_mut().trouble = true;
+    h.settle();
+    h.invoke(Role::Button, "Pause");
+    h.invoke(Role::Button, "Resume");
+    h.invoke(Role::Button, "Finish");
+    assert!(played.borrow().is_empty(), "{:?}", played.borrow());
+}
+
+#[test]
+fn with_the_sounds_on_each_event_plays_its_own() {
+    let (mut h, state, played) = sound_harness(all_sounds());
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    assert_eq!(*played.borrow(), [Cue::Start], "starting");
+    state.borrow_mut().step_to = Some(1);
+    h.settle();
+    assert_eq!(*played.borrow(), [Cue::Start, Cue::Step], "a step was captured");
+    h.settle();
+    assert_eq!(played.borrow().len(), 2, "a step is heard once, not every frame");
+    state.borrow_mut().trouble = true;
+    h.settle();
+    assert_eq!(played.borrow().last(), Some(&Cue::Error), "something went wrong");
+    h.settle();
+    assert_eq!(played.borrow().iter().filter(|c| **c == Cue::Error).count(), 1, "and is heard once");
+    h.invoke(Role::Button, "Pause");
+    h.invoke(Role::Button, "Resume");
+    h.invoke(Role::Button, "Finish");
+    assert_eq!(
+        *played.borrow(),
+        [Cue::Start, Cue::Step, Cue::Error, Cue::Stop, Cue::Start, Cue::Stop],
+        "pausing and finishing stop, resuming starts"
+    );
+}
+
+#[test]
+fn the_hotkeys_make_the_same_sounds_as_the_buttons_and_a_key_that_does_nothing_makes_none() {
+    let (mut h, _state, played) = sound_harness(all_sounds());
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::CaptureNow);
+    assert!(played.borrow().is_empty(), "before a capture the pause key does nothing, so it is silent");
+    h.app.hotkey(HotkeyAction::StartOrFinish);
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::StartOrFinish);
+    assert_eq!(*played.borrow(), [Cue::Start, Cue::Stop, Cue::Start, Cue::Stop]);
+}
+
+#[test]
+fn each_sound_setting_turns_on_only_its_own_cues() {
+    for (sounds, expect) in [
+        (crate::settings::SoundSettings { start_and_stop: true, ..Default::default() }, vec![Cue::Start, Cue::Stop]),
+        (crate::settings::SoundSettings { step: true, ..Default::default() }, vec![Cue::Step]),
+        (crate::settings::SoundSettings { problem: true, ..Default::default() }, vec![Cue::Error]),
+    ] {
+        let (mut h, state, played) = sound_harness(sounds);
+        h.invoke(Role::Button, "Start capturing");
+        h.invoke(Role::Button, "Start");
+        state.borrow_mut().step_to = Some(1);
+        h.settle();
+        state.borrow_mut().trouble = true;
+        h.settle();
+        h.invoke(Role::Button, "Finish");
+        let mut got = played.borrow().clone();
+        got.dedup();
+        assert_eq!(got, expect, "{sounds:?}");
+    }
+}
+
+#[test]
+fn a_capture_that_cannot_start_or_that_fails_plays_the_problem_sound() {
+    let played: Rc<RefCell<Vec<Cue>>> = Rc::default();
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(std::path::PathBuf::new(), Box::new(|_, _, _| Err("No.".to_string())));
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_cues(Box::new(RecordedCues(Rc::clone(&played))));
+    h.app.settings.sounds.problem = true;
+    h.settle();
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    assert_eq!(*played.borrow(), [Cue::Error]);
+
+    let (mut h, state, played) = sound_harness(crate::settings::SoundSettings { problem: true, ..Default::default() });
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    state.borrow_mut().outcome = Some(Outcome::Failed("The disk is full.".to_string()));
+    h.settle();
+    assert_eq!(*played.borrow(), [Cue::Error]);
+    assert!(h.status().starts_with("Capturing stopped."), "{}", h.status());
+}
+
+#[test]
+fn the_sound_check_boxes_are_in_settings_and_the_hear_buttons_play_even_when_a_sound_is_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let played: Rc<RefCell<Vec<Cue>>> = Rc::default();
+    let mut h = settings_harness(dir.path(), None);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_cues(Box::new(RecordedCues(Rc::clone(&played))));
+    h.invoke(Role::Button, "Settings");
+    for check in [
+        "When capturing starts or resumes, and when it pauses or finishes",
+        "When a step is captured",
+        "When something goes wrong or needs a look",
+    ] {
+        let id = h.find(Role::CheckBox, check);
+        assert_eq!(h.node(id).toggled(), Some(accesskit::Toggled::False), "{check} starts off");
+    }
+    for (cue, words) in [
+        (Cue::Start, "Hear the start sound"),
+        (Cue::Stop, "Hear the stop sound"),
+        (Cue::Step, "Hear the step sound"),
+        (Cue::Error, "Hear the problem sound"),
+    ] {
+        h.invoke(Role::Button, words);
+        assert_eq!(played.borrow().last(), Some(&cue), "{words}");
+        assert_eq!(h.status(), format!("Played the {} sound.", cue.name()));
+    }
+    assert_eq!(played.borrow().len(), 4);
+    // Turning one on is saved like any setting.
+    h.invoke(Role::CheckBox, "When a step is captured");
+    assert!(h.app.settings.sounds.step);
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert!(back.sounds.step && !back.sounds.start_and_stop && !back.sounds.problem);
 }

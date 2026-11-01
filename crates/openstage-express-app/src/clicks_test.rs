@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use openstage_express_core::capture::{Area, Captured, MarkOptions};
 use openstage_express_core::GuideFolder;
-use openstage_express_windows::hotkeys::{Action, Hotkeys, DEFAULTS};
+use openstage_express_windows::hotkeys::{Action, Hotkey, Hotkeys, DEFAULTS};
+use openstage_express_windows::input::{Hooks, Raw};
 use openstage_express_windows::run::{
     CaptureRun, CaptureTarget, Command as RunCommand, RunEvent, RunOptions, RunState,
 };
@@ -23,6 +24,10 @@ use openstage_express_windows::testwin::{Beacon, Layout, BEACON_BGRA, READY};
 use openstage_express_windows::{affinity, screen};
 
 use crate::guide_writer::GuideWriter;
+
+/// A hotkey the person might change one to: Ctrl+Shift+Z, which is "redo" in a text field, so the keyboard hook would count it as
+/// typing if it did not know it is a hotkey.
+const CHANGED_KEY: Hotkey = Hotkey { ctrl: true, alt: false, shift: true, win: false, vk: 0x5A };
 
 struct Report {
     failures: Vec<String>,
@@ -234,8 +239,10 @@ pub fn run(out: &Path, wait_for_quiet: Duration) -> bool {
     };
     let beacon_centre = (beacon_rect.0 + beacon_rect.2 / 2, beacon_rect.1 + beacon_rect.3 / 2);
 
-    // The real capture.
-    let run = match CaptureRun::start(RunOptions::default()) {
+    // The real capture. Its keyboard hook is told the usual hotkeys and the one the person might change one to (section 5b).
+    let mut known_hotkeys: Vec<Hotkey> = DEFAULTS.iter().map(|(_, key)| *key).collect();
+    known_hotkeys.push(CHANGED_KEY);
+    let run = match CaptureRun::start(RunOptions { hotkeys: known_hotkeys, ..RunOptions::default() }) {
         Ok(run) => run,
         Err(why) => {
             report.fail("capture starts", &why);
@@ -404,6 +411,49 @@ pub fn run(out: &Path, wait_for_quiet: Duration) -> bool {
         report.skip("the capture-now hotkey", &hotkeys.problems.join(" "));
     }
     drop(hotkeys);
+
+    // 5b. A hotkey the person changed. Ctrl+Shift+Z is "redo" in a field, so the keyboard hook counts it as typing unless it has
+    // been told the key is one of Express's hotkeys; the key that was changed away from must be let go.
+    if synthetic::foreground_window() != 0 {
+        let changed = Hotkeys::start(&[(Action::CaptureNow, CHANGED_KEY)]);
+        if changed.problems.is_empty() {
+            synthetic::ctrl_shift(0x5A); // Z
+            match changed.next(Duration::from_secs(2)) {
+                Ok(Action::CaptureNow) => report.pass("a hotkey the person changed is heard", ""),
+                other => report.fail("a hotkey the person changed is heard", &format!("it said {other:?}")),
+            }
+            synthetic::ctrl_shift(0x78); // F9, the usual key, which this set does not have
+            report.check(
+                changed.next(Duration::from_millis(800)).is_err(),
+                "the usual key is let go once the hotkey has been changed",
+                "the old key still answered",
+            );
+        } else {
+            report.skip("a hotkey the person changed", &changed.problems.join(" "));
+        }
+        drop(changed);
+        // The control: a hook that does not know the key counts Ctrl+Shift+Z as typing, so the next check can fail.
+        let heard_as_typing = |hooks: &[Hotkey]| -> Option<bool> {
+            let hooks = Hooks::start(hooks).ok()?;
+            synthetic::ctrl_shift(0x5A);
+            let mut typing = false;
+            while let Ok(stamped) = hooks.next(Duration::from_millis(700)) {
+                typing |= matches!(stamped.raw, Raw::Typing);
+            }
+            Some(typing)
+        };
+        match (heard_as_typing(&[]), heard_as_typing(&[CHANGED_KEY])) {
+            (Some(without), Some(with)) => {
+                report.check(
+                    without,
+                    "without being told, the hook counts the key as typing (the control)",
+                    "it did not",
+                );
+                report.check(!with, "told it is a hotkey, the hook does not count the key as typing", "it still did");
+            }
+            _ => report.skip("the hook and a changed hotkey", "the hooks could not be started"),
+        }
+    }
 
     // 6. A click on one of Express's own windows is never captured.
     let before = heard.steps.len();

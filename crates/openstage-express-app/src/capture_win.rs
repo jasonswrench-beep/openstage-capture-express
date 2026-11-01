@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use openstage_express_core::capture::{Captured, MarkOptions};
-use openstage_express_windows::hotkeys::{Action, Hotkey, DEFAULTS};
+use openstage_express_core::cues::Cue;
 use openstage_express_windows::run::{CaptureRun, CaptureTarget, Command, RunEvent, RunOptions, RunState, RunSummary};
 use openstage_express_windows::screen;
 
@@ -18,7 +18,7 @@ use crate::guide_writer::GuideWriter;
 use crate::settings::AppSettings;
 use crate::target::{Target, TargetKind};
 use crate::ui::bar::{BarAction, BarPhase, BarView};
-use crate::ui::capture::{CaptureControl, Desktop, DisplayRow, Finished, HotkeyAction, Outcome, Starter, WindowRow};
+use crate::ui::capture::{CaptureControl, CuePlayer, Desktop, DisplayRow, Finished, Outcome, Starter, WindowRow};
 use openstage_express_core::capture::Picture;
 
 /// What the saving thread tells back.
@@ -77,16 +77,17 @@ pub struct WindowsCapture {
     last: Option<String>,
     what: String,
     kind: TargetKind,
-    hotkeys: String,
     save_failures: Vec<String>,
     summary: Option<RunSummary>,
     outcome_given: bool,
     /// Whether the run has said it is capturing once (the first time is the start, not a resume).
     started: bool,
+    /// Something went wrong or needs a look since the problem sound was last asked about.
+    trouble: bool,
 }
 
 impl WindowsCapture {
-    fn new(run: CaptureRun, parent: &Path, hotkeys: &str, settings: &AppSettings, target: &Target) -> WindowsCapture {
+    fn new(run: CaptureRun, parent: &Path, settings: &AppSettings, target: &Target) -> WindowsCapture {
         let what = target.words(&format!("the whole screen ({})", run.display));
         let marks = settings.mark_options(run.dpi_percent);
         WindowsCapture {
@@ -102,11 +103,11 @@ impl WindowsCapture {
             last: None,
             what,
             kind: target.kind,
-            hotkeys: hotkeys.to_string(),
             save_failures: Vec::new(),
             summary: None,
             outcome_given: false,
             started: false,
+            trouble: false,
         }
     }
 
@@ -126,8 +127,13 @@ impl CaptureControl for WindowsCapture {
             what: self.what.clone(),
             target: self.kind,
             can_start: false,
-            hotkeys: self.hotkeys.clone(),
+            // The window fills in the hotkeys, which the person can change while the program runs.
+            hotkeys: String::new(),
         }
+    }
+
+    fn trouble(&mut self) -> bool {
+        std::mem::take(&mut self.trouble)
     }
 
     fn act(&mut self, action: BarAction) {
@@ -154,7 +160,10 @@ impl CaptureControl for WindowsCapture {
                             let _ = to.send(captured);
                         }
                     }
-                    RunEvent::Notice(words) => said.push(words),
+                    RunEvent::Notice(words) => {
+                        self.trouble = true;
+                        said.push(words);
+                    }
                     RunEvent::State(RunState::Capturing) if self.phase != BarPhase::Saving => {
                         self.phase = BarPhase::Capturing;
                         if self.started {
@@ -176,6 +185,7 @@ impl CaptureControl for WindowsCapture {
             if let Some(run) = self.run.take() {
                 let summary = run.join();
                 if summary.lost > 0 {
+                    self.trouble = true;
                     said.push(format!(
                         "{} could not be made because Windows gave no picture of the screen for {}.",
                         crate::ui::rows::steps_words(summary.lost as usize),
@@ -195,6 +205,7 @@ impl CaptureControl for WindowsCapture {
                     self.last = Some(title);
                 }
                 Saved::Failed(why) => {
+                    self.trouble = true;
                     said.push(format!("A step could not be saved. {why}"));
                     self.save_failures.push(why);
                 }
@@ -229,13 +240,31 @@ impl CaptureControl for WindowsCapture {
 }
 
 /// How to start a capture into the guides folder.
-pub fn starter(hotkeys: String) -> Starter {
+pub fn starter() -> Starter {
     Box::new(move |library: &Path, settings: &AppSettings, target: &Target| {
         let (what, display_number) = capture_target(target)?;
-        let run =
-            CaptureRun::start(RunOptions { settings: settings.builder_settings(), display_number, target: what })?;
-        Ok(Box::new(WindowsCapture::new(run, library, &hotkeys, settings, target)) as Box<dyn CaptureControl>)
+        let run = CaptureRun::start(RunOptions {
+            settings: settings.builder_settings(),
+            display_number,
+            target: what,
+            hotkeys: run_hotkeys(settings),
+        })?;
+        Ok(Box::new(WindowsCapture::new(run, library, settings, target)) as Box<dyn CaptureControl>)
     })
+}
+
+/// The keys the run must not count as typing: the person's own hotkeys.
+pub fn run_hotkeys(settings: &AppSettings) -> Vec<openstage_express_windows::hotkeys::Hotkey> {
+    settings.hotkeys.entries().iter().map(|(_, key)| *key).collect()
+}
+
+/// Plays the cue sounds through Windows. A person turns a sound on in Settings, and presses a button there to hear it.
+pub struct WindowsCues;
+
+impl CuePlayer for WindowsCues {
+    fn play(&self, cue: Cue) {
+        let _ = openstage_express_windows::sound::play(cue);
+    }
 }
 
 /// What the person chose, as what a run captures, and the display to capture (a window is captured on the display it is on).
@@ -291,49 +320,19 @@ pub fn ready_words() -> String {
     }
 }
 
-/// What Express's hotkeys are, in a sentence, leaving out any that could not be set (`problems` comes from the hotkeys).
-pub fn hotkey_sentence(problems: &[String]) -> String {
-    let working: Vec<String> = DEFAULTS
-        .iter()
-        .filter(|(_, key)| !problems.iter().any(|p| p.contains(&key.describe())))
-        .map(|(action, key)| format!("{} {}", key.describe(), action.words()))
-        .collect();
-    if working.is_empty() {
-        String::new()
-    } else {
-        format!("Hotkeys: {}.", working.join(", "))
-    }
-}
-
-/// Map a hotkey of the Windows crate to the window's own kind.
-pub fn hotkey_action(action: Action) -> HotkeyAction {
-    match action {
-        Action::StartOrFinish => HotkeyAction::StartOrFinish,
-        Action::PauseOrResume => HotkeyAction::PauseOrResume,
-        Action::CaptureNow => HotkeyAction::CaptureNow,
-    }
-}
-
-/// The defaults, for the window to register.
-pub fn default_hotkeys() -> Vec<(Action, Hotkey)> {
-    DEFAULTS.to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn the_hotkey_sentence_lists_the_ones_that_work() {
-        assert_eq!(
-            hotkey_sentence(&[]),
-            "Hotkeys: Ctrl+Shift+F7 start or finish, Ctrl+Shift+F8 pause or resume, Ctrl+Shift+F9 capture now."
-        );
-        let taken =
-            vec!["Ctrl+Shift+F8 (pause or resume) is already used by another program, so it is not set.".to_string()];
-        assert_eq!(hotkey_sentence(&taken), "Hotkeys: Ctrl+Shift+F7 start or finish, Ctrl+Shift+F9 capture now.");
-        let all: Vec<String> = DEFAULTS.iter().map(|(_, k)| format!("{} is taken", k.describe())).collect();
-        assert_eq!(hotkey_sentence(&all), "");
+    fn the_run_is_told_the_persons_own_hotkeys_not_the_usual_ones() {
+        use openstage_express_core::hotkey::HotkeyAction;
+        let mut settings = AppSettings::default();
+        let usual: Vec<String> = run_hotkeys(&settings).iter().map(|k| k.describe()).collect();
+        assert_eq!(usual, ["Ctrl+Shift+F7", "Ctrl+Shift+F8", "Ctrl+Shift+F9"]);
+        settings.hotkeys.try_set(HotkeyAction::CaptureNow, "Alt+Shift+K").unwrap();
+        let changed: Vec<String> = run_hotkeys(&settings).iter().map(|k| k.describe()).collect();
+        assert_eq!(changed, ["Ctrl+Shift+F7", "Ctrl+Shift+F8", "Alt+Shift+K"]);
     }
 
     #[test]
@@ -360,12 +359,6 @@ mod tests {
             .contains("Draw the area"));
         // Only the kind chosen counts: a window picked earlier does not make the area ready.
         assert!(capture_target(&Target { kind: TargetKind::Area, ..window }).is_err());
-    }
-    #[test]
-    fn hotkeys_map_one_to_one() {
-        assert_eq!(hotkey_action(Action::CaptureNow), HotkeyAction::CaptureNow);
-        assert_eq!(hotkey_action(Action::StartOrFinish), HotkeyAction::StartOrFinish);
-        assert_eq!(hotkey_action(Action::PauseOrResume), HotkeyAction::PauseOrResume);
     }
 
     #[test]

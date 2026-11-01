@@ -26,6 +26,8 @@ pub mod run;
 #[cfg(windows)]
 pub mod screen;
 #[cfg(windows)]
+pub mod sound;
+#[cfg(windows)]
 pub mod synthetic;
 #[cfg(windows)]
 pub mod system;

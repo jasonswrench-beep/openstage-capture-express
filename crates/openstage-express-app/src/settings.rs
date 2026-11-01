@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 use openstage_express_core::builder::{CaptureMode, ModKey, Settings as BuilderSettings};
 use openstage_express_core::capture::MarkOptions;
+use openstage_express_core::cues::Cue;
 use openstage_express_core::fsutil::write_atomic;
+use openstage_express_core::hotkey::HotkeySet;
 use openstage_express_core::Language;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -108,12 +110,38 @@ impl TitleLanguage {
     }
 }
 
+/// Which cue sounds are on (spec 8.9: all off to begin with).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SoundSettings {
+    /// A sound when capturing starts or is resumed, and another when it is paused or finished.
+    pub start_and_stop: bool,
+    /// A sound when a step is captured.
+    pub step: bool,
+    /// A sound when something goes wrong or needs a look.
+    pub problem: bool,
+}
+
+impl SoundSettings {
+    /// Whether `cue` is wanted.
+    pub fn wants(&self, cue: Cue) -> bool {
+        match cue {
+            Cue::Start | Cue::Stop => self.start_and_stop,
+            Cue::Step => self.step,
+            Cue::Error => self.problem,
+        }
+    }
+}
+
 /// Everything the person can set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: String,
     pub appearance: Appearance,
+    /// The keys that work from any program (spec 8.7).
+    pub hotkeys: HotkeySet,
+    pub sounds: SoundSettings,
     pub capture_mode: ModeChoice,
     pub capture_key: KeyChoice,
     /// Draw a pointer at each click.
@@ -150,6 +178,8 @@ impl Default for AppSettings {
         AppSettings {
             schema_version: SCHEMA_VERSION.to_string(),
             appearance: Appearance::System,
+            hotkeys: HotkeySet::default(),
+            sounds: SoundSettings::default(),
             capture_mode: ModeChoice::OnClick,
             capture_key: KeyChoice::Ctrl,
             show_cursor: true,
@@ -420,6 +450,59 @@ mod tests {
         };
         assert_eq!(s.guides_path(), None);
         assert_eq!(s.exports_path(), Some(PathBuf::from("D:\\Out")));
+    }
+
+    #[test]
+    fn hotkeys_and_sounds_start_as_the_specs_and_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = AppSettings::default();
+        assert_eq!(s.hotkeys, HotkeySet::default());
+        assert_eq!(s.sounds, SoundSettings::default());
+        assert!(Cue::ALL.iter().all(|c| !s.sounds.wants(*c)), "every sound is off to begin with");
+        let mut changed = s.clone();
+        changed.hotkeys.try_set(openstage_express_core::hotkey::HotkeyAction::CaptureNow, "Alt+Shift+K").unwrap();
+        changed.sounds = SoundSettings { start_and_stop: true, step: false, problem: true };
+        save(&path, &changed).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"captureNow\": \"Alt+Shift+K\""), "{text}");
+        assert!(text.contains("\"startAndStop\": true"), "{text}");
+        let (back, note) = load(&path);
+        assert_eq!(back, changed);
+        assert!(note.is_none());
+    }
+
+    #[test]
+    fn a_bad_hotkey_in_the_file_does_not_cost_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            br#"{"showCursor": false, "hotkeys": {"startOrFinish": "banana", "captureNow": "Alt+Shift+K"}, "sounds": {"step": true}}"#,
+        )
+        .unwrap();
+        let (s, note) = load(&path);
+        assert!(note.is_none(), "{note:?}");
+        assert!(!s.show_cursor, "the other settings are kept");
+        assert_eq!(s.hotkeys.start_or_finish, HotkeySet::default().start_or_finish, "the bad key is the usual one");
+        assert_eq!(s.hotkeys.capture_now.describe(), "Alt+Shift+K", "the good key is kept");
+        assert!(s.sounds.step && !s.sounds.start_and_stop && !s.sounds.problem);
+    }
+
+    #[test]
+    fn each_sound_setting_turns_on_the_right_cues() {
+        let all_off = SoundSettings::default();
+        let starts = SoundSettings { start_and_stop: true, ..all_off };
+        assert!(
+            starts.wants(Cue::Start)
+                && starts.wants(Cue::Stop)
+                && !starts.wants(Cue::Step)
+                && !starts.wants(Cue::Error)
+        );
+        let steps = SoundSettings { step: true, ..all_off };
+        assert!(steps.wants(Cue::Step) && !steps.wants(Cue::Start));
+        let problems = SoundSettings { problem: true, ..all_off };
+        assert!(problems.wants(Cue::Error) && !problems.wants(Cue::Step));
     }
 
     #[test]

@@ -21,8 +21,10 @@ and redo, and every change is saved. In the editor the guide can be renamed (a b
 spotlight) are added with buttons, listed, moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
 whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
 thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (on Home) holds the colour scheme, how
-clicks make steps, the pointer and circle, the language of step titles, the two folders and a few delays; each change is saved at
-once to `%APPDATA%\OpenStage Capture Express\settings.json`. **About and licences** shows the licence and what the program is built
+clicks make steps, the pointer and circle, the language of step titles, the two folders, the three hotkeys (each written as words,
+such as Ctrl+Shift+F7, and changed as soon as the person leaves its box; keys that would take a key from every other program are
+refused with the reason), three optional cue sounds (off to begin with, each with a button to hear it) and a few delays; each
+change is saved at once to `%APPDATA%\OpenStage Capture Express\settings.json`. **About and licences** shows the licence and what the program is built
 from. The window has the program's icon. The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
 has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
 
@@ -30,8 +32,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 607 passed (225 in the core, 182 in the exports, 42 in the
-  Windows crate, 158 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 638 passed (239 in the core, 182 in the exports, 44 in the
+  Windows crate, 173 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -54,6 +56,14 @@ Run on Windows, and working:
   size, the click was placed inside it and titled from the button's name. No step was lost in either mode. What this run did not
   cover: choosing the window or the area with the mouse or a screen reader (the screens are tested headlessly and were drawn by the
   real program), a window dragged to another display, and menus that hang outside the window's frame (see `TESTING-TODO.md`).
+- A hotkey the person changed was proved on this PC on 2026-11-01 by four more checks in the same click test (40 checks in all, all
+  passed on a clean run; a first run with the new checks had the four new ones pass but four older ones fail because someone clicked
+  in other windows during it, which the saved guide showed). With Ctrl+Shift+Z as the capture-now hotkey, the real `RegisterHotKey`
+  heard it when it was pressed with another program holding the keyboard; the usual Ctrl+Shift+F9 was no longer heard once that set
+  was replaced; the keyboard hook counted Ctrl+Shift+Z ("redo" in a field) as typing when it was not told the key is a hotkey (the
+  control that makes the next check meaningful), and did not when it was told. The run is given the person's own hotkeys when it
+  starts. Sixteen deliberate faults in the new code (a rule dropped, a clash not checked, the sound played whatever the setting, the
+  listener not told, a cue wrong, the file's keys not checked, and others) were each caught by a test.
 - The program behind `CHECK EXPRESS COMPUTER.bat` (`check-computer`) passed on this PC: Windows 11 build 26200, two displays (the
   second above the main one, at a negative place), a picture of the screen in 572 ms, UI Automation answering, the hooks and the
   three hotkeys available, 1002 GB free, WebView2 156.
@@ -80,6 +90,14 @@ Run on Windows, and working:
 
 Written and type-checked, not yet run on Windows:
 
+- The cue sounds (start, stop, step, problem) have never been played. They are made in the core as short quiet tones and held in memory;
+  the tests check each is a well-formed WAV file, quiet, short, starts and ends in silence, and has the pitch it should, and that
+  each sound plays at the right moment and only when its setting is on (a recording stand-in takes the place of the speaker, so
+  nothing is heard from a test). Whether Windows' `PlaySound` plays them, and how they sound, is for a person to try with the
+  four "Hear the ... sound" buttons on the Settings screen (`TESTING-TODO.md`).
+- Changing a hotkey in the running program: the Settings boxes, the plain-words refusals, saving, and handing the new keys to the
+  listener are tested headlessly; letting go of a set of keys and setting another with the real `RegisterHotKey` is tested
+  in the Windows crate; the listener thread of the window that does this while the program runs has not been watched by a person.
 - Choosing a window or an area by a person: the list of windows and the screen for drawing the area are tested headlessly (a stand-in
   desktop) and were drawn by the real program, and the capture itself ran for real (above), but nobody has used the two screens by
   mouse, keyboard or screen reader on a real desktop, and whether the list of open windows matches what a person sees (which
@@ -131,7 +149,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, dragging to draw a new shape, picking several steps, deleting or renaming a guide from Home,
 panning the focused crop by hand, options on the
-Export screen (it offers the formats with their usual options), changing the hotkeys, sounds, the language of the program's own words
+Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.
 
@@ -154,7 +172,7 @@ If the OpenStage code is not next to this folder, the scripts say so; double-cli
 
 4. Double-click **`OPEN EXPRESS.bat`**. It builds the program if needed (a few seconds when nothing has changed) and opens the
    window. Press Tab to move between controls and Enter to press one. The example guide ("How to submit an assignment") is a
-   card under "Your guides"; opening it shows the editor. "Start capturing" says that capturing is not built yet.
+   card under "Your guides"; opening it shows the editor. "Start capturing" opens the capture bar (see item 6 for what it does).
 
 5. Double-click **`CHECK EXPRESS COMPUTER.bat`**. It looks at the Windows version, the displays, whether pictures of the screen arrive,
    whether the names of clicked things can be found, whether the hotkeys are free and whether there is room for guides. It clicks
@@ -180,7 +198,8 @@ Made by Jason on 2026-11-01, when asked whether to keep the spec's defaults for 
 them.** So the name stays OpenStage Capture Express, a guide stays a folder named *.osguide, typing is read from the field and never
 logged key by key, descriptions are plain text with a small Markdown subset, the hotkeys are Ctrl+Shift+F7, F8 and F9, step titles come in
 English, German and French, and the link to OpenStage Author, REA and signing stay later decisions. Anything the spec proposed that
-the program does not yet do (changing the hotkeys, for one) is still to build, not to ask about again.
+the program does not yet do is still to build, not to ask about again. (Changing the hotkeys and the cue sounds were the first of
+those to be built after that decision.)
 a step-guide program is installed on Jason's computer (`C:\Program Files\a step-guide program`) and is the reference program; its behaviour may be looked at
 there, but never its code, templates, strings or artwork.
 

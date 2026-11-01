@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use openstage_express_core::capture::Picture;
+use openstage_express_core::cues::Cue;
 use openstage_express_core::{Document, GuideFolder};
 
 use super::bar::{BarAction, BarView};
@@ -12,11 +13,19 @@ use crate::settings::AppSettings;
 use crate::target::Target;
 
 /// A key pressed anywhere in Windows that Express listens for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HotkeyAction {
-    StartOrFinish,
-    PauseOrResume,
-    CaptureNow,
+pub use openstage_express_core::hotkey::HotkeyAction;
+
+/// Plays the cue sounds. The real one is in `capture_win.rs`; the tests use one that only writes down what it was asked to play, so
+/// that nothing is ever heard from a test.
+pub trait CuePlayer {
+    fn play(&self, cue: Cue);
+}
+
+/// A player for a system that cannot play sounds, or a run that must stay silent.
+pub struct NoCues;
+
+impl CuePlayer for NoCues {
+    fn play(&self, _: Cue) {}
 }
 
 /// A guide that has been captured and written.
@@ -43,6 +52,11 @@ pub trait CaptureControl {
     fn poll(&mut self) -> Vec<String>;
     /// `Some` once the capture has ended and the guide is written (or has failed to be).
     fn finished(&mut self) -> Option<Outcome>;
+    /// Whether something went wrong or needs a look since the last call (a step that could not be saved, a window that closed). It
+    /// is what the problem sound is for. Most stand-ins never have trouble.
+    fn trouble(&mut self) -> bool {
+        false
+    }
 }
 
 /// Starts a capture into the guides folder, of what the person chose to capture.

@@ -146,8 +146,19 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       the screen without Express's own windows.) Is the area what you meant in the pictures?
 - [ ] The window list and the area screen with Narrator and NVDA, only when you are away and on your go: the list is read row by row with
       Up and Down, the number boxes are named, the picture has words with the area's numbers.
+- [ ] Change a hotkey by hand: Settings, the Hotkeys boxes. Write a new key in "Capture now", such as Ctrl+Shift+Q, and press Tab: the
+      status line should say "Saved." and name the keys. Then, while another program has the focus and a capture is running, press
+      the new key (a step should be made) and the old one (nothing). Try some that should be refused (F7 alone, Ctrl+C, Ctrl+Alt+K,
+      Alt+F4, F12, two jobs the same key, "banana"): is each reason clear? Try a key another program holds (the status line should
+      say it is taken). Close and open the program: are the keys kept? "Use the usual hotkeys" puts the three back.
+- [ ] Hear the sounds, only when you want to: Settings, Sounds, the four "Hear the ... sound" buttons. Nothing in the tests has ever
+      played one. Are they quiet enough, different enough from each other, and pleasant (start rises, stop falls, step is a short
+      soft note, problem is a low double note)? Then turn each on and capture: do they come at the right moments (start and resume,
+      pause and finish, each step, each problem)? Does a quick run of steps become a drone?
+- [ ] The hotkey boxes and the Sounds check boxes with Narrator and NVDA, only when you are away and on your go: each box is named
+      ("Start or finish" and so on), a refusal is read from the status line, and Tab and Enter leave a box.
 - [ ] Not built yet in capture: the screenshot delay and capture-mode choices (they are in the
-      engine and tested, but no setting reaches them), sound cues, cancelling after starting (Finish keeps the steps), HDR and
+      engine and tested, but no setting reaches them), cancelling after starting (Finish keeps the steps), HDR and
       protected content.
 - [ ] Open a guide in the folder `Documents\OpenStage Express\Guides` after a capture: is that the place you want guides kept? Is
       "Guide 2026-11-01 09.38" a good first title? Rename it in the editor (the Guide title box) if you like.

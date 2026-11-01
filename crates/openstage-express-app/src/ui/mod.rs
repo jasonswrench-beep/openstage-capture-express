@@ -49,6 +49,10 @@ pub struct DevOptions {
     pub theme: Option<egui::Theme>,
     /// Add one of each kind of mark to the example guide's first step, so a picture of the editor shows them.
     pub with_marks: bool,
+    /// Open the window this many pixels tall, so that a picture of a long screen (Settings) shows more of it.
+    pub height: Option<f32>,
+    /// Keep the Settings page scrolled this many pixels down, so that a picture shows its lower part.
+    pub scroll: Option<f32>,
 }
 
 impl DevOptions {
@@ -77,6 +81,24 @@ impl DevOptions {
                     })
                 }
                 "--with-marks" => options.with_marks = true,
+                "--scroll" => {
+                    let pixels: f32 = value("a number of pixels")?
+                        .parse()
+                        .map_err(|_| "--scroll needs a number of pixels.".to_string())?;
+                    if !(0.0..=10_000.0).contains(&pixels) {
+                        return Err("--scroll is between 0 and 10000 pixels.".to_string());
+                    }
+                    options.scroll = Some(pixels);
+                }
+                "--height" => {
+                    let pixels: f32 = value("a number of pixels")?
+                        .parse()
+                        .map_err(|_| "--height needs a number of pixels.".to_string())?;
+                    if !(400.0..=4000.0).contains(&pixels) {
+                        return Err("--height is between 400 and 4000 pixels.".to_string());
+                    }
+                    options.height = Some(pixels);
+                }
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value("a file name ending in .png")?)),
                 "--close-after" => {
                     let seconds: f32 = value("a number of seconds")?
@@ -104,8 +126,12 @@ impl DevOptions {
 /// What the hotkey listener tells the window.
 enum HotkeyEvent {
     Pressed(HotkeyAction),
-    /// Hotkeys that could not be set, each in words (never sent empty).
-    Problems(Vec<String>),
+    /// The hotkeys were set, at the start and again after each change: the ones that work, and the ones that could not be set (for
+    /// example because another program holds the key), each in words.
+    Set {
+        working: Vec<(HotkeyAction, openstage_express_core::hotkey::KeyCombo)>,
+        problems: Vec<String>,
+    },
 }
 
 /// The window's size as the whole program, and as the strip of the capture bar.
@@ -122,6 +148,8 @@ struct ExpressApp {
     frames: u32,
     screenshot_requested: bool,
     hotkeys: Option<Receiver<HotkeyEvent>>,
+    /// Tells the hotkey listener the keys have been changed.
+    hotkey_changes: Option<std::sync::mpsc::Sender<openstage_express_core::hotkey::HotkeySet>>,
     applied_mode: WindowMode,
     /// Where the whole-program window was before it became the bar, so that it goes back there.
     normal_position: Option<egui::Pos2>,
@@ -153,15 +181,22 @@ impl eframe::App for ExpressApp {
 
 impl ExpressApp {
     fn take_hotkeys(&mut self) {
+        // New keys the person chose go to the listener, which lets go of the old ones and sets these.
+        if let Some(keys) = self.app.take_hotkey_change() {
+            if let Some(changes) = &self.hotkey_changes {
+                let _ = changes.send(keys);
+            }
+        }
         let Some(events) = &self.hotkeys else { return };
         let events: Vec<HotkeyEvent> = events.try_iter().collect();
         for event in events {
             match event {
                 HotkeyEvent::Pressed(action) => self.app.hotkey(action),
-                HotkeyEvent::Problems(problems) => {
-                    #[cfg(windows)]
-                    self.app.set_hotkey_words(&crate::capture_win::hotkey_sentence(&problems));
-                    self.app.status.say(problems.join(" "));
+                HotkeyEvent::Set { working, problems } => {
+                    self.app.set_hotkeys_working(&working);
+                    if !problems.is_empty() {
+                        self.app.status.say(problems.join(" "));
+                    }
                 }
             }
         }
@@ -263,23 +298,43 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Stri
     writer.write_image_data(&bytes).map_err(|e| e.to_string())
 }
 
-/// Listen for the hotkeys on a thread of their own and tell the window, waking it when one is pressed. Not used by the runs that
-/// only take a picture of the window, so that they do not take the hotkeys from a real copy of the program.
+/// Listen for the hotkeys on a thread of their own and tell the window, waking it when one is pressed. The keys it listens for can be
+/// changed by sending the new set. Not used by the runs that only take a picture of the window, so that they do not take the
+/// hotkeys from a real copy of the program.
 #[cfg(windows)]
-fn listen_for_hotkeys(ctx: egui::Context) -> Receiver<HotkeyEvent> {
+fn listen_for_hotkeys(
+    ctx: egui::Context,
+    first: openstage_express_core::hotkey::HotkeySet,
+) -> (Receiver<HotkeyEvent>, std::sync::mpsc::Sender<openstage_express_core::hotkey::HotkeySet>) {
     use openstage_express_windows::hotkeys::Hotkeys;
     use std::sync::mpsc;
     let (tx, rx) = mpsc::channel();
+    let (change_tx, change_rx) = mpsc::channel::<openstage_express_core::hotkey::HotkeySet>();
     std::thread::spawn(move || {
-        let hotkeys = Hotkeys::start(&crate::capture_win::default_hotkeys());
-        if !hotkeys.problems.is_empty() {
-            let _ = tx.send(HotkeyEvent::Problems(hotkeys.problems.clone()));
-            ctx.request_repaint();
-        }
+        let mut hotkeys = Some(Hotkeys::start(&first.entries()));
+        let mut announce = true;
         loop {
-            match hotkeys.next(Duration::from_secs(1)) {
+            if let (true, Some(current)) = (announce, hotkeys.as_ref()) {
+                announce = false;
+                let set = HotkeyEvent::Set { working: current.working.clone(), problems: current.problems.clone() };
+                if tx.send(set).is_err() {
+                    break;
+                }
+                ctx.request_repaint();
+            }
+            // The person chose other keys. Let go of the old ones first: setting a key that is already set by this same program
+            // would be refused.
+            let newest = change_rx.try_iter().last();
+            if let Some(keys) = newest {
+                hotkeys.take();
+                hotkeys = Some(Hotkeys::start(&keys.entries()));
+                announce = true;
+                continue;
+            }
+            let Some(current) = hotkeys.as_ref() else { break };
+            match current.next(Duration::from_millis(200)) {
                 Ok(action) => {
-                    if tx.send(HotkeyEvent::Pressed(crate::capture_win::hotkey_action(action))).is_err() {
+                    if tx.send(HotkeyEvent::Pressed(action)).is_err() {
                         break;
                     }
                     ctx.request_repaint();
@@ -289,7 +344,7 @@ fn listen_for_hotkeys(ctx: egui::Context) -> Receiver<HotkeyEvent> {
             }
         }
     });
-    rx
+    (rx, change_tx)
 }
 
 /// The program's icon for the title bar and the task bar, from the icon pack (256 pixels).
@@ -311,7 +366,7 @@ pub fn window_icon() -> Option<egui::IconData> {
 pub fn run(options: DevOptions) -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("OpenStage Capture Express")
-        .with_inner_size(NORMAL_SIZE)
+        .with_inner_size([NORMAL_SIZE[0], options.height.unwrap_or(NORMAL_SIZE[1])])
         .with_min_inner_size(NORMAL_MIN);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
@@ -345,18 +400,24 @@ pub fn run(options: DevOptions) -> eframe::Result {
             let library = crate::library::guides_folder(settings.guides_path());
             let exports = crate::library::exports_folder(settings.exports_path(), &library);
             #[cfg(windows)]
-            let (app, hotkeys) = {
+            let (app, hotkeys, hotkey_changes) = {
                 let dev_run = options.screenshot.is_some() || options.close_after.is_some();
-                let hotkeys = (!dev_run).then(|| listen_for_hotkeys(cc.egui_ctx.clone()));
-                let words = crate::capture_win::hotkey_sentence(&[]);
+                let (hotkeys, hotkey_changes) =
+                    match (!dev_run).then(|| listen_for_hotkeys(cc.egui_ctx.clone(), settings.hotkeys)) {
+                        Some((events, changes)) => (Some(events), Some(changes)),
+                        None => (None, None),
+                    };
+                // Until the listener says which keys it could set, say the ones the person chose.
+                let words = openstage_express_core::hotkey::sentence(&settings.hotkeys.entries());
                 let mut app = App::new(screen)
                     .with_capture(
                         library,
-                        crate::capture_win::starter(words.clone()),
+                        crate::capture_win::starter(),
                         &crate::capture_win::ready_words(),
                         Box::new(openstage_express_windows::system::process_is_running),
                     )
                     .with_desktop(Box::new(crate::capture_win::WindowsDesktop))
+                    .with_cues(Box::new(crate::capture_win::WindowsCues))
                     .with_system(
                         exports,
                         crate::export_run::system_pdf().is_some(),
@@ -368,10 +429,10 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         }),
                     );
                 app.set_hotkey_words(&words);
-                (app.with_settings(settings, settings_path, settings_note), hotkeys)
+                (app.with_settings(settings, settings_path, settings_note), hotkeys, hotkey_changes)
             };
             #[cfg(not(windows))]
-            let (app, hotkeys) = (
+            let (app, hotkeys, hotkey_changes) = (
                 App::new(screen).with_capture(
                     library,
                     capture::cannot_capture(),
@@ -379,8 +440,12 @@ pub fn run(options: DevOptions) -> eframe::Result {
                     Box::new(|_| false),
                 ),
                 None,
+                None,
             );
             let mut app = app;
+            if let Some(y) = options.scroll {
+                app = app.with_settings_scroll(y);
+            }
             if with_marks {
                 app.add_demo_marks();
             }
@@ -403,6 +468,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 frames: 0,
                 screenshot_requested: false,
                 hotkeys,
+                hotkey_changes,
                 applied_mode: WindowMode::Normal,
                 normal_position: None,
                 last_protected: Instant::now(),
