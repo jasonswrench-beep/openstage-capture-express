@@ -16,6 +16,7 @@ use super::widgets::{self, palette, Status};
 pub enum Leave {
     Stay,
     ToHome,
+    ToExport,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> Leave {
@@ -33,6 +34,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> 
             }
             if widgets::button_enabled(ui, state.can_redo(), "Redo").clicked() {
                 status.say_opt(state.redo());
+            }
+            let has_steps = !state.doc().guide.steps.is_empty();
+            if widgets::button_enabled(ui, has_steps, "Export").clicked() {
+                state.commit_pending();
+                leave = Leave::ToExport;
             }
             widgets::heading(ui, &state.doc().guide.title.clone());
         });

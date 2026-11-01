@@ -25,6 +25,11 @@ pub fn default_folder() -> PathBuf {
     in_documents(documents.unwrap_or_else(|| PathBuf::from(".")))
 }
 
+/// Where exports go unless the person chooses another folder: `Documents\OpenStage Express\Exports`, beside the guides folder.
+pub fn default_exports_folder() -> PathBuf {
+    default_folder().parent().map(|p| p.join("Exports")).unwrap_or_else(|| PathBuf::from("Exports"))
+}
+
 /// The guides folder inside a Documents folder.
 pub fn in_documents(documents: PathBuf) -> PathBuf {
     UNDER_DOCUMENTS.iter().fold(documents, |path, part| path.join(part))

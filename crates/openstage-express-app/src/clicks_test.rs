@@ -136,6 +136,22 @@ fn beacon_pixels(step: &Captured, area: &Area, rect: (i32, i32, i32, i32)) -> us
     count
 }
 
+/// How many pixels differ between two pictures inside the screen rectangle `(x, y, width, height)`.
+fn region_difference(a: &Captured, b: &Captured, area: &Area, rect: (i32, i32, i32, i32)) -> usize {
+    let (px, py) = area.to_picture(rect.0, rect.1);
+    let (wa, wb) = (a.picture.width as usize, b.picture.width as usize);
+    let mut count = 0;
+    for y in py.max(0)..(py + rect.3).min(a.picture.height.min(b.picture.height) as i32) {
+        for x in px.max(0)..(px + rect.2).min(a.picture.width.min(b.picture.width) as i32) {
+            let (ia, ib) = ((y as usize * wa + x as usize) * 4, (y as usize * wb + x as usize) * 4);
+            if a.picture.bgra[ia..ia + 3] != b.picture.bgra[ib..ib + 3] {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 fn titles(steps: &[Captured]) -> Vec<String> {
     steps.iter().map(|s| s.draft.title.clone()).collect()
 }
@@ -411,6 +427,26 @@ pub fn run(out: &Path, wait_for_quiet: Duration) -> bool {
     println!("      {} steps, {} pictures skipped", summary.steps, summary.skipped_pictures);
     for notice in &heard.notices {
         println!("NOTE  {notice}");
+    }
+
+    // A Type step's picture shows the whole text: inside the Email field it looks the same as in the next step's picture (taken
+    // after the typing had finished) and not like the one before it (the field was empty). The caret may blink, so a few pixels
+    // are allowed to differ.
+    let field = (layout.email.0 - 170, layout.email.1 - 12, 340, 24);
+    match heard.steps.iter().position(|s| s.draft.typed.is_some()) {
+        Some(i) if i > 0 && i + 1 < heard.steps.len() => {
+            let (before, typed, after) = (&heard.steps[i - 1], &heard.steps[i], &heard.steps[i + 1]);
+            let same_as_after = region_difference(typed, after, &area, field);
+            let unlike_before = region_difference(typed, before, &area, field);
+            report.check(
+                same_as_after <= 40 && unlike_before > 150,
+                "a Type step's picture shows the field with all its text",
+                &format!("{same_as_after} pixels differ from the next picture, {unlike_before} from the one before"),
+            );
+        }
+        _ => {
+            report.fail("a Type step's picture shows the field with all its text", "no Type step with steps around it")
+        }
     }
 
     // 8. The guide: written step by step, readable again, and the password nowhere in it.

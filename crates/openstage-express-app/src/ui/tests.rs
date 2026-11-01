@@ -544,6 +544,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                         (Role::Button, "How to submit an assignment, 5 steps, example guide"),
                     ],
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
+                    Screen::Export => &[(Role::Button, "Back to the guide")],
                     Screen::Editor => &[
                         (Role::Button, "Back to guides"),
                         (Role::Button, "Undo"),
@@ -924,4 +925,174 @@ impl Harness {
     fn window_mode(&self) -> WindowMode {
         self.app.window_mode()
     }
+}
+
+// ---- the Export screen
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+/// Let the export thread finish, frame by frame, as the window would.
+fn wait_for_export(h: &mut Harness) {
+    for _ in 0..400 {
+        h.frame();
+        if !h.app.is_exporting() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    h.settle();
+}
+
+type Opened = Rc<RefCell<Vec<PathBuf>>>;
+
+/// An editor over the example guide with an exports folder in a temporary place, a stand-in for the folder dialog (it answers
+/// with `chosen`, or is cancelled when `None`) and a stand-in for opening a folder that records what it was asked to open.
+fn export_harness(exports: &std::path::Path, chosen: Option<PathBuf>) -> (Harness, Opened) {
+    let opened: Opened = Rc::default();
+    let mut h = Harness::new(Screen::Editor);
+    let record = Rc::clone(&opened);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_system(
+        exports.to_path_buf(),
+        false,
+        Box::new(move |_| chosen.clone()),
+        Box::new(move |folder| record.borrow_mut().push(folder.to_path_buf())),
+    );
+    h.app.screen = Screen::Editor;
+    h.settle();
+    (h, opened)
+}
+
+#[test]
+fn the_editor_has_an_export_button_that_opens_the_export_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    assert_eq!(h.app.screen, Screen::Export);
+    h.find(Role::Heading, "Export");
+    h.find(Role::Button, "Back to the guide");
+    for format in crate::export_run::Format::ALL {
+        h.find(Role::CheckBox, format.name());
+    }
+    h.find(Role::Button, "Choose folder...");
+    h.find(Role::CheckBox, "Open the folder when it is done");
+    h.find(Role::Button, "Export 2 formats");
+    assert!(h.status().starts_with("Export. Choose the formats"), "{}", h.status());
+    // This computer is pretending to have no PDF engine, so PDF cannot be chosen and says why.
+    assert!(h.node(h.find(Role::CheckBox, "PDF")).is_disabled());
+    h.invoke(Role::Button, "Back to the guide");
+    assert_eq!(h.app.screen, Screen::Editor);
+}
+
+#[test]
+fn choosing_formats_changes_the_button_and_nothing_chosen_cannot_be_exported() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "Markdown");
+    h.find(Role::Button, "Export 3 formats");
+    for name in ["Web page", "Markdown", "Word document"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    assert!(h.node(h.find(Role::Button, "Export")).is_disabled(), "nothing chosen: no export");
+    h.find(Role::Label, "Choose at least one format.");
+}
+
+#[test]
+fn exporting_makes_the_chosen_formats_in_a_new_folder_says_so_and_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, opened) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    for name in ["Web page", "Word document"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::CheckBox, "Markdown");
+    h.invoke(Role::CheckBox, "JSON data");
+    h.invoke(Role::Button, "Export 2 formats");
+    assert!(h.status().starts_with("Exporting 2 formats."), "{}", h.status());
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 2 formats to "), "{}", h.status());
+    let runs: Vec<_> = std::fs::read_dir(dir.path().join("How to submit an assignment")).unwrap().flatten().collect();
+    assert_eq!(runs.len(), 1, "one new folder for this run");
+    let run = runs[0].path();
+    assert!(run.join("markdown/How to submit an assignment.md").is_file());
+    assert!(run.join("json/How to submit an assignment.json").is_file());
+    assert!(!run.join("html").exists());
+    assert_eq!(*opened.borrow(), [run], "the new folder was shown to the person");
+}
+
+#[test]
+fn a_second_export_goes_into_another_new_folder_and_does_not_open_it_when_that_is_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, opened) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "Open the folder when it is done");
+    for name in ["Word document", "Web page"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::CheckBox, "JSON data");
+    h.invoke(Role::Button, "Export 1 format");
+    wait_for_export(&mut h);
+    std::thread::sleep(Duration::from_millis(1100)); // run folders are named by the second
+    h.invoke(Role::Button, "Export 1 format");
+    wait_for_export(&mut h);
+    let runs = std::fs::read_dir(dir.path().join("How to submit an assignment")).unwrap().count();
+    assert_eq!(runs, 2, "each export has a folder of its own");
+    assert!(opened.borrow().is_empty());
+}
+
+#[test]
+fn choosing_another_folder_changes_where_exports_go_and_cancelling_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    let (mut h, _) = export_harness(dir.path(), Some(elsewhere.clone()));
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::Button, "Choose folder...");
+    assert_eq!(h.app.export.folder, elsewhere);
+    assert!(h.status().starts_with("Exports will go into "), "{}", h.status());
+    h.find(Role::Label, &format!("Export folder: {}", elsewhere.display()));
+    let (mut h2, _) = export_harness(dir.path(), None);
+    h2.invoke(Role::Button, "Export");
+    h2.invoke(Role::Button, "Choose folder...");
+    assert_eq!(h2.app.export.folder, dir.path());
+}
+
+#[test]
+fn a_real_guide_is_exported_from_its_folder_with_its_pictures() {
+    let finished = one_captured_step();
+    let folder_path = finished.folder.path().to_path_buf();
+    let library = folder_path.parent().unwrap().to_path_buf();
+    drop(finished);
+    let exports = tempfile::tempdir().unwrap();
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(library, super::capture::cannot_capture());
+    let opened: Opened = Rc::default();
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_system(exports.path().to_path_buf(), false, Box::new(|_| None), Box::new(|_| {}));
+    h.settle();
+    h.invoke(Role::Button, "Captured guide, 1 step");
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "Pictures (PNG)");
+    h.invoke(Role::Button, "Export 3 formats");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 3 formats to "), "{}", h.status());
+    let run = std::fs::read_dir(exports.path().join("Captured guide")).unwrap().next().unwrap().unwrap().path();
+    let png = std::fs::read(run.join("images/step-01.png")).expect("the picture was read from the guide's folder");
+    assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
+    assert!(opened.borrow().is_empty());
+}
+
+#[test]
+fn a_guide_with_no_steps_cannot_be_exported() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    // Delete every step of the example guide in the editor.
+    h.invoke(Role::Button, "Back to the guide");
+    for _ in 0..8 {
+        h.key(Key::Delete, Modifiers::COMMAND | Modifiers::SHIFT);
+    }
+    assert!(h.rows().is_empty(), "{:?}", h.rows());
+    assert!(h.node(h.find(Role::Button, "Export")).is_disabled());
 }

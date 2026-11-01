@@ -16,7 +16,8 @@ PowerPoint file that Express writes itself, a window, and (since 2026-11-01) rea
 folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
-and redo, and every change is saved. The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
+and redo, and every change is saved. **Export** (in the editor) offers every format in a screen of its own and makes them on a
+thread of their own, each in a new folder (the folder dialog is Windows' own). The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
 has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
 
 Run on Windows, and working:
