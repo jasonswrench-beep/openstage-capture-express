@@ -15,6 +15,7 @@ mod guide_writer;
 mod library;
 mod settings;
 mod target;
+mod text;
 mod ui;
 
 use std::path::PathBuf;

@@ -1992,6 +1992,7 @@ name = "openstage-express-app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "openstage-capture-project",
  "openstage-capture-render",
  "openstage-express-core",
  "openstage-express-export",
@@ -2038,6 +2039,7 @@ name = "openstage-express-windows"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "openstage-capture-project",
  "openstage-capture-render",
  "openstage-capture-windows",
  "openstage-express-core",

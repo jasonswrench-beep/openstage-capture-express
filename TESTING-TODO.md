@@ -55,7 +55,10 @@ milestones are built; tick an item (and say on which PC and when) once it has be
 - [ ] Open the Markdown file in a Markdown viewer you use (the `markdown` folder), and the JSON in anything that reads it.
 - [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
       seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
-- [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
+- [ ] The made-up screenshots in the demo draw their own words as blocks, because they are made up. The words on marks (a text mark,
+      a step number) are real Windows text now: add a text mark and a step number to a step of a real guide, and look at them in the
+      editor and in an exported picture. Are the size, the font (Segoe UI) and the colours right? Is there any way to choose a font?
+      (There is none yet.)
 - [ ] Open a few of the `jpg` folder's pictures next to the PNGs. At quality 90 the marks and text should look as sharp. Try
       quality 50 and 70 (not offered anywhere until the window exists, milestone M5): are the marks still readable? JPGs of the
       flat demo screenshots are larger than the PNGs; check a real screenshot with a photograph in it.

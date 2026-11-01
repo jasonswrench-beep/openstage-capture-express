@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use eframe::egui;
-use openstage_capture_render::BlockText;
 use openstage_express_core::focus::{auto_focus, pan, zoom, DEFAULT_ZOOM_PERCENT};
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_core::marks::{self, Handle, Tool};
@@ -1244,18 +1243,19 @@ impl EditorState {
             }
         }
         let picture = self.pictures.picture(&image.file)?;
-        let rendered = render_marked(&picture, &step, &BlockText);
-        let canvas = rendered.canvas;
-        let rgba: Vec<u8> = canvas.bgra.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], 255]).collect();
-        let size = [canvas.width as usize, canvas.height as usize];
-        let texture = ctx.load_texture(
-            format!("step-{}", step.id),
-            egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
-            egui::TextureOptions::LINEAR,
-        );
+        let texture =
+            ctx.load_texture(format!("step-{}", step.id), marked_image(&picture, &step), egui::TextureOptions::LINEAR);
         self.texture = Some((key, texture.clone()));
         Some(texture)
     }
+}
+
+/// A step's whole picture with its marks drawn on it, as the window shows it. The words on text marks and the numbers on badges are
+/// drawn with the program's text renderer (Windows' own text on Windows).
+fn marked_image(picture: &openstage_capture_render::Picture, step: &Step) -> egui::ColorImage {
+    let canvas = render_marked(picture, step, crate::text::renderer()).canvas;
+    let rgba: Vec<u8> = canvas.bgra.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], 255]).collect();
+    egui::ColorImage::from_rgba_unmultiplied([canvas.width as usize, canvas.height as usize], &rgba)
 }
 
 #[cfg(test)]
@@ -1269,6 +1269,24 @@ mod tests {
 
     fn titles(e: &EditorState) -> Vec<String> {
         e.rows().iter().map(Row::label).collect()
+    }
+
+    /// What the window shows for a step with a text mark ("Start here") has Windows' letters on it, not blocks.
+    #[cfg(windows)]
+    #[test]
+    fn the_editors_picture_has_the_words_of_text_marks_in_windows_text() {
+        use openstage_capture_render::BlockText;
+        let d = demo();
+        let step = d.document.guide.steps.iter().find(|s| s.title == "Click \"New assignment\"").unwrap();
+        let picture = d.pictures.picture(&step.image.as_ref().unwrap().file).unwrap();
+        let shown = marked_image(&picture, step);
+        let as_pixels = |canvas: openstage_capture_render::Canvas| -> Vec<egui::Color32> {
+            canvas.bgra.as_chunks::<4>().0.iter().map(|p| egui::Color32::from_rgb(p[2], p[1], p[0])).collect()
+        };
+        let windows = as_pixels(render_marked(&picture, step, &openstage_express_windows::WindowsText).canvas);
+        let blocks = as_pixels(render_marked(&picture, step, &BlockText).canvas);
+        assert_eq!(shown.pixels, windows, "the window draws Windows' letters");
+        assert_ne!(shown.pixels, blocks, "not blocks");
     }
 
     #[test]

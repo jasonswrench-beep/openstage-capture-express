@@ -3,7 +3,8 @@
 //! (`EXPORT DEMO.bat` uses it, and so do the tests).
 //!
 //! The screenshots are drawn here: a small imaginary course site with a menu, a form and some buttons. The words on them
-//! are drawn as plain blocks, because real text drawing comes from Windows and arrives with the capture work.
+//! are drawn as plain blocks, because the screenshots are made up (the words on the marks put over them are drawn by whatever text
+//! renderer an export is given, which is Windows' own in the program).
 
 use openstage_capture_render::{BlockText, Canvas, Picture, PixelRect, Rgb, TextRenderer, TextRequest};
 use openstage_express_core::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
