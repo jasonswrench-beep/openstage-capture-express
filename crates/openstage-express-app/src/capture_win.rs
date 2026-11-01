@@ -15,6 +15,7 @@ use openstage_express_windows::run::{CaptureRun, Command, RunEvent, RunOptions, 
 use openstage_express_windows::screen;
 
 use crate::guide_writer::GuideWriter;
+use crate::settings::AppSettings;
 use crate::ui::bar::{BarAction, BarPhase, BarView};
 use crate::ui::capture::{CaptureControl, Finished, HotkeyAction, Outcome, Starter};
 
@@ -31,7 +32,7 @@ struct Saver {
     thread: Option<JoinHandle<Option<GuideWriter>>>,
 }
 
-fn spawn_saver(parent: PathBuf, title: String, marks: MarkOptions) -> Saver {
+fn spawn_saver(parent: PathBuf, title: String, language: String, marks: MarkOptions) -> Saver {
     let (to, incoming) = mpsc::channel::<Captured>();
     let (reply, back) = mpsc::channel::<Saved>();
     let thread = std::thread::Builder::new()
@@ -40,7 +41,7 @@ fn spawn_saver(parent: PathBuf, title: String, marks: MarkOptions) -> Saver {
             let mut writer: Option<GuideWriter> = None;
             for captured in incoming {
                 if writer.is_none() {
-                    match GuideWriter::create(&parent, &title, "en", marks) {
+                    match GuideWriter::create(&parent, &title, &language, marks) {
                         Ok(w) => writer = Some(w),
                         Err(why) => {
                             let _ = reply.send(Saved::Failed(format!("The guide folder could not be made: {why}")));
@@ -82,14 +83,15 @@ pub struct WindowsCapture {
 }
 
 impl WindowsCapture {
-    fn new(run: CaptureRun, parent: &Path, hotkeys: &str) -> WindowsCapture {
+    fn new(run: CaptureRun, parent: &Path, hotkeys: &str, settings: &AppSettings) -> WindowsCapture {
         let what = format!("the whole screen ({})", run.display);
-        let marks = MarkOptions { dpi_percent: run.dpi_percent, ..MarkOptions::default() };
+        let marks = settings.mark_options(run.dpi_percent);
         WindowsCapture {
             run: Some(run),
             saver: spawn_saver(
                 parent.to_path_buf(),
                 format!("Guide {}", openstage_express_windows::system::local_time_stamp()),
+                settings.title_language.code().to_string(),
                 marks,
             ),
             phase: BarPhase::Capturing,
@@ -222,9 +224,9 @@ impl CaptureControl for WindowsCapture {
 
 /// How to start a capture into the guides folder.
 pub fn starter(hotkeys: String) -> Starter {
-    Box::new(move |library: &Path| {
-        let run = CaptureRun::start(RunOptions::default())?;
-        Ok(Box::new(WindowsCapture::new(run, library, &hotkeys)) as Box<dyn CaptureControl>)
+    Box::new(move |library: &Path, settings: &AppSettings| {
+        let run = CaptureRun::start(RunOptions { settings: settings.builder_settings(), ..RunOptions::default() })?;
+        Ok(Box::new(WindowsCapture::new(run, library, &hotkeys, settings)) as Box<dyn CaptureControl>)
     })
 }
 
@@ -294,7 +296,8 @@ mod tests {
     #[test]
     fn a_capture_of_nothing_leaves_no_guide_folder_behind() {
         let dir = tempfile::tempdir().unwrap();
-        let mut saver = spawn_saver(dir.path().to_path_buf(), "Guide".to_string(), MarkOptions::default());
+        let mut saver =
+            spawn_saver(dir.path().to_path_buf(), "Guide".to_string(), "en".to_string(), MarkOptions::default());
         saver.to = None; // nothing was ever sent
         let writer = saver.thread.take().unwrap().join().unwrap();
         assert!(writer.is_none());

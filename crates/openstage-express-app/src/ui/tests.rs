@@ -250,7 +250,7 @@ fn home_is_a_heading_a_button_a_search_box_and_the_guide_all_with_names() {
 
 #[test]
 fn every_control_on_every_screen_has_a_name_and_can_be_reached_by_the_keyboard() {
-    for screen in [Screen::Home, Screen::Editor, Screen::Bar] {
+    for screen in [Screen::Home, Screen::Editor, Screen::Bar, Screen::Export, Screen::Settings, Screen::About] {
         for dark in [true, false] {
             let h = Harness::sized(screen, egui::vec2(1280.0, 720.0), 1.0, dark);
             let mut inputs = 0;
@@ -268,7 +268,8 @@ fn every_control_on_every_screen_has_a_name_and_can_be_reached_by_the_keyboard()
                     );
                 }
             }
-            assert!(inputs >= 2, "{screen:?}: only {inputs} controls");
+            let wanted = if screen == Screen::About { 1 } else { 2 }; // the About screen is something to read, with one way back
+            assert!(inputs >= wanted, "{screen:?}: only {inputs} controls");
         }
     }
 }
@@ -505,8 +506,10 @@ fn tab_visits_every_control_on_home_in_order_and_does_not_get_stuck() {
     }
     assert_eq!(seen[0], "Start capturing");
     assert_eq!(seen[1], "Search");
-    assert_eq!(seen[2], "How to submit an assignment, 5 steps, example guide");
-    assert!(seen[3..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
+    assert_eq!(seen[2], "Settings");
+    assert_eq!(seen[3], "About and licences");
+    assert_eq!(seen[4], "How to submit an assignment, 5 steps, example guide");
+    assert!(seen[5..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
 }
 
 #[test]
@@ -545,6 +548,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     ],
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Export => &[(Role::Button, "Back to the guide")],
+                    Screen::Settings | Screen::About => &[(Role::Button, "Back to guides")],
                     Screen::Editor => &[
                         (Role::Button, "Back to guides"),
                         (Role::Button, "Undo"),
@@ -718,7 +722,7 @@ impl CaptureControl for FakeCapture {
 
 fn fake_starter(state: &Rc<RefCell<FakeState>>) -> Starter {
     let state = Rc::clone(state);
-    Box::new(move |_| Ok(Box::new(FakeCapture(Rc::clone(&state))) as Box<dyn CaptureControl>))
+    Box::new(move |_, _| Ok(Box::new(FakeCapture(Rc::clone(&state))) as Box<dyn CaptureControl>))
 }
 
 impl Harness {
@@ -829,7 +833,7 @@ fn capture_that_cannot_start_says_why_and_stays_on_the_bar() {
     let mut h = Harness::new(Screen::Home);
     h.with_capture(
         std::path::PathBuf::new(),
-        Box::new(|_| Err("Windows would not let the program watch the mouse.".to_string())),
+        Box::new(|_, _| Err("Windows would not let the program watch the mouse.".to_string())),
     );
     h.invoke(Role::Button, "Start capturing");
     h.invoke(Role::Button, "Start");
@@ -1095,4 +1099,202 @@ fn a_guide_with_no_steps_cannot_be_exported() {
     }
     assert!(h.rows().is_empty(), "{:?}", h.rows());
     assert!(h.node(h.find(Role::Button, "Export")).is_disabled());
+}
+
+// ---- the Settings screen
+
+use crate::settings::{AppSettings, Appearance, KeyChoice, ModeChoice};
+
+/// A window that saves its settings in `dir`, with the folder dialog answering `chosen`.
+fn settings_harness(dir: &std::path::Path, chosen: Option<PathBuf>) -> Harness {
+    let mut h = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app
+        .with_system(dir.join("exports"), false, Box::new(move |_| chosen.clone()), Box::new(|_| {}))
+        .with_settings(AppSettings::default(), Some(dir.join("settings.json")), None);
+    h.settle();
+    h
+}
+
+#[test]
+fn settings_open_from_home_and_every_choice_has_a_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    assert_eq!(h.app.screen, Screen::Settings);
+    h.find(Role::Heading, "Settings");
+    for heading in ["Appearance", "Capturing", "Folders", "Hotkeys"] {
+        h.find(Role::Heading, heading);
+    }
+    for radio in ["Follow Windows", "Light", "Dark", "every time", "English", "German", "French"] {
+        h.find(Role::RadioButton, radio);
+    }
+    for check in [
+        "Draw a pointer at each click",
+        "Draw a circle round each click",
+        "Make a step for what I type (never for a password)",
+        "Start new steps with a close-up of the click",
+        "Open the folder when an export is done",
+    ] {
+        h.find(Role::CheckBox, check);
+    }
+    h.find(Role::Button, "Choose guides folder...");
+    h.find(Role::Button, "Choose exports folder...");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+#[test]
+fn a_change_is_saved_at_once_and_said_and_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    h.invoke(Role::RadioButton, "Dark");
+    assert_eq!(h.app.appearance(), Appearance::Dark);
+    assert_eq!(h.status(), "Saved.");
+    let (back, note) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(back.appearance, Appearance::Dark);
+    assert!(note.is_none());
+    h.invoke(Role::CheckBox, "Draw a pointer at each click");
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert!(!back.show_cursor && back.appearance == Appearance::Dark, "both changes are in the file");
+}
+
+#[test]
+fn the_key_choices_are_off_until_a_mode_that_uses_a_key_is_chosen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.invoke(Role::Button, "Settings");
+    assert!(h.node(h.find(Role::RadioButton, "Shift")).is_disabled());
+    h.invoke(Role::RadioButton, "only when I hold a key while I click");
+    assert!(!h.node(h.find(Role::RadioButton, "Shift")).is_disabled());
+    h.invoke(Role::RadioButton, "Shift");
+    assert_eq!(h.app.settings.capture_mode, ModeChoice::WithKey);
+    assert_eq!(h.app.settings.capture_key, KeyChoice::Shift);
+}
+
+#[test]
+fn what_is_chosen_reaches_the_next_capture() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    let seen: Rc<RefCell<Option<AppSettings>>> = Rc::default();
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let (record, fake) = (Rc::clone(&seen), Rc::clone(&state));
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_capture(
+        PathBuf::new(),
+        Box::new(move |_, settings| {
+            *record.borrow_mut() = Some(settings.clone());
+            Ok(Box::new(FakeCapture(Rc::clone(&fake))) as Box<dyn CaptureControl>)
+        }),
+        "the whole screen",
+        Box::new(|_| false),
+    );
+    h.settle();
+    h.invoke(Role::Button, "Settings");
+    h.invoke(Role::RadioButton, "never. Only the capture now hotkey makes a step");
+    h.invoke(Role::CheckBox, "Draw a circle round each click");
+    h.invoke(Role::RadioButton, "French");
+    h.invoke(Role::Button, "Back to guides");
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    let got = seen.borrow().clone().expect("the starter was given the settings");
+    assert_eq!(got.capture_mode, ModeChoice::HotkeyOnly);
+    assert!(!got.mark_clicked_area);
+    assert_eq!(got.title_language.code(), "fr");
+    assert_eq!(got.builder_settings().mode, openstage_express_core::CaptureMode::HotkeyOnly);
+}
+
+#[test]
+fn choosing_a_guides_folder_lists_the_guides_there_and_remembers_it() {
+    let finished = one_captured_step();
+    let guide_folder = finished.folder.path().to_path_buf();
+    let library = guide_folder.parent().unwrap().to_path_buf();
+    drop(finished);
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), Some(library.clone()));
+    h.find(Role::Button, "How to submit an assignment, 5 steps, example guide");
+    h.invoke(Role::Button, "Settings");
+    h.invoke(Role::Button, "Choose guides folder...");
+    assert!(h.status().starts_with("Guides are now kept in "), "{}", h.status());
+    h.find(Role::Label, &format!("Guides folder: {}", library.display()));
+    h.invoke(Role::Button, "Back to guides");
+    h.find(Role::Button, "Captured guide, 1 step");
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(back.guides_folder.as_deref(), Some(library.to_str().unwrap()));
+}
+
+#[test]
+fn choosing_an_exports_folder_is_remembered_and_cancelling_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("my exports");
+    let mut h = settings_harness(dir.path(), Some(elsewhere.clone()));
+    h.invoke(Role::Button, "Settings");
+    h.invoke(Role::Button, "Choose exports folder...");
+    assert_eq!(h.app.export.folder, elsewhere);
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(back.exports_folder.as_deref(), Some(elsewhere.to_str().unwrap()));
+    let mut h2 = settings_harness(dir.path(), None);
+    h2.invoke(Role::Button, "Settings");
+    let before = h2.app.export.folder.clone();
+    h2.invoke(Role::Button, "Choose exports folder...");
+    assert_eq!(h2.app.export.folder, before);
+}
+
+#[test]
+fn the_export_screens_choices_are_remembered_in_the_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = settings_harness(dir.path(), None);
+    h.app.screen = Screen::Editor;
+    h.app.editor = Some(super::editor_state::EditorState::new(openstage_express_export::demo::demo()));
+    h.settle();
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "Markdown");
+    h.invoke(Role::CheckBox, "Open the folder when it is done");
+    let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert!(!back.open_folder_after_export);
+    assert!(back.export_formats.iter().any(|f| f == "markdown"), "{:?}", back.export_formats);
+}
+
+#[test]
+fn a_note_about_the_settings_file_is_shown_on_the_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_settings(
+        AppSettings::default(),
+        None,
+        Some("The settings file is damaged, so the usual settings are used.".to_string()),
+    );
+    h.settle();
+    h.invoke(Role::Button, "Settings");
+    h.find(Role::Label, "The settings file is damaged, so the usual settings are used.");
+    drop(dir);
+}
+
+// ---- the About screen and the icon
+
+#[test]
+fn about_opens_from_home_and_shows_the_licence_and_the_credits() {
+    let mut h = Harness::new(Screen::Home);
+    h.invoke(Role::Button, "About and licences");
+    assert_eq!(h.app.screen, Screen::About);
+    h.find(Role::Heading, "About OpenStage Capture Express");
+    h.find(Role::Heading, "Licence and notices");
+    h.find(Role::Heading, "Programs and libraries this one is built from");
+    assert!(h.has(Role::Label, &format!("Version {}.", super::about::version())));
+    let text: Vec<String> = h.order.iter().filter_map(|id| h.name(*id)).collect();
+    assert!(text.iter().any(|t| t.contains("Apache License, Version 2.0")), "the licence is on the screen");
+    assert!(text.iter().any(|t| t.starts_with("Roboto")), "the bundled font is credited");
+    assert!(text.iter().any(|t| t.starts_with("egui ")), "the libraries are listed");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+#[test]
+fn the_window_has_an_icon_from_the_icon_pack() {
+    let icon = super::window_icon().expect("the icon decodes");
+    assert_eq!((icon.width, icon.height), (256, 256));
+    assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    assert!(icon.rgba.chunks(4).any(|p| p[3] == 255), "it is not blank");
 }

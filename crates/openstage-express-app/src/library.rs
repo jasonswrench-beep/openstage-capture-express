@@ -25,9 +25,19 @@ pub fn default_folder() -> PathBuf {
     in_documents(documents.unwrap_or_else(|| PathBuf::from(".")))
 }
 
-/// Where exports go unless the person chooses another folder: `Documents\OpenStage Express\Exports`, beside the guides folder.
-pub fn default_exports_folder() -> PathBuf {
-    default_folder().parent().map(|p| p.join("Exports")).unwrap_or_else(|| PathBuf::from("Exports"))
+/// The guides folder to use: the one named by `EXPRESS_GUIDES_FOLDER` if that is set, else the one in the settings, else the usual
+/// place.
+pub fn guides_folder(from_settings: Option<PathBuf>) -> PathBuf {
+    if std::env::var_os(FOLDER_VARIABLE).is_some_and(|v| !v.is_empty()) {
+        return default_folder();
+    }
+    from_settings.unwrap_or_else(default_folder)
+}
+
+/// The exports folder to use: the one in the settings, else `Exports` beside the guides folder.
+pub fn exports_folder(from_settings: Option<PathBuf>, guides: &Path) -> PathBuf {
+    from_settings
+        .unwrap_or_else(|| guides.parent().map(|p| p.join("Exports")).unwrap_or_else(|| PathBuf::from("Exports")))
 }
 
 /// The guides folder inside a Documents folder.

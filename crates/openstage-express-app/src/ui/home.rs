@@ -98,6 +98,8 @@ pub enum Action {
     None,
     Open(usize),
     StartCapturing,
+    Settings,
+    About,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
@@ -117,6 +119,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
                 .add(egui::TextEdit::singleline(&mut state.search).hint_text("Search your guides").desired_width(320.0))
                 .labelled_by(label.id);
             widgets::ring(ui, &search);
+            ui.add_space(24.0);
+            if widgets::button(ui, "Settings").clicked() {
+                action = Action::Settings;
+            }
+            if widgets::button(ui, "About and licences").clicked() {
+                action = Action::About;
+            }
         });
         ui.add_space(14.0);
         widgets::subheading(ui, "Your guides");

@@ -7,6 +7,7 @@ use std::path::Path;
 use openstage_express_core::{Document, GuideFolder};
 
 use super::bar::{BarAction, BarView};
+use crate::settings::AppSettings;
 
 /// A key pressed anywhere in Windows that Express listens for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,9 +44,9 @@ pub trait CaptureControl {
 }
 
 /// Starts a capture into the guides folder.
-pub type Starter = Box<dyn FnMut(&Path) -> Result<Box<dyn CaptureControl>, String>>;
+pub type Starter = Box<dyn FnMut(&Path, &AppSettings) -> Result<Box<dyn CaptureControl>, String>>;
 
 /// The starter for a system that cannot capture.
 pub fn cannot_capture() -> Starter {
-    Box::new(|_| Err("Capturing needs Windows.".to_string()))
+    Box::new(|_, _| Err("Capturing needs Windows.".to_string()))
 }

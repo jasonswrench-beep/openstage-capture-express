@@ -111,6 +111,15 @@ impl Selection {
         Selection { chosen: Format::ALL.to_vec() }
     }
 
+    /// Exactly these formats, in the dialog's order.
+    pub fn none_then(formats: &[Format]) -> Selection {
+        let mut selection = Selection::starting();
+        for f in Format::ALL {
+            selection.set(f, formats.contains(&f));
+        }
+        selection
+    }
+
     /// What is chosen when a person has chosen nothing yet: a web page and a PDF.
     pub fn starting() -> Selection {
         Selection { chosen: vec![Format::Html, Format::Pdf] }

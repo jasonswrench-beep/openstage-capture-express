@@ -11,3 +11,5 @@ export-demo-output/
 check-build-log.txt
 clicks-build-log.txt
 clicks-test-output/
+pack-log.txt
+dist/
