@@ -22,6 +22,7 @@ use windows::Win32::Foundation::POINT;
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowThreadProcessId, WindowFromPoint};
 
+use crate::hotkeys::{Hotkey, DEFAULTS};
 use crate::input::{Hooks, Raw};
 use crate::screen::{area_of, display_of, displays, dpi_percent, window_area, window_is_open, ScreenFeed};
 use crate::uia::Uia;
@@ -92,11 +93,18 @@ pub struct RunOptions {
     /// 1 is the main display. A window is captured on the display it is on, whatever this says.
     pub display_number: u32,
     pub target: CaptureTarget,
+    /// Express's own hotkeys, which the keyboard hook must never count as typing.
+    pub hotkeys: Vec<Hotkey>,
 }
 
 impl Default for RunOptions {
     fn default() -> RunOptions {
-        RunOptions { settings: Settings::default(), display_number: 1, target: CaptureTarget::Screen }
+        RunOptions {
+            settings: Settings::default(),
+            display_number: 1,
+            target: CaptureTarget::Screen,
+            hotkeys: DEFAULTS.iter().map(|(_, key)| *key).collect(),
+        }
     }
 }
 
@@ -135,7 +143,7 @@ impl CaptureRun {
             }
             _ => None,
         };
-        let hooks = Hooks::start()?;
+        let hooks = Hooks::start(&options.hotkeys)?;
         let (area, percent, display) = {
             let d = feed.display();
             let area = match options.target {

@@ -124,7 +124,7 @@ pub fn run(guides: &Path) -> bool {
     }
 
     // Hooks.
-    match Hooks::start() {
+    match Hooks::start(&[]) {
         Ok(hooks) => {
             r.add(Level::Pass, "The mouse and keyboard can be watched.");
             drop(hooks);

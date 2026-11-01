@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 
 use openstage_express_core::builder::{Key, Mods, MouseButton};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+
+use crate::hotkeys::Hotkey;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -113,11 +115,22 @@ pub fn classify_key(vk: u32, mods: Mods) -> KeyClass {
     }
 }
 
+/// Whether this key, with exactly these modifiers held, is one of Express's own hotkeys. The hook sees such a key press before
+/// Windows hands it to the hotkey, and it must not be counted as typing (Ctrl+Shift+Z is "redo" in a text field, and a hotkey the
+/// person chose may be any such key).
+pub fn is_chord(chords: &[Hotkey], vk: u32, mods: Mods) -> bool {
+    chords
+        .iter()
+        .any(|c| c.vk == vk && c.ctrl == mods.ctrl && c.alt == mods.alt && c.shift == mods.shift && c.win == mods.meta)
+}
+
 /// What the hook functions need. They are bare functions that Windows calls, so this lives with the hook thread.
 struct HookState {
     tx: SyncSender<Stamped>,
     dropped: Arc<AtomicU64>,
     active: Arc<AtomicBool>,
+    /// Express's own hotkeys, which are never typing.
+    chords: Vec<Hotkey>,
 }
 
 thread_local! {
@@ -173,7 +186,18 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         // The key code is read into `class` and goes no further.
         let class = {
             let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-            classify_key(info.vkCode, current_mods())
+            let mods = current_mods();
+            let chord = HOOK.with(|slot| {
+                slot.try_borrow()
+                    .ok()
+                    .and_then(|state| state.as_ref().map(|s| is_chord(&s.chords, info.vkCode, mods)))
+                    .unwrap_or(false)
+            });
+            if chord {
+                KeyClass::Ignore
+            } else {
+                classify_key(info.vkCode, mods)
+            }
         };
         match class {
             KeyClass::Typing => hand_over(Raw::Typing),
@@ -232,12 +256,13 @@ pub struct Hooks {
 }
 
 impl Hooks {
-    /// Put the hooks in. They start out active.
-    pub fn start() -> Result<Hooks, String> {
+    /// Put the hooks in. They start out active. `chords` are Express's own hotkeys, which are never counted as typing.
+    pub fn start(chords: &[Hotkey]) -> Result<Hooks, String> {
         let (tx, inbox) = mpsc::sync_channel::<Stamped>(QUEUE);
         let dropped = Arc::new(AtomicU64::new(0));
         let active = Arc::new(AtomicBool::new(true));
-        let state = HookState { tx, dropped: Arc::clone(&dropped), active: Arc::clone(&active) };
+        let state =
+            HookState { tx, dropped: Arc::clone(&dropped), active: Arc::clone(&active), chords: chords.to_vec() };
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread = std::thread::spawn(move || run_hooks(state, ready_tx));
         match ready_rx.recv_timeout(Duration::from_secs(5)) {
@@ -367,6 +392,22 @@ mod tests {
         for vk in [0x76, 0x77, 0x78] {
             assert_eq!(classify_key(vk, both), KeyClass::Ignore);
         }
+    }
+
+    #[test]
+    fn a_hotkey_the_person_chose_is_never_typing_but_the_same_key_without_its_modifiers_still_is() {
+        // Ctrl+Z is "undo" in a field, so Ctrl+Shift+Z counts as typing when the key is not one of Express's hotkeys.
+        let ctrl_shift = Mods { ctrl: true, shift: true, ..Mods::none() };
+        assert_eq!(classify_key(0x5A, ctrl_shift), KeyClass::Typing);
+        let chosen = [Hotkey { ctrl: true, alt: false, shift: true, win: false, vk: 0x5A }];
+        assert!(is_chord(&chosen, 0x5A, ctrl_shift), "Ctrl+Shift+Z is the hotkey");
+        assert!(!is_chord(&chosen, 0x5A, ctrl()), "Ctrl+Z is not: the modifiers must match exactly");
+        assert!(!is_chord(&chosen, 0x5A, Mods { ctrl: true, shift: true, alt: true, ..Mods::none() }));
+        assert!(!is_chord(&chosen, 0x59, ctrl_shift), "another key is not");
+        assert!(!is_chord(&[], 0x5A, ctrl_shift), "with no hotkeys nothing is");
+        let with_win = [Hotkey { ctrl: false, alt: false, shift: true, win: true, vk: 0x4B }];
+        assert!(is_chord(&with_win, 0x4B, Mods { shift: true, meta: true, ..Mods::none() }));
+        assert!(!is_chord(&with_win, 0x4B, Mods { shift: true, ..Mods::none() }));
     }
 
     #[test]

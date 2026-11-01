@@ -6,13 +6,17 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use eframe::egui;
+use openstage_express_core::cues::Cue;
 use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
+use openstage_express_core::hotkey::{self, HotkeySet, KeyCombo};
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
 
 use super::about;
 use super::bar::{self, BarAction, BarView};
-use super::capture::{cannot_capture, CaptureControl, Desktop, HotkeyAction, NoDesktop, Outcome, Starter};
+use super::capture::{
+    cannot_capture, CaptureControl, CuePlayer, Desktop, HotkeyAction, NoCues, NoDesktop, Outcome, Starter,
+};
 use super::choose_area::{self, AreaAction, AreaScreen};
 use super::choose_window::{self, WindowList, WindowListAction};
 use super::editor::{self, Leave};
@@ -20,7 +24,7 @@ use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
 use super::rows::{step_count, steps_words};
-use super::settings::{self as settings_screen, SettingsAction, SettingsInfo};
+use super::settings::{self as settings_screen, HotkeyEdit, SettingsAction, SettingsInfo};
 use super::widgets::{self, Status};
 use crate::export_run::{self, Job, Report};
 use crate::library;
@@ -73,6 +77,14 @@ pub struct App {
     what: String,
     /// The hotkeys in a sentence, for the bar.
     hotkey_words: String,
+    /// New hotkeys the person chose, which whoever listens for the keys has not been told yet.
+    hotkey_change: Option<HotkeySet>,
+    /// The three boxes on the Settings screen where hotkeys are typed.
+    hotkey_edit: HotkeyEdit,
+    /// For a picture of the lower part of the Settings page (`--scroll`).
+    settings_scroll: Option<f32>,
+    /// Plays the cue sounds (silent unless the real player was given).
+    cues: Box<dyn CuePlayer>,
     is_running: Box<dyn Fn(u32) -> bool>,
     pub export: ExportState,
     pub settings: AppSettings,
@@ -106,6 +118,10 @@ impl App {
             capture: None,
             what: "the whole screen".to_string(),
             hotkey_words: String::new(),
+            hotkey_change: None,
+            hotkey_edit: HotkeyEdit::default(),
+            settings_scroll: None,
+            cues: Box::new(NoCues),
             is_running: Box::new(|_| false),
             export: ExportState::new(PathBuf::new(), false),
             settings: AppSettings::default(),
@@ -224,6 +240,36 @@ impl App {
         self.hotkey_words = words.to_string();
     }
 
+    /// The hotkeys that are set now (some the person asked for may be missing, if another program holds them), said on the bar and
+    /// on the Settings screen.
+    pub fn set_hotkeys_working(&mut self, working: &[(HotkeyAction, KeyCombo)]) {
+        self.hotkey_words = hotkey::sentence(working);
+    }
+
+    /// The hotkeys the person has chosen since this was last called, if they changed: the listener sets them again.
+    pub fn take_hotkey_change(&mut self) -> Option<HotkeySet> {
+        self.hotkey_change.take()
+    }
+
+    /// For a picture of the lower part of the Settings page: keep it scrolled this far down.
+    pub fn with_settings_scroll(mut self, y: f32) -> App {
+        self.settings_scroll = Some(y);
+        self
+    }
+
+    /// Give the program a way to play the cue sounds.
+    pub fn with_cues(mut self, cues: Box<dyn CuePlayer>) -> App {
+        self.cues = cues;
+        self
+    }
+
+    /// Play a cue if the person has turned that sound on.
+    fn cue(&self, cue: Cue) {
+        if self.settings.sounds.wants(cue) {
+            self.cues.play(cue);
+        }
+    }
+
     /// Look at the guides folder again.
     pub fn refresh_home(&mut self) {
         if !self.library.as_os_str().is_empty() {
@@ -316,10 +362,12 @@ impl App {
                     " Use the capture bar or the hotkeys to pause or finish.".to_string()
                 };
                 self.status.say(format!("Capturing. Do the task you want to explain.{finish}"));
+                self.cue(Cue::Start);
             }
             Err(why) => {
                 self.screen = Screen::Bar;
                 self.status.say(format!("Capturing could not start. {why}"));
+                self.cue(Cue::Error);
             }
         }
     }
@@ -363,8 +411,16 @@ impl App {
                 self.status.say("Cancelled. Nothing was captured.");
             }
             other => {
+                // Only an action the capture can take now makes a sound: Pause while capturing, Resume while paused, Finish either way.
+                let phase = self.capture.as_ref().map(|c| c.view().phase);
                 if let Some(capture) = self.capture.as_mut() {
                     capture.act(other);
+                }
+                match (other, phase) {
+                    (BarAction::Pause, Some(bar::BarPhase::Capturing)) => self.cue(Cue::Stop),
+                    (BarAction::Resume, Some(bar::BarPhase::Paused)) => self.cue(Cue::Start),
+                    (BarAction::Finish, Some(bar::BarPhase::Capturing | bar::BarPhase::Paused)) => self.cue(Cue::Stop),
+                    _ => {}
                 }
             }
         }
@@ -477,12 +533,25 @@ impl App {
     pub fn poll(&mut self) {
         self.poll_export();
         let Some(capture) = self.capture.as_mut() else { return };
+        let steps_before = capture.view().steps;
         let said = capture.poll();
+        let steps_after = capture.view().steps;
+        let trouble = capture.trouble();
+        let outcome = capture.finished();
+        if steps_after > steps_before {
+            self.cue(Cue::Step);
+        }
+        if trouble {
+            self.cue(Cue::Error);
+        }
         if !said.is_empty() {
             self.status.say(said.join(" "));
         }
-        let Some(outcome) = capture.finished() else { return };
+        let Some(outcome) = outcome else { return };
         self.capture = None;
+        if matches!(outcome, Outcome::Failed(_)) {
+            self.cue(Cue::Error);
+        }
         match outcome {
             Outcome::Guide(finished) => {
                 let steps = step_count(&finished.doc.guide);
@@ -548,7 +617,8 @@ impl App {
             },
             Screen::Bar => {
                 let view = match &self.capture {
-                    Some(capture) => capture.view(),
+                    // The hotkeys are the ones set now, which the person can change while the program runs.
+                    Some(capture) => BarView { hotkeys: self.hotkey_words.clone(), ..capture.view() },
                     None => BarView {
                         target: self.target.kind,
                         can_start: self.target.is_ready(),
@@ -627,9 +697,25 @@ impl App {
                     exports_folder: self.export.folder.display().to_string(),
                     hotkeys: self.hotkey_words.clone(),
                     note: self.settings_note.clone(),
+                    scroll: self.settings_scroll,
                 };
-                match settings_screen::show(ui, &mut self.settings, &info) {
+                let shown = settings_screen::show(ui, &mut self.settings, &mut self.hotkey_edit, &info);
+                if let Some(said) = self.hotkey_edit.take_said() {
+                    self.status.say(said);
+                }
+                match shown {
                     SettingsAction::None => {}
+                    SettingsAction::Hear(cue) => {
+                        // The person pressed the button for it, so it plays whether or not that sound is turned on.
+                        self.cues.play(cue);
+                        self.status.say(format!("Played the {} sound.", cue.name()));
+                    }
+                    SettingsAction::HotkeysChanged => {
+                        self.hotkey_change = Some(self.settings.hotkeys);
+                        self.hotkey_words = hotkey::sentence(&self.settings.hotkeys.entries());
+                        self.save_settings();
+                        self.status.say(format!("Saved. {}", self.hotkey_words));
+                    }
                     SettingsAction::Back => {
                         self.screen = Screen::Home;
                         self.status.say("Back at your guides.");

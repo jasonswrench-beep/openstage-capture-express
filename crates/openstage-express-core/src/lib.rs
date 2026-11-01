@@ -11,9 +11,11 @@
 pub mod area;
 pub mod builder;
 pub mod capture;
+pub mod cues;
 pub mod error;
 pub mod focus;
 pub mod fsutil;
+pub mod hotkey;
 pub mod marks;
 pub mod migrate;
 pub mod model;
