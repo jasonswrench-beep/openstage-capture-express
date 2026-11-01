@@ -115,6 +115,48 @@ dialog button{{font:inherit;padding:.4rem 1rem;margin-bottom:.5rem}}\
     )
 }
 
+/// The nested ordered list of links to the steps (content blocks are not in it), shared with the PDF's print page. Empty
+/// when the plan has no steps to list.
+pub(crate) fn toc_list(plan: &Plan) -> String {
+    let listed: Vec<&PlannedStep> = plan.steps.iter().filter(|s| s.kind != StepKind::Block).collect();
+    let mut out = String::new();
+    if listed.is_empty() {
+        return out;
+    }
+    let mut level: Option<usize> = None;
+    for step in &listed {
+        let depth = match level {
+            None => 0,
+            Some(l) => step.depth.min(l + 1),
+        };
+        match level {
+            None => out.push_str("<ol>\n"),
+            Some(l) if depth > l => out.push_str("\n<ol>\n"),
+            Some(mut l) => {
+                out.push_str("</li>\n");
+                while l > depth {
+                    out.push_str("</ol>\n</li>\n");
+                    l -= 1;
+                }
+            }
+        }
+        level = Some(depth);
+        let number = step.number.as_deref().unwrap_or("");
+        out.push_str(&format!(
+            "<li><a href=\"#{}\">{} {}</a>",
+            html_escape(&step.id),
+            html_escape(number),
+            html_escape(&step.title)
+        ));
+    }
+    out.push_str("</li>\n");
+    for _ in 0..level.unwrap_or(0) {
+        out.push_str("</ol>\n</li>\n");
+    }
+    out.push_str("</ol>\n");
+    out
+}
+
 /// Make the page for a plan.
 pub fn html_page(plan: &Plan) -> String {
     let language = Language::from_code(&plan.language);
@@ -142,40 +184,11 @@ pub fn html_page(plan: &Plan) -> String {
     out.push_str(&markdown_to_html(&plan.description));
 
     // The list of steps (content blocks are not in it).
-    let listed: Vec<&PlannedStep> = plan.steps.iter().filter(|s| s.kind != StepKind::Block).collect();
-    if !listed.is_empty() {
+    let toc = toc_list(plan);
+    if !toc.is_empty() {
         out.push_str(&format!("<nav class=\"toc\" aria-label=\"{}\"{fallback_lang}>\n", html_escape(w.steps)));
-        let mut level: Option<usize> = None;
-        for step in &listed {
-            let depth = match level {
-                None => 0,
-                Some(l) => step.depth.min(l + 1),
-            };
-            match level {
-                None => out.push_str("<ol>\n"),
-                Some(l) if depth > l => out.push_str("\n<ol>\n"),
-                Some(mut l) => {
-                    out.push_str("</li>\n");
-                    while l > depth {
-                        out.push_str("</ol>\n</li>\n");
-                        l -= 1;
-                    }
-                }
-            }
-            level = Some(depth);
-            let number = step.number.as_deref().unwrap_or("");
-            out.push_str(&format!(
-                "<li><a href=\"#{}\">{} {}</a>",
-                html_escape(&step.id),
-                html_escape(number),
-                html_escape(&step.title)
-            ));
-        }
-        out.push_str("</li>\n");
-        for _ in 0..level.unwrap_or(0) {
-            out.push_str("</ol>\n</li>\n");
-        }
-        out.push_str("</ol>\n</nav>\n");
+        out.push_str(&toc);
+        out.push_str("</nav>\n");
     }
 
     // The steps.

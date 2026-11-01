@@ -233,6 +233,35 @@ Every export is made from the same plan, so they agree about which steps are in,
 | JSON | `<title>.json` and `images/step-NN.png`. See below. |
 | Images | `step-NN.png` only. JPG with a quality setting is not built yet. |
 | GIF | `<title>.gif`: one frame per step (a step with no picture is a card with its title), the same width, shorter pictures centred on a background colour, each frame 1, 2, 3, 5 or 8 seconds (3 by default), looping unless turned off, with an optional title card and progress bar. Width between 320 and 1920 (800 by default). A GIF cannot be made accessible. |
+| PDF | `<title>.pdf`, made by the WebView2 engine on Windows. See below. |
+
+### The PDF export
+
+Express writes a *print page* from the plan (the HTML export's contents and numbering, made for paper) and has the Microsoft
+WebView2 runtime print it with the DevTools command `Page.printToPDF`, which can write a tagged PDF. The runtime is the one that
+ships with Windows 11; Express does not copy any of it. If it is not installed, PDF export says so and everything else still works.
+
+- **Options.** Paper A4, Letter, A3, A5 or Legal; portrait or landscape; margins of 10 to 40 mm (20 by default); a cover page
+  (title and description only); a contents list (every entry a link); a header line and a footer line; "Page 3 of 12" at the bottom
+  right (words in the guide's language: English, German, French); every top-level step on a new page.
+- **Fonts.** Roboto Regular, Bold and Italic (Apache-2.0), carried inside the page as data, so no Windows font is copied into the
+  file. Roboto has no Chinese, Japanese, Korean or Arabic letters; those fall back to a Windows font.
+- **No outside requests.** The page has a Content-Security-Policy that allows only its own style, pictures and fonts, no script, and
+  the engine runs with scripts off, from a private working folder under a made-up host name, with background networking, updates
+  and reputation checks turned off. The folder is removed afterwards.
+- **What the PDF is tagged with** (WebView2 156, seen by reading the file with a separate program): the document language, the
+  title shown in the window bar, headings (`H1` for the title, `H2` and deeper for steps), lists and list items, links, bold
+  text, the note box (`Aside`), pictures as `Figure` with their alt text, and bookmarks (one for the title, the contents and every step).
+- **What it is not tagged with.** The page numbers, the header and the footer are drawn in the page margins and are neither
+  tagged nor marked as decoration, so a strict checker will report them. The export warns about this whenever any of them is on.
+  The contents list has no page numbers (the engine does not support that). A PDF passed through no accessibility checker is not
+  called accessible here.
+- **Checks on the finished file.** The export reads the PDF back and warns when it finds no tags, no document language, fewer
+  alt texts than pictures, or no bookmarks. Something that is not a PDF is never written as one.
+- **Page breaks.** A picture never splits across pages, a heading is never left alone at the foot of a page, and a step's text goes
+  with its picture (`break-after: avoid` chains). No block holding a heading is kept together with `break-inside: avoid`, because
+  WebView2 once wrote some headings' bookmarks twice ("2.2. Click Save Click Save") from such a page set in Segoe UI; the cause is
+  not understood, and the Windows tests print every layout option with the real engine and check the bookmark titles.
 
 ### The JSON export
 
@@ -263,4 +292,4 @@ control, the program and the capture time.
 
 ## Not in this document yet
 
-The settings file is written when it is built. PDF, Word and PowerPoint exports are not built.
+The settings file is written when it is built. Word and PowerPoint exports are not built.

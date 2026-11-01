@@ -3,7 +3,8 @@
 //!
 //! Built so far (milestone M4): HTML ([`html`]), Markdown ([`markdown`]), JSON ([`json`]), a folder of pictures ([`images`])
 //! and an animated GIF ([`gif`]). Each one takes the same [`plan::Plan`], so they agree about which steps are exported, how
-//! they are numbered and what every picture looks like. Still to come: PDF, Word and PowerPoint.
+//! they are numbered and what every picture looks like. PDF ([`pdf`]) writes a print page and hands it to a renderer, which
+//! on Windows is the WebView2 engine in `openstage-express-windows`. Still to come: Word and PowerPoint.
 //!
 //! An export is a list of files in memory ([`Export`]); writing them to a folder is a separate step that refuses to
 //! replace a file that already exists, so nothing a person has is ever overwritten.
@@ -18,6 +19,7 @@ pub mod html;
 pub mod images;
 pub mod json;
 pub mod markdown;
+pub mod pdf;
 pub mod picture;
 pub mod plan;
 
