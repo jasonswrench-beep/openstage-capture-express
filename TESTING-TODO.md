@@ -92,8 +92,14 @@ submit an assignment") to open from the card under "Your guides".
 - [ ] Double-click the finished `openstage-capture-express.exe` in `target\release` from Explorer, on an ARM64 PC, and on a PC with an
       older graphics driver (the window draws through wgpu, which chooses the graphics interface itself). It has been run only on
       this PC.
-- [ ] The editor does not yet let you draw marks, blur a name, crop, zoom or add notes; there is no tool row. Those come after capture.
-      Home's "Start capturing" says it is not built yet.
+- [ ] Marks in the editor (rectangle, oval, line, arrow, text, step number, highlight, blur, spotlight): add some to a captured step and
+      use them by keyboard alone (the Add buttons, the marks list with Up, Down and Delete, the Move and size buttons, colours and widths)
+      and by mouse (press on a mark and drag it, drag a square handle to change its size). The window shows the whole picture with the
+      focused crop as a frame; is that clear? Blur especially: blur a name on a real screenshot, export a PNG, and check it cannot be read
+      (it is a coarse mosaic, not a black box; use a solid rectangle to hide something that must stay secret).
+- [ ] Not built in the editor yet: dragging to draw a new shape (a mark starts at a default size and is moved), picking several
+      steps at once, duplicating a step, panning or zooming the focused crop by hand, editing a guide's own title, and cutting the
+      picture.
 
 ## Milestone M6 (capture)
 

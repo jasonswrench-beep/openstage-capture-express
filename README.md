@@ -16,7 +16,9 @@ PowerPoint file that Express writes itself, a window, and (since 2026-11-01) rea
 folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
-and redo, and every change is saved. **Export** (in the editor) offers every format in a screen of its own and makes them on a
+and redo, and every change is saved. In the editor, marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
+spotlight) are added with buttons, listed, moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
+whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
 thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (on Home) holds the colour scheme, how
 clicks make steps, the pointer and circle, the language of step titles, the two folders and a few delays; each change is saved at
 once to `%APPDATA%\OpenStage Capture Express\settings.json`. **About and licences** shows the licence and what the program is built
@@ -27,8 +29,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 535 passed (198 in the core, 182 in the exports, 33 in the
-  Windows crate, 122 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 569 passed (214 in the core, 182 in the exports, 33 in the
+  Windows crate, 140 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -114,7 +116,8 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing one window or a drawn area, drawing and cropping in the editor, options on the
+Not built: M8 and everything else in the spec: capturing one window or a drawn area, dragging to draw a new shape, picking several steps, duplicating a step, editing a guide's title,
+panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), changing the hotkeys, sounds, the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.
@@ -160,7 +163,11 @@ Made by Jason on 2026-10-31, when the kickoff questions were put to him:
 | Window toolkit? | egui with AccessKit, all Rust (spec D5) | Milestone M5 includes the Narrator and NVDA pass, with Tauri as the fallback |
 | First slice? | Capture, edit, **and** PDF, Word and PowerPoint (spec D6, widened) | The first version includes the formats the spec calls S2 |
 
-Everything else in the spec (D7 to D9 and questions 4 to 12 in its section 16) is still a proposal and has not been put to Jason.
+Made by Jason on 2026-11-01, when asked whether to keep the spec's defaults for its open questions (4 to 12 in section 16): **yes, keep
+them.** So the name stays OpenStage Capture Express, a guide stays a folder named *.osguide, typing is read from the field and never
+logged key by key, descriptions are plain text with a small Markdown subset, the hotkeys are Ctrl+Shift+F7, F8 and F9, step titles come in
+English, German and French, and the link to OpenStage Author, REA and signing stay later decisions. Anything the spec proposed that
+the program does not yet do (changing the hotkeys, for one) is still to build, not to ask about again.
 a step-guide program is installed on Jason's computer (`C:\Program Files\a step-guide program`) and is the reference program; its behaviour may be looked at
 there, but never its code, templates, strings or artwork.
 

@@ -75,6 +75,16 @@ pub struct RenderedStep {
 
 /// Draw every mark of a step on a copy of its picture and crop it to the step's focused view (the whole picture if none).
 pub fn render_step(picture: &Picture, step: &Step, text: &dyn TextRenderer) -> RenderedStep {
+    let RenderedStep { canvas: full, report } = render_marked(picture, step, text);
+    let canvas = match &step.focus {
+        Some(focus) => crop_canvas(&full, focus),
+        None => full,
+    };
+    RenderedStep { canvas, report }
+}
+
+/// Draw every mark of a step on a copy of its whole picture, without cropping it (what the editor shows while marks are worked on).
+pub fn render_marked(picture: &Picture, step: &Step, text: &dyn TextRenderer) -> RenderedStep {
     let mut full = Canvas::new(picture.width, picture.height);
     full.draw_picture(
         picture,
@@ -82,11 +92,7 @@ pub fn render_step(picture: &Picture, step: &Step, text: &dyn TextRenderer) -> R
         PixelRect::new(0, 0, picture.width as i32, picture.height as i32),
     );
     let report = draw_annotations(&mut full, &step.annotations, text);
-    let canvas = match &step.focus {
-        Some(focus) => crop_canvas(&full, focus),
-        None => full,
-    };
-    RenderedStep { canvas, report }
+    RenderedStep { canvas: full, report }
 }
 
 /// A copy of the part of a canvas inside `rect` (moved inside the canvas first if it hangs over an edge).

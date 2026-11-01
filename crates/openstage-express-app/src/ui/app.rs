@@ -186,6 +186,19 @@ impl App {
         }
     }
 
+    /// For looking at the editor without a person: add one of each kind of mark to the open guide's chosen step.
+    pub fn add_demo_marks(&mut self) {
+        use openstage_express_core::marks::Tool;
+        let Some(editor) = self.editor.as_mut() else { return };
+        for tool in Tool::ALL {
+            let _ = editor.add_mark(tool);
+        }
+        for (id, _) in editor.mark_rows().into_iter().skip(2).step_by(2) {
+            editor.select_mark(Some(&id));
+            let _ = editor.nudge_mark(60, 40);
+        }
+    }
+
     pub fn set_hotkey_words(&mut self, words: &str) {
         self.hotkey_words = words.to_string();
     }
