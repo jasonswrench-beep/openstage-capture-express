@@ -116,7 +116,7 @@ Written and type-checked, not yet run on Windows:
   clears the undo history, and says how many steps and pictures went. The guide is saved without the steps before any picture is
   deleted, and if it cannot be saved nothing changes (a test breaks the trash file to prove it); if a picture cannot be deleted
   after that (another program has it open), the words say so and the picture stays in the folder. Pictures are deleted for good, not
-  sent to the Recycle Bin. Nobody has used it by hand, and Narrator and NVDA have not read it. The screens were drawn by the real program and looked at (`--screen deleted`,
+  sent to the Recycle Bin (Jason's choice, 2026-11-01). Nobody has used it by hand, and Narrator and NVDA have not read it. The screens were drawn by the real program and looked at (`--screen deleted`,
   `--delete-steps`). Twenty-one deliberate faults were each caught by a test (one first slipped through, because two steps deleted in
   the same second hid it; a test that does not depend on the clock now catches it). Fifteen more deliberate faults in the emptying
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
