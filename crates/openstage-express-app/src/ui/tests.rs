@@ -3489,3 +3489,204 @@ fn restoring_the_last_button_of_several_leaves_the_keyboard_on_the_new_last_one(
         "the one pressed was last, so the keyboard goes to the new last one"
     );
 }
+
+// ---- emptying the trash of deleted steps (the one thing that cannot be undone)
+
+/// The names of the PNG files in a folder, sorted.
+fn pngs_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|entries| entries.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())
+        .unwrap_or_default();
+    names.retain(|n| n.ends_with(".png"));
+    names.sort();
+    names
+}
+
+#[test]
+fn empty_the_trash_asks_first_with_keep_them_ready_and_deletes_nothing_until_told() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    h.invoke(Role::Button, "Empty the trash");
+    assert!(h.status().starts_with("Empty the trash for good? This deletes 2 steps for good"), "{}", h.status());
+    assert_eq!(h.node(h.find(Role::Heading, "Empty the trash for good?")).level(), Some(2));
+    assert_eq!(h.focused_words().as_deref(), Some("Keep them"), "Enter by accident keeps the steps");
+    h.find(Role::Button, "Empty the trash for good");
+    assert!(restore_buttons(&h).is_empty() && !h.has(Role::Button, "Restore all 2 steps"), "one question at a time");
+    assert_eq!(h.app.editor.as_ref().unwrap().deleted_count(), 2, "nothing is deleted by asking");
+    // Answering Keep them, with the button and then with Escape: the steps are still there and the keyboard is back on the button.
+    h.invoke(Role::Button, "Keep them");
+    assert_eq!(h.status(), "Kept the deleted steps. Nothing was deleted.");
+    assert_eq!(restore_buttons(&h).len(), 2);
+    assert_eq!(h.focused_words().as_deref(), Some("Empty the trash"));
+    h.invoke(Role::Button, "Empty the trash");
+    h.key(Key::Escape, NO_MODS);
+    assert_eq!(h.status(), "Kept the deleted steps. Nothing was deleted.");
+    assert_eq!(restore_buttons(&h).len(), 2);
+    assert_eq!(h.app.editor.as_ref().unwrap().deleted_count(), 2);
+}
+
+#[test]
+fn tab_goes_through_the_question_and_empty_the_trash_is_the_last_stop_of_the_list() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    let mut list = Vec::new();
+    for _ in 0..5 {
+        h.key(Key::Tab, NO_MODS);
+        list.push(h.focused_words().unwrap_or_default());
+    }
+    assert_eq!(list[0], "Back to the steps");
+    assert_eq!(list[1], "Restore all 2 steps");
+    assert_eq!(list[4], "Empty the trash", "after every Restore button: {list:?}");
+    h.invoke(Role::Button, "Empty the trash");
+    let mut question = vec![h.focused_words().unwrap_or_default()];
+    for _ in 0..2 {
+        h.key(Key::Tab, NO_MODS);
+        question.push(h.focused_words().unwrap_or_default());
+    }
+    question.sort();
+    assert_eq!(question, ["Back to the steps", "Empty the trash for good", "Keep them"]);
+}
+
+#[test]
+fn leaving_while_asked_drops_the_question_and_nothing_is_deleted() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (2)"));
+    h.invoke(Role::Button, "Deleted steps (2)");
+    assert!(!h.has(Role::Heading, "Empty the trash for good?"), "it asks again, from the start");
+    assert_eq!(restore_buttons(&h).len(), 2);
+}
+
+#[test]
+fn emptying_the_trash_of_the_example_guide_deletes_the_steps_and_clears_undo() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Empty the trash for good");
+    assert_eq!(h.status(), "Emptied the trash: 2 steps deleted for good. Undo cannot go back past this.");
+    h.find(Role::Label, "No steps are deleted.");
+    assert!(!h.has(Role::Button, "Empty the trash"), "nothing is left to empty");
+    assert_eq!(h.focused_words().as_deref(), Some("Back to the steps"));
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.rows().len(), 5);
+    assert_eq!(deleted_button(&h), None);
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled(), "undo cannot go back past an empty trash");
+    assert!(h.node(h.find(Role::Button, "Redo")).is_disabled());
+}
+
+#[test]
+fn emptying_the_trash_of_a_real_guide_deletes_the_pictures_nothing_uses_and_keeps_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    let all = pngs_in(&guide.join("images"));
+    assert_eq!(all.len(), 6);
+    h.invoke(Role::Button, "Delete step");
+    h.invoke(Role::Button, "Delete step");
+    assert_eq!((pngs_in(&guide.join("images")).len(), pngs_in(&guide.join("trash")).len()), (4, 2));
+    h.invoke(Role::Button, "Deleted steps (2)");
+    h.invoke(Role::Button, "Empty the trash");
+    assert_eq!((pngs_in(&guide.join("trash")).len(), saved_steps(&guide).1), (2, 2), "asking deletes nothing");
+    h.invoke(Role::Button, "Empty the trash for good");
+    assert_eq!(
+        h.status(),
+        "Emptied the trash: 2 steps and 2 pictures deleted for good. Undo cannot go back past this."
+    );
+    assert!(pngs_in(&guide.join("trash")).is_empty(), "the pictures of the deleted steps are gone");
+    assert_eq!(pngs_in(&guide.join("images")).len(), 4, "the pictures of the steps that are left are kept");
+    let (steps, kept) = saved_steps(&guide);
+    assert_eq!((steps.len(), kept), (5, 0), "the guide on disk has five steps and nothing in its trash");
+    h.invoke(Role::Button, "Back to the steps");
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled());
+    assert_eq!(h.rows().len(), 5);
+}
+
+#[test]
+fn a_picture_a_step_that_is_left_still_uses_is_not_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    // The copy shares the picture of the first step; deleting the copy leaves the picture in use.
+    h.invoke(Role::Button, "Duplicate step");
+    h.invoke(Role::Button, "Delete step");
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Empty the trash for good");
+    assert_eq!(h.status(), "Emptied the trash: 1 step deleted for good. Undo cannot go back past this.");
+    assert!(guide.join("images/step-0001.png").is_file(), "the first step still shows it");
+    assert_eq!(saved_steps(&guide).0.len(), 7);
+}
+
+#[test]
+fn if_the_guide_cannot_be_saved_the_trash_is_not_emptied_and_the_steps_can_still_be_brought_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Delete step");
+    // A folder where the trash file should be: saving the trash fails, as a locked or full disk would.
+    let trash_file = guide.join("trash/trash.json");
+    std::fs::remove_file(&trash_file).unwrap();
+    std::fs::create_dir(&trash_file).unwrap();
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Empty the trash for good");
+    assert!(
+        h.status().starts_with("The trash was not emptied, and the steps are still there to bring back."),
+        "{}",
+        h.status()
+    );
+    assert_eq!(restore_buttons(&h), ["Restore Click \"Assignments\""]);
+    assert!(guide.join("trash/step-0001.png").is_file(), "the picture was not touched");
+    h.invoke(Role::Button, "Back to the steps");
+    assert!(!h.node(h.find(Role::Button, "Undo")).is_disabled(), "and undo still works");
+}
+
+/// A picture another program is holding open cannot be deleted: the steps are gone, the picture is left and the words say so.
+#[cfg(windows)]
+#[test]
+fn a_picture_that_cannot_be_deleted_is_said_in_words_and_the_steps_are_gone() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Delete step");
+    let stuck = guide.join("trash/step-0001.png");
+    let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(&stuck).unwrap();
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Empty the trash for good");
+    drop(held);
+    assert!(h.status().starts_with("Deleted for good: 1 step. A picture could not be removed"), "{}", h.status());
+    h.find(Role::Label, "No steps are deleted.");
+    assert!(stuck.is_file(), "the picture is still in the folder");
+    assert_eq!(saved_steps(&guide).1, 0, "but the guide no longer has the step in its trash");
+}
+
+#[test]
+fn the_dev_switch_that_draws_the_question_is_read() {
+    use super::DevOptions;
+    let words = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(DevOptions::parse(&words(&["--screen", "deleted", "--ask-to-empty"])).unwrap().ask_to_empty);
+    let mut h = Harness::new(Screen::DeletedSteps);
+    assert!(!h.has(Role::Heading, "Empty the trash for good?"));
+    h.app.ask_to_empty_demo();
+    h.settle();
+    h.find(Role::Heading, "Empty the trash for good?");
+}
+
+#[test]
+fn one_step_with_its_own_picture_is_said_in_the_singular() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Delete step");
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Empty the trash");
+    h.invoke(Role::Button, "Empty the trash for good");
+    assert_eq!(h.status(), "Emptied the trash: 1 step and 1 picture deleted for good. Undo cannot go back past this.");
+    assert!(!guide.join("images/step-0001.png").exists() && !guide.join("trash/step-0001.png").exists());
+}

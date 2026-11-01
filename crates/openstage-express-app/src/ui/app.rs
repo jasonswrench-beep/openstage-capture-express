@@ -19,7 +19,7 @@ use super::capture::{
 };
 use super::choose_area::{self, AreaAction, AreaScreen};
 use super::choose_window::{self, WindowList, WindowListAction};
-use super::deleted::{self, DeletedAction};
+use super::deleted::{self, DeletedAction, DeletedView};
 use super::editor::{self, Leave};
 use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
@@ -76,8 +76,9 @@ pub struct App {
     pub home: HomeState,
     /// The guides in the Trash, as they were when the Trash was last opened or changed.
     trash: TrashState,
-    /// Where the keyboard goes on the Deleted steps screen after a step is put back.
-    deleted_keyboard: deleted::KeyboardAt,
+    /// What the Deleted steps screen remembers: where the keyboard goes after a step is put back, and whether it is asking about
+    /// emptying the trash.
+    deleted: DeletedView,
     pub editor: Option<EditorState>,
     pub status: Status,
     library: PathBuf,
@@ -122,7 +123,7 @@ impl App {
             screen: Screen::Home,
             home: HomeState::example(),
             trash: TrashState::default(),
-            deleted_keyboard: None,
+            deleted: DeletedView::default(),
             editor: None,
             status: Status::default(),
             library: PathBuf::new(),
@@ -268,6 +269,11 @@ impl App {
             let first = first.id.clone();
             editor.select(&first);
         }
+    }
+
+    /// For looking at the Deleted steps screen without a person: open its question "Empty the trash for good?".
+    pub fn ask_to_empty_demo(&mut self) {
+        self.deleted.ask();
     }
 
     /// For looking at the editor without a person: add one of each kind of mark to the open guide's chosen step.
@@ -783,10 +789,11 @@ impl App {
                     return;
                 };
                 let rows = editor.deleted_rows();
-                match deleted::show(ui, &rows, &mut self.deleted_keyboard) {
+                match deleted::show(ui, &rows, &mut self.deleted) {
                     DeletedAction::None => {}
                     DeletedAction::Back => {
                         self.screen = Screen::Editor;
+                        self.deleted.stop_asking(false);
                         editor.focus_row_next = true;
                         self.status.say("Back at the guide.");
                     }
@@ -794,11 +801,29 @@ impl App {
                         let at = rows.iter().position(|r| r.id == id).unwrap_or(0);
                         self.status.say_opt(editor.restore_deleted(&id));
                         // The button that was pressed is gone: the keyboard goes to the next one, or to Back if none is left.
-                        self.deleted_keyboard = Some(at);
+                        self.deleted.keyboard = Some(at);
                     }
                     DeletedAction::RestoreAll => {
                         self.status.say_opt(editor.restore_all_deleted());
-                        self.deleted_keyboard = Some(0);
+                        self.deleted.keyboard = Some(0);
+                    }
+                    DeletedAction::AskToEmpty => {
+                        self.deleted.ask();
+                        self.status.say(format!(
+                            "Empty the trash for good? This deletes {} for good, and their pictures. It cannot be undone. \
+                             Press Keep them, or Empty the trash for good.",
+                            steps_words(rows.len())
+                        ));
+                    }
+                    DeletedAction::KeepThem => {
+                        self.deleted.stop_asking(true);
+                        self.status.say("Kept the deleted steps. Nothing was deleted.");
+                    }
+                    DeletedAction::EmptyForGood => {
+                        self.deleted.stop_asking(false);
+                        self.status.say_opt(editor.empty_deleted());
+                        // Nothing is left to press: the keyboard goes to Back (or stays on the list if the trash could not be emptied).
+                        self.deleted.keyboard = Some(0);
                     }
                 }
             }
@@ -965,7 +990,7 @@ impl App {
                 }
                 if left == Leave::ToDeleted {
                     self.screen = Screen::DeletedSteps;
-                    self.deleted_keyboard = None;
+                    self.deleted = DeletedView::default();
                     let n = editor_state.deleted_count();
                     self.status
                         .say(format!("Deleted steps. {n} can be put back. Restore puts a step back where it was."));

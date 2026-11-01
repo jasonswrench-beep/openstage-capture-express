@@ -288,12 +288,19 @@ impl GuideFolder {
 
     /// Empty the trash for good, at the person's request. The guide is saved first (so it no longer names the deleted
     /// steps), then each picture that no remaining step uses is deleted. Returns how many pictures were deleted.
+    ///
+    /// If the guide cannot be saved nothing has changed: the session still has its trash and its undo history. If a
+    /// picture cannot be deleted after that, the error comes back but the session is already emptied and the guide
+    /// already saved without the deleted steps (the picture is then left in the folder, where `orphan_pictures` lists it).
     pub fn empty_trash(&self, session: &mut Session, now: &str) -> Result<usize, StoreError> {
         if self.read_only {
             return Err(StoreError::ReadOnly);
         }
-        let removed = session.empty_trash(now);
-        self.save(session.doc())?;
+        // Done on a copy, so that a save that fails leaves the person's trash and undo history as they were.
+        let mut emptied = session.clone();
+        let removed = emptied.empty_trash(now);
+        self.save(emptied.doc())?;
+        *session = emptied;
         let still_used: BTreeSet<String> = session.doc().live_pictures().into_iter().collect();
         let mut deleted = BTreeSet::new();
         for entry in &removed {
@@ -590,6 +597,67 @@ mod tests {
         assert!(!session.can_undo());
         let saved: Value = serde_json::from_slice(&fs::read(folder.path().join("trash/trash.json")).unwrap()).unwrap();
         assert_eq!(saved["entries"], serde_json::json!([]));
+    }
+
+    /// A guide whose first two steps are deleted, saved, with the session that did it.
+    fn guide_with_two_steps_deleted(parent: &Path) -> (GuideFolder, Session) {
+        let (folder, d) = guide_with_pictures(parent);
+        let mut session = Session::new(d);
+        session.apply(|d| d.delete_step("step-1", LATER)).unwrap();
+        session.apply(|d| d.delete_step("step-2", LATER)).unwrap();
+        folder.save(session.doc()).unwrap();
+        (folder, session)
+    }
+
+    #[test]
+    fn a_guide_that_cannot_be_saved_keeps_its_trash_its_history_and_its_pictures() {
+        let dir = tempfile::tempdir().unwrap();
+        let (folder, mut session) = guide_with_two_steps_deleted(dir.path());
+        // A folder where the trash file should be: writing the trash fails, as a full or locked disk would.
+        let trash_file = folder.path().join("trash/trash.json");
+        fs::remove_file(&trash_file).unwrap();
+        fs::create_dir(&trash_file).unwrap();
+        let before = session.doc().clone();
+        let depth = session.undo_depth();
+        assert!(folder.empty_trash(&mut session, LATER).is_err());
+        assert_eq!(session.doc(), &before, "the deleted steps are still there to bring back");
+        assert_eq!(session.undo_depth(), depth, "and so is the undo history");
+        assert!(folder.path().join("trash/step-0001.png").is_file());
+        assert!(folder.path().join("trash/step-0002.png").is_file());
+    }
+
+    #[test]
+    fn emptying_a_read_only_guide_is_refused_and_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, mut session) = guide_with_two_steps_deleted(dir.path());
+        let second = GuideFolder::open(first.path(), &always_running).unwrap();
+        assert!(matches!(second.folder.empty_trash(&mut session, LATER), Err(StoreError::ReadOnly)));
+        assert_eq!(session.doc().trash.entries.len(), 2);
+        assert!(first.path().join("trash/step-0001.png").is_file());
+    }
+
+    /// A picture Windows will not delete (another program has it open without allowing a delete) is reported, after the
+    /// guide was saved without the steps.
+    #[cfg(windows)]
+    #[test]
+    fn a_picture_that_cannot_be_deleted_is_reported_but_the_guide_is_already_saved_without_the_steps() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (folder, mut session) = guide_with_two_steps_deleted(dir.path());
+        let stuck = folder.path().join("trash/step-0001.png");
+        // Share mode 1 lets others read the file but not delete it.
+        let held = fs::OpenOptions::new().read(true).share_mode(1).open(&stuck).unwrap();
+        let result = folder.empty_trash(&mut session, LATER);
+        drop(held);
+        assert!(result.is_err(), "the picture could not be deleted");
+        assert!(
+            session.doc().trash.entries.is_empty(),
+            "the session is emptied: the guide was saved without the steps"
+        );
+        let saved: Value = serde_json::from_slice(&fs::read(folder.path().join("trash/trash.json")).unwrap()).unwrap();
+        assert_eq!(saved["entries"], serde_json::json!([]));
+        assert!(stuck.is_file(), "the stuck picture is left in the folder");
+        assert!(folder.orphan_pictures(session.doc()).contains(&"trash/step-0001.png".to_string()), "and is listed");
     }
 
     #[test]
