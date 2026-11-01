@@ -13,3 +13,4 @@ clicks-build-log.txt
 clicks-test-output/
 pack-log.txt
 dist/
+installer-log.txt

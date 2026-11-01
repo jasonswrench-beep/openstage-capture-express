@@ -122,6 +122,19 @@ Written and type-checked, not yet run on Windows:
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
   only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
 
+- The installer and the program's icon (2026-11-01; `docs/installer.md`; Jason said to download Inno Setup and to use the product
+  icon in the installer). `MAKE EXPRESS INSTALLER.bat` builds the program and has Inno Setup 7.1.1 (free; downloaded from its
+  project's GitHub release after its Authenticode signature and SHA-256 were checked, and installed in `C:\Users\Jason\InnoSetup7`)
+  make `dist\OpenStage-Capture-Express-0.1.0-x64-setup.exe` (6.5 MB) from `installer/express.iss`. The product icon is the setup
+  file's own icon, is drawn into the setup wizard's pictures (the tall one on the first and last pages, a small one in the corner of
+  the others), is on the program file inside the setup file and the zip (`tools/set-exe-icon.ps1` adds it with Windows' own
+  resource calls, nothing downloaded), and is used by the Start menu and desktop shortcuts and the entry in Windows' list of
+  installed programs. Checked on this PC by installing the built setup file silently into a scratch folder and reading back: the
+  files, the installed program starting, the icon found on the setup file and on the installed program, both shortcuts' icons, the
+  list entry (name, version, publisher, icon), then uninstalling: the entry, both shortcuts and the folder were gone and nothing
+  of the person's was touched. Jason clicked through the wizard once (it installed, and started the program) and said it looked good;
+  Narrator has not read it, and it has not been tried on another PC. Not signed, so SmartScreen will warn.
+
 - Moving and duplicating several chosen steps (spec E1, written and tested 2026-11-01). Alt+Up and Alt+Down, or the new "Move these
   steps up" and "Move these steps down" buttons, move every chosen step one place among its neighbours as one change: steps that
   sit together pass the step beside them as a block, a chosen step already at the end of its level stays (and so do the chosen
@@ -222,7 +235,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, a "Save a copy as one file",
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
-(English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
+(English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
@@ -254,6 +267,11 @@ If the OpenStage code is not next to this folder, the scripts say so; double-cli
    of your screen, so close anything private first.
 7. Double-click **`PACK EXPRESS.bat`**. It builds the program and makes the portable folder and zip in the folder `dist` (the program,
    its licence and notices, and a short guide). It never replaces one that is there.
+8. Double-click **`MAKE EXPRESS INSTALLER.bat`**. It builds the program and makes one setup file in `dist`
+   (`OpenStage-Capture-Express-<version>-x64-setup.exe`) with Inno Setup, a free program that must be installed first (see
+   `docs/installer.md`). The setup file, the program file it installs, its shortcuts and its entry in Windows' list of installed
+   programs all use the product icon (`assets/icon/OpenCapture_Express.ico`). It installs for one person without needing an
+   administrator, and removing it never deletes guides or settings. Neither the zip nor the setup file is signed.
 
 ## Decisions
 
