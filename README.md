@@ -20,7 +20,7 @@ while you work in other programs; before Start you choose what to capture: the w
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped and deleted (a Delete step button, or Ctrl+Shift+Delete), with undo
 and redo, and every change is saved. Deleted steps are kept with the guide: once one is deleted a Deleted steps button opens a list
-where each has a Restore button (and from two up a Restore all). In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
+where each has a Restore button (and from two up a Restore all), and an Empty the trash button that asks first and then deletes them for good. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
 spotlight) are added with buttons or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
 moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
 whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 721 passed (247 in the core, 182 in the exports, 44 in the
-  Windows crate, 248 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 736 passed (250 in the core, 182 in the exports, 44 in the
+  Windows crate, 260 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -110,10 +110,17 @@ Written and type-checked, not yet run on Windows:
   the steps" returns to the list with the keyboard on the chosen step. Restore all puts the steps back in reverse order of deleting, so
   neighbours come back in order, and is one change: one Undo deletes them all again. The list is the guide's own trash, saved with the
   guide, so a step deleted in one visit can be restored in the next; a test on a real guide folder with real picture files checks that
-  the picture moves to `trash` and back to `images`. There is no button to empty a guide's trash, so nothing is erased. Nobody has used
-  it by hand, and Narrator and NVDA have not read it. The screens were drawn by the real program and looked at (`--screen deleted`,
+  the picture moves to `trash` and back to `images`. An "Empty the trash" button at the foot of the list is the one thing in the program
+  that cannot be undone, so it asks first ("Empty the trash for good?", with "Keep them" ready and Escape keeping them), and then
+  deletes the deleted steps for good, with the pictures no remaining step uses (a copy of a step shares its picture, which stays),
+  clears the undo history, and says how many steps and pictures went. The guide is saved without the steps before any picture is
+  deleted, and if it cannot be saved nothing changes (a test breaks the trash file to prove it); if a picture cannot be deleted
+  after that (another program has it open), the words say so and the picture stays in the folder. Pictures are deleted for good, not
+  sent to the Recycle Bin. Nobody has used it by hand, and Narrator and NVDA have not read it. The screens were drawn by the real program and looked at (`--screen deleted`,
   `--delete-steps`). Twenty-one deliberate faults were each caught by a test (one first slipped through, because two steps deleted in
-  the same second hid it; a test that does not depend on the clock now catches it).
+  the same second hid it; a test that does not depend on the clock now catches it). Fifteen more deliberate faults in the emptying
+  were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
+  only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
 
 - Choosing several steps in the editor (Ctrl+click adds or takes out one, Shift+click or Shift+Up and Down chooses a run, Ctrl+A or the
   "Choose all steps" button chooses every step; the details give way to Skip, Put back, Delete and Choose just one, each done to all
@@ -198,7 +205,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   checking function has (against the real doubled titles).
 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, moving or duplicating several steps at once, a "Save a copy as one file",
-panning the focused crop by hand, a button to empty a guide's trash for good (nothing is erased yet), options on the
+panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.

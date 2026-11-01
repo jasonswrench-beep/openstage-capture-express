@@ -59,6 +59,8 @@ pub struct DevOptions {
     pub choose_steps: bool,
     /// Delete two steps of the example guide, so a picture of the editor shows the Deleted steps button.
     pub delete_steps: bool,
+    /// Open the question "Empty the trash for good?" on the Deleted steps screen.
+    pub ask_to_empty: bool,
 }
 
 impl DevOptions {
@@ -91,6 +93,7 @@ impl DevOptions {
                 "--with-marks" => options.with_marks = true,
                 "--choose-steps" => options.choose_steps = true,
                 "--delete-steps" => options.delete_steps = true,
+                "--ask-to-empty" => options.ask_to_empty = true,
                 "--scroll" => {
                     let pixels: f32 = value("a number of pixels")?
                         .parse()
@@ -461,6 +464,9 @@ pub fn run(options: DevOptions) -> eframe::Result {
             }
             if options.delete_steps && screen != Screen::DeletedSteps {
                 app.delete_demo_steps();
+            }
+            if options.ask_to_empty {
+                app.ask_to_empty_demo();
             }
             if options.choose_steps {
                 app.choose_demo_steps();

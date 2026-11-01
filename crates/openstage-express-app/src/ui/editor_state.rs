@@ -442,6 +442,42 @@ impl EditorState {
         }
     }
 
+    /// Delete every deleted step for good, and the pictures that nothing else uses. This is the one change that cannot be undone, so
+    /// the undo history is cleared (the person has been asked first). If the guide cannot be saved nothing is changed.
+    pub fn empty_deleted(&mut self) -> Said {
+        self.commit_pending();
+        let count = self.deleted_count();
+        if count == 0 {
+            return Some("There are no deleted steps.".to_string());
+        }
+        let now = utc_now_iso();
+        let steps = steps_words(count);
+        let Some(folder) = &self.folder else {
+            // The example guide has no folder, so there are no pictures to delete.
+            self.session.empty_trash(&now);
+            return Some(format!("Emptied the trash: {steps} deleted for good. Undo cannot go back past this."));
+        };
+        let result = folder.empty_trash(&mut self.session, &now);
+        let emptied = self.session.doc().trash.entries.is_empty();
+        if emptied {
+            // The guide was saved by the emptying itself.
+            self.saved_stamp = Some(self.stamp());
+        }
+        Some(match (result, emptied) {
+            (Ok(0), _) => format!("Emptied the trash: {steps} deleted for good. Undo cannot go back past this."),
+            (Ok(1), _) => format!(
+                "Emptied the trash: {steps} and 1 picture deleted for good. Undo cannot go back past this."
+            ),
+            (Ok(pictures), _) => format!(
+                "Emptied the trash: {steps} and {pictures} pictures deleted for good. Undo cannot go back past this."
+            ),
+            (Err(why), true) => format!(
+                "Deleted for good: {steps}. A picture could not be removed from the guide's folder, so it is still there. {why}"
+            ),
+            (Err(why), false) => format!("The trash was not emptied, and the steps are still there to bring back. {why}"),
+        })
+    }
+
     fn reload_buffer(&mut self) {
         let guide_title = self.session.doc().guide.title.clone();
         self.buffer = match self.selected_step() {
@@ -1202,6 +1238,27 @@ mod tests {
         assert!(!e.can_undo(), "nothing was recorded");
         assert_eq!(e.restore_all_deleted().as_deref(), Some("There are no deleted steps."));
         assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn emptying_when_nothing_is_deleted_says_so_and_changes_nothing() {
+        let mut e = editor();
+        assert_eq!(e.empty_deleted().as_deref(), Some("There are no deleted steps."));
+        assert!(!e.can_undo(), "nothing was recorded");
+    }
+
+    #[test]
+    fn emptying_the_example_guides_trash_deletes_the_steps_for_good_and_clears_the_history() {
+        let mut e = editor();
+        let before = titles(&e);
+        e.select("step-1");
+        e.delete_selected();
+        assert!(e.can_undo() && e.deleted_count() == 1);
+        let said = e.empty_deleted().unwrap();
+        assert_eq!(said, "Emptied the trash: 1 step deleted for good. Undo cannot go back past this.");
+        assert_eq!((e.deleted_count(), e.can_undo(), e.can_redo()), (0, false, false));
+        assert_eq!(e.rows().len(), before.len() - 1, "the step is gone, not back");
+        assert_eq!(e.restore_deleted("step-1").as_deref(), Some("That step could not be put back."));
     }
 
     #[test]

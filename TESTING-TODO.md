@@ -116,9 +116,16 @@ submit an assignment") to open from the card under "Your guides".
       returns to the list with the keyboard on it. Close the guide and open it again: the step should still be there to restore, with
       its picture. Look in the guide's folder: the picture of a deleted step should be in `trash` and be back in `images` after
       Restore. Does it feel right that the list is a screen of its own, that the button only appears once something is deleted, and
-      that a step with substeps comes back without them (they stay where they moved to)? There is no button to empty a guide's trash
-      for good, so deleted pictures stay in the folder. Narrator and NVDA: the button's count, the heading "Deleted steps", each button
-      named "Restore Click "Save"", and the status line after a restore should be read.
+      that a step with substeps comes back without them (they stay where they moved to)? Narrator and NVDA: the button's count, the
+      heading "Deleted steps", each button named "Restore Click "Save"", and the status line after a restore should be read.
+- [ ] Empty the trash (on a guide you can spare, with a few steps deleted): the "Empty the trash" button at the foot of the Deleted
+      steps list asks "Empty the trash for good?" with "Keep them" ready; Enter or Escape keeps everything. "Empty the trash for good"
+      deletes the steps and their pictures from the guide's folder (look in `trash`: the pictures should be gone, and the pictures of
+      the steps that are left still in `images`), and Undo can no longer go back past it. This is permanent: the pictures do not go to
+      the Recycle Bin. Is that what you want, or should they go to the Recycle Bin? Does the question say enough? Does it matter
+      that Undo is lost for the steps deleted before as well as the deleted ones? Narrator and NVDA: the question's heading, both
+      buttons, and the status line after emptying should be read. Not tried: a picture another program has open (the words are
+      tested with a locked file, on this PC only).
 - [ ] Not built in the editor yet: moving or duplicating several steps at once, panning or zooming the focused crop by hand, and
       cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
