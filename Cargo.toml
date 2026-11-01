@@ -21,6 +21,8 @@ tempfile = "3"
 png = "0.17"
 base64 = "0.22"
 sha2 = "0.10"
+flate2 = "1"
+crc32fast = "1"
 # OpenStage Capture's crates, read through a path link to the sibling openstage-author folder (see README).
 openstage-capture-project = { path = "../openstage-author/capture/crates/openstage-capture-project" }
 openstage-capture-render = { path = "../openstage-author/capture/crates/openstage-capture-render" }

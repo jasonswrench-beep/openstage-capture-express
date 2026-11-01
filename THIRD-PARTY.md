@@ -33,6 +33,7 @@ OpenStage Capture Express is Apache-2.0. These Rust crates are built into it, ea
 | png | 0.17.16 | MIT OR Apache-2.0 |
 | powerfmt | 0.2.1 | MIT OR Apache-2.0 |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
+| quick-xml | 0.42.0 | MIT |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |

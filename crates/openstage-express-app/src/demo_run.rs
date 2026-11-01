@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use openstage_capture_render::BlockText;
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_export::demo::demo;
+use openstage_express_export::docx::{export_docx, DocxOptions};
 use openstage_express_export::gif::{export_gif, GifOptions};
 use openstage_express_export::html::export_html;
 use openstage_express_export::images::export_images;
@@ -15,6 +16,7 @@ use openstage_express_export::json::export_json;
 use openstage_express_export::markdown::export_markdown;
 use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
 use openstage_express_export::plan::{plan, ExportOptions};
+use openstage_express_export::pptx::{export_pptx, PptxOptions};
 use openstage_express_export::Export;
 
 /// A folder name for this run, from the time: `2026-11-01 10-30-05`.
@@ -54,6 +56,9 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
             ),
         ),
     ];
+    exports.push(("word", export_docx(&the_plan, &DocxOptions::default()).map_err(|e| format!("word: {e}"))?));
+    exports
+        .push(("powerpoint", export_pptx(&the_plan, &PptxOptions::default()).map_err(|e| format!("powerpoint: {e}"))?));
     match pdf {
         Some(renderer) => {
             let export = export_pdf(&the_plan, &PdfOptions::default(), renderer).map_err(|e| format!("pdf: {e}"))?;
@@ -115,6 +120,8 @@ mod tests {
             "images/step-06.png",
             "gif/How to submit an assignment.gif",
             "pdf/How to submit an assignment.pdf",
+            "word/How to submit an assignment.docx",
+            "powerpoint/How to submit an assignment.pptx",
         ] {
             assert!(folder.join(expected).is_file(), "{expected}");
         }

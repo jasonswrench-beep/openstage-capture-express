@@ -11,14 +11,14 @@ small program with its own window.
 
 **Milestones M0 to M4 are done: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
 focused view, and exports to a web page, Markdown, JSON, a folder of pictures, an animated GIF and (since 2026-11-01) a PDF made
-by the WebView2 engine that Windows ships. There is still no window and no capture. Word and PowerPoint (which Jason put in the
-first version) and JPG are not built.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
+by the WebView2 engine that Windows ships, a Word file and a PowerPoint file that Express writes itself. There is still no window
+and no capture. JPG is not built.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
 
 Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat` and `EXPORT DEMO.bat` ran on 2026-10-31 and 2026-11-01 on Jason's Windows 11 x64 PC
   (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than
-  double-clicked. The last full run of the tests: 293 passed (174 in the core, 105 in the exports, 11 in the Windows engine, 3 in
+  double-clicked. The last full run of the tests: 350 passed (174 in the core, 162 in the exports, 11 in the Windows engine, 3 in
   the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved, locked, crashed and
   reopened in temporary folders.
 - The demo's output was checked with programs that are not ours: Windows' own image decoder read the GIF (800 by 450, seven
@@ -30,12 +30,20 @@ Run on Windows, and working:
   landscape) each have the right bookmark titles and the right number of pages; a heading in Japanese gets one bookmark; no
   working folder is left behind. The file was also read back with a separate program (pypdf) and its pages were drawn by Windows'
   own PDF renderer and looked at (Roboto text, links, pictures with their marks, "Page 1 of 4" at the bottom right).
+- The Word and PowerPoint files of the demo were opened in the real Word and PowerPoint (Microsoft 365, version 16) on 2026-11-01,
+  with no repair prompt. Word found the Title and heading styles, one table of contents (and, when asked to update it, produced the
+  same entries), five pictures each with alt text, the footer and the A4 size, and drew the pages (looked at). PowerPoint found
+  seven 16:9 slides with titles, alt text, slide numbers and speaker notes, and drew the slides (looked at). Windows' own ZIP
+  reader and Python's `zipfile` read both files too.
 
 Written and type-checked, not yet run on Windows:
 
 - The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered), and
   the part that lists skipped tests (no skip has happened on this PC).
 - `GET OPENSTAGE CODE.bat` downloading (its "not found" and "stop" paths were tried).
+- `tools/check-office.ps1`, which repeats the Office checks: its PowerPoint half ran and passed (7 checks); its Word half has
+  not run in its final form, because Word was already open when it was tried (the script skips a program that is open, so it
+  cannot disturb anyone). The checks it makes were each run before, by hand, in Word.
 - PDF export on a computer with no WebView2 runtime: the "not installed" message and the demo's "pdf: skipped" line are tested only
   with a stand-in engine. The paper sizes A3, A5 and Legal, other margins and the header and footer lines are written and their page
   rules tested, but not printed with the real engine.
@@ -50,20 +58,26 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 - The exports: a golden Markdown file, JSON structure, HTML structure (one heading, no skipped heading levels, alt text, no outside
   requests, the page's security rule naming its one script, every piece of the author's text escaped, colours that pass 4.5 to 1), a
   GIF encoder checked against a separate decoder, and files never replacing each other.
+- The Word and PowerPoint exports (every XML part well formed, every relationship and content type resolving, headings, the contents
+  field, alt text, notes, language, options, escaping of the author's words) and the ZIP writer they share (read back by a
+  separate strict reader: every checksum, size and signature), with the real Word and PowerPoint checks above.
 - The PDF's print page (paper, margins, cover, contents, page numbers, header and footer, languages, escaping of the author's
   words in the page and in its style rules, no script, no outside request, Roboto inside the page) and the check of the finished
   PDF (tags, language, bookmarks, alt text, "not a PDF"), with a stand-in for the engine.
-- 25 deliberate breakages of the code were each caught by a test (one slipped through the first time and got a better test). Five
+- 25 deliberate breakages of the code were each caught by a test (one slipped through the first time and got a better test). Seven
+  more were tried on the Word, PowerPoint, ZIP and shared code on 2026-11-01 (a wrong checksum, lost alt text in each, contents links
+  pointing at the wrong heading, a slide title that is not a title, no speaker notes, `<` not escaped): every one was caught. Five
   more were tried on the PDF export on 2026-11-01: four were caught by the portable tests and the one that switches tagging off was
   caught by the real-engine tests. Several attempts to bring back the doubled bookmark titles (see `docs/guide-format.md`) did not
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, Word,
-PowerPoint, JPG, and the portable zip.
+Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, JPG,
+the optional logo on slides, and the portable zip.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
-tagged (the export warns about that). Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The dark colour
+tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
+accessibility checker or read with a screen reader, and Word and PowerPoint use Calibri without embedding it. Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The dark colour
 scheme of the web page has not been seen rendered. The icon files are copied in but not used by any program yet (milestone M7).
 `TESTING-TODO.md` lists what only a person can check.
 
@@ -115,8 +129,8 @@ does not sync, and extract each new copy into a new, empty folder.
 ```
 crates/
   openstage-express-core/       the guide model, edit operations, undo, saving, smart titles, step builder, drawing, focused view
-  openstage-express-export/     HTML, Markdown, JSON, pictures, GIF and the PDF's print page (Word, PowerPoint not built); a made-up
-                                demo guide; the Roboto font files for the PDF (fonts/)
+  openstage-express-export/     HTML, Markdown, JSON, pictures, GIF, the PDF's print page, Word and PowerPoint (with a small ZIP
+                                writer); a made-up demo guide; the Roboto font files for the PDF (fonts/)
   openstage-express-windows/    Windows only: the PDF engine (WebView2) so far; hooks, UI Automation, screenshots, hotkeys later
   openstage-express-app/        the program openstage-capture-express.exe (no window yet; runs the export demo)
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code

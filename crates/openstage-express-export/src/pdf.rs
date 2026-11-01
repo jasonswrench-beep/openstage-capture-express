@@ -58,7 +58,7 @@ impl PageSize {
     }
 
     /// Width and height in millimetres, portrait.
-    fn portrait_mm(self) -> (f64, f64) {
+    pub(crate) fn portrait_mm(self) -> (f64, f64) {
         match self {
             PageSize::A4 => (210.0, 297.0),
             PageSize::Letter => (215.9, 279.4),
@@ -134,14 +134,14 @@ impl PdfOptions {
 }
 
 /// The few words the print page says itself, in the guide's language.
-struct Words {
-    steps: &'static str,
-    contents: &'static str,
-    page: &'static str,
-    of: &'static str,
+pub(crate) struct Words {
+    pub(crate) steps: &'static str,
+    pub(crate) contents: &'static str,
+    pub(crate) page: &'static str,
+    pub(crate) of: &'static str,
 }
 
-fn words(language: Language) -> Words {
+pub(crate) fn words(language: Language) -> Words {
     match language {
         Language::English => Words { steps: "Steps", contents: "Contents", page: "Page", of: "of" },
         Language::German => Words { steps: "Schritte", contents: "Inhalt", page: "Seite", of: "von" },

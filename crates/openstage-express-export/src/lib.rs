@@ -13,15 +13,19 @@
 //! undone. The originals stay in the guide folder.
 
 pub mod demo;
+pub mod docx;
 pub mod encoding;
 pub mod gif;
 pub mod html;
 pub mod images;
 pub mod json;
 pub mod markdown;
+pub mod office;
 pub mod pdf;
 pub mod picture;
 pub mod plan;
+pub mod pptx;
+pub mod zip;
 
 use std::fs;
 use std::io::Write;

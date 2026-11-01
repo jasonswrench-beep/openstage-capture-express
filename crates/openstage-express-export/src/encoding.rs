@@ -60,10 +60,41 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric()
 }
 
-/// Inline Markdown (bold, italic, links) to HTML. Everything else is escaped text.
-fn inline_to_html(text: &str) -> String {
+/// One piece of a line of a description: the little Markdown subset descriptions are written in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Inline {
+    Text(String),
+    Strong(Vec<Inline>),
+    Emphasis(Vec<Inline>),
+    /// A link whose address passed [`is_safe_link`]. Any other address is left as the plain text it was written as.
+    Link {
+        url: String,
+        label: Vec<Inline>,
+    },
+}
+
+/// One block of a description.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Block {
+    /// The lines of one paragraph (a line break inside a paragraph is kept).
+    Paragraph(Vec<Vec<Inline>>),
+    List {
+        numbered: bool,
+        items: Vec<Vec<Inline>>,
+    },
+}
+
+fn push_text(out: &mut Vec<Inline>, c: char) {
+    match out.last_mut() {
+        Some(Inline::Text(text)) => text.push(c),
+        _ => out.push(Inline::Text(c.to_string())),
+    }
+}
+
+/// Inline Markdown (bold, italic, links) to pieces. Everything else is plain text.
+pub fn parse_inline(text: &str) -> Vec<Inline> {
     let chars: Vec<char> = text.chars().collect();
-    let mut out = String::new();
+    let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -72,7 +103,7 @@ fn inline_to_html(text: &str) -> String {
             if let Some(end) = find_closing(&chars, i + 2, &['*', '*']) {
                 if end > i + 2 {
                     let inner: String = chars[i + 2..end].iter().collect();
-                    out.push_str(&format!("<strong>{}</strong>", inline_to_html(&inner)));
+                    out.push(Inline::Strong(parse_inline(&inner)));
                     i = end + 2;
                     continue;
                 }
@@ -86,7 +117,7 @@ fn inline_to_html(text: &str) -> String {
                     let after_ok = c == '*' || chars.get(end + 1).is_none_or(|n| !is_word_char(*n));
                     if end > i + 1 && !chars[end - 1].is_whitespace() && after_ok {
                         let inner: String = chars[i + 1..end].iter().collect();
-                        out.push_str(&format!("<em>{}</em>", inline_to_html(&inner)));
+                        out.push(Inline::Emphasis(parse_inline(&inner)));
                         i = end + 1;
                         continue;
                     }
@@ -101,11 +132,7 @@ fn inline_to_html(text: &str) -> String {
                         let label: String = chars[i + 1..close].iter().collect();
                         let url: String = chars[close + 2..end].iter().collect();
                         if is_safe_link(&url) {
-                            out.push_str(&format!(
-                                "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
-                                html_escape(url.trim()),
-                                inline_to_html(&label)
-                            ));
+                            out.push(Inline::Link { url: url.trim().to_string(), label: parse_inline(&label) });
                             i = end + 1;
                             continue;
                         }
@@ -113,7 +140,7 @@ fn inline_to_html(text: &str) -> String {
                 }
             }
         }
-        out.push_str(&html_escape(&c.to_string()));
+        push_text(&mut out, c);
         i += 1;
     }
     out
@@ -137,50 +164,120 @@ fn numbered_text(line: &str) -> Option<&str> {
     trimmed[digits..].strip_prefix(". ").map(str::trim)
 }
 
-/// The Markdown subset of a description to HTML: paragraphs (a line break inside one becomes `<br>`), bullet lists and
-/// numbered lists, with bold, italic and safe links inside them. Everything is escaped, so no HTML gets through.
-pub fn markdown_to_html(text: &str) -> String {
-    let mut out = String::new();
-    let mut paragraph: Vec<&str> = Vec::new();
-    let mut list: Option<(bool, Vec<String>)> = None; // (numbered, items)
-    fn flush_paragraph(out: &mut String, paragraph: &mut Vec<&str>) {
+/// A description's Markdown subset as blocks: paragraphs (a line break inside one is kept), bullet lists and numbered lists,
+/// with bold, italic and safe links inside them.
+pub fn parse_markdown(text: &str) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    let mut paragraph: Vec<Vec<Inline>> = Vec::new();
+    let mut list: Option<(bool, Vec<Vec<Inline>>)> = None;
+    fn flush_paragraph(blocks: &mut Vec<Block>, paragraph: &mut Vec<Vec<Inline>>) {
         if !paragraph.is_empty() {
-            let body: Vec<String> = paragraph.iter().map(|l| inline_to_html(l.trim())).collect();
-            out.push_str(&format!("<p>{}</p>\n", body.join("<br>\n")));
-            paragraph.clear();
+            blocks.push(Block::Paragraph(std::mem::take(paragraph)));
         }
     }
-    fn flush_list(out: &mut String, list: &mut Option<(bool, Vec<String>)>) {
+    fn flush_list(blocks: &mut Vec<Block>, list: &mut Option<(bool, Vec<Vec<Inline>>)>) {
         if let Some((numbered, items)) = list.take() {
-            let tag = if numbered { "ol" } else { "ul" };
-            out.push_str(&format!("<{tag}>\n"));
-            for item in items {
-                out.push_str(&format!("<li>{item}</li>\n"));
-            }
-            out.push_str(&format!("</{tag}>\n"));
+            blocks.push(Block::List { numbered, items });
         }
     }
     for line in text.lines() {
         if line.trim().is_empty() {
-            flush_paragraph(&mut out, &mut paragraph);
-            flush_list(&mut out, &mut list);
+            flush_paragraph(&mut blocks, &mut paragraph);
+            flush_list(&mut blocks, &mut list);
         } else if let Some(item) = bullet_text(line).or_else(|| numbered_text(line)) {
             let numbered = numbered_text(line).is_some();
-            flush_paragraph(&mut out, &mut paragraph);
+            flush_paragraph(&mut blocks, &mut paragraph);
             if list.as_ref().is_some_and(|(n, _)| *n != numbered) {
-                flush_list(&mut out, &mut list);
+                flush_list(&mut blocks, &mut list);
             }
-            list.get_or_insert((numbered, Vec::new())).1.push(inline_to_html(item));
+            list.get_or_insert((numbered, Vec::new())).1.push(parse_inline(item));
         } else {
-            flush_list(&mut out, &mut list);
-            paragraph.push(line);
+            flush_list(&mut blocks, &mut list);
+            paragraph.push(parse_inline(line.trim()));
         }
     }
-    flush_paragraph(&mut out, &mut paragraph);
-    flush_list(&mut out, &mut list);
+    flush_paragraph(&mut blocks, &mut paragraph);
+    flush_list(&mut blocks, &mut list);
+    blocks
+}
+
+fn inlines_to_html(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(text) => out.push_str(&html_escape(text)),
+            Inline::Strong(inner) => out.push_str(&format!("<strong>{}</strong>", inlines_to_html(inner))),
+            Inline::Emphasis(inner) => out.push_str(&format!("<em>{}</em>", inlines_to_html(inner))),
+            Inline::Link { url, label } => out.push_str(&format!(
+                "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
+                html_escape(url),
+                inlines_to_html(label)
+            )),
+        }
+    }
     out
 }
 
+/// The Markdown subset of a description to HTML: paragraphs (a line break inside one becomes `<br>`), bullet lists and
+/// numbered lists, with bold, italic and safe links inside them. Everything is escaped, so no HTML gets through.
+pub fn markdown_to_html(text: &str) -> String {
+    let mut out = String::new();
+    for block in parse_markdown(text) {
+        match block {
+            Block::Paragraph(lines) => {
+                let body: Vec<String> = lines.iter().map(|line| inlines_to_html(line)).collect();
+                out.push_str(&format!("<p>{}</p>\n", body.join("<br>\n")));
+            }
+            Block::List { numbered, items } => {
+                let tag = if numbered { "ol" } else { "ul" };
+                out.push_str(&format!("<{tag}>\n"));
+                for item in items {
+                    out.push_str(&format!("<li>{}</li>\n", inlines_to_html(&item)));
+                }
+                out.push_str(&format!("</{tag}>\n"));
+            }
+        }
+    }
+    out
+}
+
+/// The plain words of some inline pieces: no marks, a link shown as `label (address)`.
+pub fn inlines_to_plain(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(text) => out.push_str(text),
+            Inline::Strong(inner) | Inline::Emphasis(inner) => out.push_str(&inlines_to_plain(inner)),
+            Inline::Link { url, label } => {
+                let label = inlines_to_plain(label);
+                if label.trim() == url.as_str() || label.trim().is_empty() {
+                    out.push_str(url);
+                } else {
+                    out.push_str(&format!("{label} ({url})"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A description as plain paragraphs, for places that cannot show marks (speaker notes, slide text): one string for each
+/// paragraph, list item or line, with `• ` or `1. ` in front of list items.
+pub fn markdown_to_plain_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for block in parse_markdown(text) {
+        match block {
+            Block::Paragraph(lines) => out.extend(lines.iter().map(|line| inlines_to_plain(line))),
+            Block::List { numbered, items } => {
+                for (n, item) in items.iter().enumerate() {
+                    let marker = if numbered { format!("{}. ", n + 1) } else { "\u{2022} ".to_string() };
+                    out.push(format!("{marker}{}", inlines_to_plain(item)));
+                }
+            }
+        }
+    }
+    out
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +344,69 @@ mod tests {
             "<p>see <a href=\"https://example.com/x\" rel=\"noopener noreferrer\">the site</a></p>\n"
         );
         assert_eq!(markdown_to_html("**a *b* c**"), "<p><strong>a <em>b</em> c</strong></p>\n");
+    }
+
+    #[test]
+    fn a_description_becomes_blocks_that_every_export_can_draw() {
+        let blocks = parse_markdown(
+            "First **line**\nsecond line\n\n- one\n- two with [a link](https://example.com)\n\n1. step\n2. step",
+        );
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(
+            blocks[0],
+            Block::Paragraph(vec![
+                vec![Inline::Text("First ".into()), Inline::Strong(vec![Inline::Text("line".into())])],
+                vec![Inline::Text("second line".into())],
+            ])
+        );
+        let Block::List { numbered: false, items } = &blocks[1] else { panic!("{:?}", blocks[1]) };
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[1],
+            vec![
+                Inline::Text("two with ".into()),
+                Inline::Link { url: "https://example.com".into(), label: vec![Inline::Text("a link".into())] }
+            ]
+        );
+        assert!(matches!(&blocks[2], Block::List { numbered: true, items } if items.len() == 2));
+        assert_eq!(parse_markdown(""), vec![]);
+        assert_eq!(parse_markdown("  \n\n "), vec![]);
+        assert_eq!(
+            parse_inline("a_b and 2*3*4"),
+            vec![
+                Inline::Text("a_b and 2".into()),
+                Inline::Emphasis(vec![Inline::Text("3".into())]),
+                Inline::Text("4".into())
+            ]
+        );
+        assert_eq!(
+            parse_inline("[x](javascript:alert(1))"),
+            vec![Inline::Text("[x](javascript:alert(1))".into())],
+            "an unsafe link stays text"
+        );
+    }
+
+    #[test]
+    fn plain_lines_drop_the_marks_and_spell_out_links_and_list_numbers() {
+        assert_eq!(markdown_to_plain_lines(""), Vec::<String>::new());
+        assert_eq!(markdown_to_plain_lines("a **bold** and *italic* word"), ["a bold and italic word"]);
+        assert_eq!(
+            markdown_to_plain_lines("see [the site](https://example.com/x) now"),
+            ["see the site (https://example.com/x) now"]
+        );
+        assert_eq!(
+            markdown_to_plain_lines("[https://example.com](https://example.com)"),
+            ["https://example.com"],
+            "no repeating an address"
+        );
+        assert_eq!(markdown_to_plain_lines("[](https://example.com)"), ["https://example.com"]);
+        assert_eq!(markdown_to_plain_lines("line one\nline two\n\nnext"), ["line one", "line two", "next"]);
+        assert_eq!(markdown_to_plain_lines("- a\n- b\n\n1. c\n2. d"), ["\u{2022} a", "\u{2022} b", "1. c", "2. d"]);
+        assert_eq!(
+            markdown_to_plain_lines("<b>not html</b> & more"),
+            ["<b>not html</b> & more"],
+            "plain text is not escaped: the caller does that"
+        );
     }
 
     #[test]
