@@ -17,15 +17,18 @@ folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the win
 while you work in other programs; each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
 and redo, and every change is saved. **Export** (in the editor) offers every format in a screen of its own and makes them on a
-thread of their own, each in a new folder (the folder dialog is Windows' own). The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
+thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (on Home) holds the colour scheme, how
+clicks make steps, the pointer and circle, the language of step titles, the two folders and a few delays; each change is saved at
+once to `%APPDATA%\OpenStage Capture Express\settings.json`. **About and licences** shows the licence and what the program is built
+from. The window has the program's icon. The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
 has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
 
 Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 494 passed (198 in the core, 182 in the exports, 33 in the
-  Windows crate, 81 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 535 passed (198 in the core, 182 in the exports, 33 in the
+  Windows crate, 122 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -111,9 +114,10 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M7 and M8 and everything else in the spec: capturing one window or a drawn area, drawing and cropping in the editor, the
-Export dialog, settings (the capture mode, language, hotkeys and guides folder cannot be changed yet), first-run, WebP, the optional logo
-on slides, and the portable zip.
+Not built: M8 and everything else in the spec: capturing one window or a drawn area, drawing and cropping in the editor, options on the
+Export screen (it offers the formats with their usual options), changing the hotkeys, sounds, the language of the program's own words
+(English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
+opens), first-run, WebP, the optional logo on slides, and signing.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
@@ -142,6 +146,8 @@ If the OpenStage code is not next to this folder, the scripts say so; double-cli
 6. Double-click **`TEST EXPRESS CLICKS.bat`**. It opens a test window, then clicks and types in it by itself for about thirty seconds
    (it waits until you have left the mouse and keyboard alone) while Express captures, and checks the steps. It takes real pictures
    of your screen, so close anything private first.
+7. Double-click **`PACK EXPRESS.bat`**. It builds the program and makes the portable folder and zip in the folder `dist` (the program,
+   its licence and notices, and a short guide). It never replaces one that is there.
 
 ## Decisions
 

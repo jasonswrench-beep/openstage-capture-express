@@ -10,6 +10,7 @@ use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
 
+use super::about;
 use super::bar::{self, BarAction, BarView};
 use super::capture::{cannot_capture, CaptureControl, HotkeyAction, Outcome, Starter};
 use super::editor::{self, Leave};
@@ -17,9 +18,11 @@ use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
 use super::rows::{step_count, steps_words};
+use super::settings::{self as settings_screen, SettingsAction, SettingsInfo};
 use super::widgets::{self, Status};
 use crate::export_run::{self, Job, Report};
 use crate::library;
+use crate::settings::{self, AppSettings, Appearance};
 
 /// Asks the person for a folder (Windows' own dialog), starting at the one given; None when they cancel.
 pub type FolderChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
@@ -33,6 +36,10 @@ pub enum Screen {
     Editor,
     /// Choosing formats and a folder, and exporting the open guide.
     Export,
+    /// The settings, on one page.
+    Settings,
+    /// What the program is, its licence and the licences of what it is built from.
+    About,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
 }
@@ -58,6 +65,11 @@ pub struct App {
     hotkey_words: String,
     is_running: Box<dyn Fn(u32) -> bool>,
     pub export: ExportState,
+    pub settings: AppSettings,
+    /// Where the settings are saved (nowhere, in the tests).
+    settings_path: Option<PathBuf>,
+    /// Something to say about the settings file (damaged, newer), shown on the Settings screen.
+    settings_note: Option<String>,
     export_job: Option<Receiver<Result<Report, String>>>,
     /// Asks the person for a folder (Windows' own dialog), starting at the one given.
     chooser: FolderChooser,
@@ -81,6 +93,9 @@ impl App {
             hotkey_words: String::new(),
             is_running: Box::new(|_| false),
             export: ExportState::new(PathBuf::new(), false),
+            settings: AppSettings::default(),
+            settings_path: None,
+            settings_note: None,
             export_job: None,
             chooser: Box::new(|_| None),
             opener: Box::new(|_| {}),
@@ -92,6 +107,8 @@ impl App {
                 app.open_example();
                 app.screen = Screen::Export;
             }
+            Screen::Settings => app.screen = Screen::Settings,
+            Screen::About => app.screen = Screen::About,
             Screen::Home => {}
         }
         app
@@ -126,6 +143,47 @@ impl App {
         self.chooser = chooser;
         self.opener = opener;
         self
+    }
+
+    /// Use these settings, saved at `path` (`None` keeps them in memory only). `note` is something to tell the person about the
+    /// settings file.
+    pub fn with_settings(mut self, settings: AppSettings, path: Option<PathBuf>, note: Option<String>) -> App {
+        self.export.open_after = settings.open_folder_after_export;
+        let formats: Vec<_> = crate::export_run::Format::ALL
+            .into_iter()
+            .filter(|f| settings.export_formats.iter().any(|name| name == f.folder()))
+            .filter(|f| *f != crate::export_run::Format::Pdf || self.export.can_pdf)
+            .collect();
+        if !formats.is_empty() {
+            self.export.selection = crate::export_run::Selection::none_then(&formats);
+        }
+        self.settings = settings;
+        self.settings_path = path;
+        self.settings_note = note;
+        self
+    }
+
+    /// The colour scheme the person chose.
+    pub fn appearance(&self) -> Appearance {
+        self.settings.appearance
+    }
+
+    fn save_settings(&mut self) {
+        if let Some(path) = &self.settings_path {
+            if let Err(why) = settings::save(path, &self.settings) {
+                self.status.say(why);
+            }
+        }
+    }
+
+    /// Keep the settings that the Export screen also changes in step with it.
+    fn sync_export_settings(&mut self) {
+        let chosen: Vec<String> = self.export.selection.formats().iter().map(|f| f.folder().to_string()).collect();
+        if self.export.open_after != self.settings.open_folder_after_export || chosen != self.settings.export_formats {
+            self.settings.open_folder_after_export = self.export.open_after;
+            self.settings.export_formats = chosen;
+            self.save_settings();
+        }
     }
 
     pub fn set_hotkey_words(&mut self, words: &str) {
@@ -200,7 +258,7 @@ impl App {
     }
 
     fn begin_capture(&mut self) {
-        match (self.starter)(&self.library) {
+        match (self.starter)(&self.library, &self.settings) {
             Ok(control) => {
                 self.capture = Some(control);
                 self.screen = Screen::Bar;
@@ -223,7 +281,7 @@ impl App {
         match (action, self.capture.is_some()) {
             (HotkeyAction::StartOrFinish, false) => match self.screen {
                 Screen::Home | Screen::Bar => self.begin_capture(),
-                Screen::Editor | Screen::Export => {
+                Screen::Editor | Screen::Export | Screen::Settings | Screen::About => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
             },
@@ -363,6 +421,14 @@ impl App {
             Screen::Home => match home::show(ui, &mut self.home) {
                 Action::None => {}
                 Action::StartCapturing => self.show_bar(),
+                Action::About => {
+                    self.screen = Screen::About;
+                    self.status.say("About OpenStage Capture Express, its licence and what it is built from.");
+                }
+                Action::Settings => {
+                    self.screen = Screen::Settings;
+                    self.status.say("Settings. Each change is saved as you make it.");
+                }
                 Action::Open(index) => match self.home.guides.get(index).and_then(|g| g.path.clone()) {
                     Some(path) => self.open_guide(&path),
                     None => self.open_example(),
@@ -375,6 +441,49 @@ impl App {
                 };
                 let action = bar::show(ui, &view);
                 self.bar_action(action);
+            }
+            Screen::About => {
+                if about::show(ui) {
+                    self.screen = Screen::Home;
+                    self.status.say("Back at your guides.");
+                }
+            }
+            Screen::Settings => {
+                let info = SettingsInfo {
+                    guides_folder: self.library.display().to_string(),
+                    exports_folder: self.export.folder.display().to_string(),
+                    hotkeys: self.hotkey_words.clone(),
+                    note: self.settings_note.clone(),
+                };
+                match settings_screen::show(ui, &mut self.settings, &info) {
+                    SettingsAction::None => {}
+                    SettingsAction::Back => {
+                        self.screen = Screen::Home;
+                        self.status.say("Back at your guides.");
+                    }
+                    SettingsAction::ChooseGuidesFolder => {
+                        if let Some(chosen) = (self.chooser)(&self.library) {
+                            self.settings.guides_folder = Some(chosen.display().to_string());
+                            self.library = chosen;
+                            self.refresh_home();
+                            self.save_settings();
+                            self.status.say(format!("Guides are now kept in {}.", self.library.display()));
+                        }
+                    }
+                    SettingsAction::ChooseExportsFolder => {
+                        if let Some(chosen) = (self.chooser)(&self.export.folder) {
+                            self.settings.exports_folder = Some(chosen.display().to_string());
+                            self.export.folder = chosen;
+                            self.save_settings();
+                            self.status.say(format!("Exports will go into {}.", self.export.folder.display()));
+                        }
+                    }
+                    SettingsAction::Changed => {
+                        self.export.open_after = self.settings.open_folder_after_export;
+                        self.save_settings();
+                        self.status.say("Saved.");
+                    }
+                }
             }
             Screen::Export => {
                 if self.editor.is_none() {
@@ -395,6 +504,7 @@ impl App {
                     }
                     ExportAction::Export => self.start_export(),
                 }
+                self.sync_export_settings();
             }
             Screen::Editor => {
                 let Some(editor_state) = self.editor.as_mut() else {

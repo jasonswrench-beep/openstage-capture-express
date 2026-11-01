@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! OpenStage Capture Express. Run with nothing after its name it opens the window (Home and the Editor, over an example
-//! guide: milestone M5). It cannot capture yet (milestone M6). `export-demo --out <folder>` makes every export of a made-up guide.
+//! OpenStage Capture Express. Run with nothing after its name it opens the window (Home, the capture bar, the Editor, the Export
+//! screen, Settings and About). The other commands are for the scripts: `export-demo`, `check-computer`, `test-clicks` and the
+//! hidden `test-window`.
 
 #[cfg(windows)]
 mod capture_win;
@@ -12,13 +13,14 @@ mod demo_run;
 mod export_run;
 mod guide_writer;
 mod library;
+mod settings;
 mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-OpenStage Capture Express (the window has an example guide; capturing is not built yet)
+OpenStage Capture Express: turns what you do on screen into a step-by-step guide
 
   openstage-capture-express                          open the window
   openstage-capture-express --screen editor          start in the editor (or: home)
@@ -43,10 +45,7 @@ fn main() -> ExitCode {
             }
         },
         Some("--version") | Some("--help") => {
-            println!(
-                "OpenStage Capture Express {} (the window has an example guide; capturing is not built yet)",
-                env!("CARGO_PKG_VERSION")
-            );
+            println!("OpenStage Capture Express {}", env!("CARGO_PKG_VERSION"));
             if args.first().map(String::as_str) == Some("--help") {
                 print!("{USAGE}");
             }
@@ -74,7 +73,8 @@ fn main() -> ExitCode {
         Some("check-computer") => {
             #[cfg(windows)]
             {
-                if check_computer::run(&library::default_folder()) {
+                let settings = settings::default_path().map(|p| settings::load(&p).0).unwrap_or_default();
+                if check_computer::run(&library::guides_folder(settings.guides_path())) {
                     ExitCode::SUCCESS
                 } else {
                     ExitCode::FAILURE

@@ -145,6 +145,18 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       and Narrator?), press Export. Does the window stay usable while a PDF is made? Is the new folder opened? Open each file.
 - [ ] The export options (GIF speed and size, JPG quality, PDF paper and margins, Word and PowerPoint choices) exist in the code and
       are tested, but the Export screen offers only the formats, with the default options. Say which options you want on the screen.
+- [ ] Settings by hand: open Settings from Home, change the colour scheme (does the window change at once, in both schemes, with a
+      Windows contrast theme?), the capture mode and key, the language of step titles (do German and French titles read well?), and
+      the two folders (the folder dialog again). Then start a capture and check the choices took effect. The choices reach the capture
+      through tests with a stand-in; only the colour scheme and the folders have been tried in the real window by the tests' own
+      pictures.
+- [ ] About and licences: read it. Is the licence text the one you want shown, and are the credits right (Roboto, the libraries)?
+- [ ] The icon: look at the title bar and the task bar while the window is open. The icon is in the window but not yet on the `.exe`,
+      so Explorer still shows the plain program icon (putting it there needs a Windows resource tool, which would be a new
+      download; say if you want it).
+- [ ] The portable zip (`PACK EXPRESS.bat`): unzip it on another PC (not this one), double-click the program, read START-HERE.txt,
+      and see what SmartScreen and any antivirus say about a program that is not signed. This PC has only unzipped it into a
+      scratch folder and run `--version` and the computer check from there.
 - [ ] The exports of a captured guide have only been checked by their tests and by reading the files, not by opening each in Word,
       PowerPoint and a PDF reader as was done for the demo.
 

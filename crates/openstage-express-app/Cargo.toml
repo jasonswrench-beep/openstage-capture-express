@@ -15,11 +15,12 @@ openstage-express-core = { path = "../openstage-express-core" }
 openstage-express-export = { path = "../openstage-express-export" }
 openstage-capture-render.workspace = true
 png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu"] }
 
 [target.'cfg(windows)'.dependencies]
 openstage-express-windows = { path = "../openstage-express-windows" }
-serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -7,6 +7,7 @@
 //! told. This file is the only place that opens a real window, switches it between the whole program and the strip of the
 //! capture bar, listens for the hotkeys, and keeps Express's own windows out of its screenshots.
 
+pub mod about;
 pub mod app;
 pub mod bar;
 pub mod capture;
@@ -16,6 +17,7 @@ pub mod export;
 pub mod fonts;
 pub mod home;
 pub mod rows;
+pub mod settings;
 pub mod theme;
 pub mod widgets;
 
@@ -46,7 +48,7 @@ pub struct DevOptions {
 }
 
 impl DevOptions {
-    /// Read `--screen home|editor|export|bar`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
+    /// Read `--screen home|editor|export|settings|about|bar`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
     pub fn parse(args: &[String]) -> Result<DevOptions, String> {
         let mut options = DevOptions::default();
         let mut it = args.iter();
@@ -54,12 +56,18 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor, export or bar")?.as_str() {
+                    options.screen = Some(match value("home, editor, export, settings, about or bar")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
                         "export" => Screen::Export,
+                        "settings" => Screen::Settings,
+                        "about" => Screen::About,
                         "bar" => Screen::Bar,
-                        other => return Err(format!("--screen is home, editor, export or bar, not {other:?}.")),
+                        other => {
+                            return Err(format!(
+                                "--screen is home, editor, export, settings, about or bar, not {other:?}."
+                            ))
+                        }
                     })
                 }
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value("a file name ending in .png")?)),
@@ -111,6 +119,8 @@ struct ExpressApp {
     normal_position: Option<egui::Pos2>,
     #[cfg_attr(not(windows), allow(dead_code))]
     last_protected: Instant,
+    /// The colour scheme last given to the window (so it is set only when it changes).
+    applied_appearance: Option<crate::settings::Appearance>,
 }
 
 impl eframe::App for ExpressApp {
@@ -118,6 +128,7 @@ impl eframe::App for ExpressApp {
         self.take_hotkeys();
         self.app.draw(ui);
         self.apply_window_mode(ui.ctx());
+        self.apply_appearance(ui.ctx());
         self.protect_own_windows();
         self.dev_tick(ui.ctx());
         if self.app.is_capturing() || self.app.is_exporting() {
@@ -146,6 +157,21 @@ impl ExpressApp {
                 }
             }
         }
+    }
+
+    /// Give the window the colour scheme the person chose, when it changes. A scheme forced on the command line wins.
+    fn apply_appearance(&mut self, ctx: &egui::Context) {
+        use crate::settings::Appearance;
+        let chosen = self.app.appearance();
+        if self.options.theme.is_some() || self.applied_appearance == Some(chosen) {
+            return;
+        }
+        self.applied_appearance = Some(chosen);
+        ctx.set_theme(match chosen {
+            Appearance::System => egui::ThemePreference::System,
+            Appearance::Light => egui::ThemePreference::Light,
+            Appearance::Dark => egui::ThemePreference::Dark,
+        });
     }
 
     /// Make the window the whole program or the strip of the capture bar, when that changes.
@@ -253,15 +279,31 @@ fn listen_for_hotkeys(ctx: egui::Context) -> Receiver<HotkeyEvent> {
     rx
 }
 
+/// The program's icon for the title bar and the task bar, from the icon pack (256 pixels).
+pub fn window_icon() -> Option<egui::IconData> {
+    const ICON: &[u8] = include_bytes!("../../../../assets/icon/PNG/OpenCapture_Express_256.png");
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(ICON));
+    decoder.set_transformations(png::Transformations::EXPAND);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buffer).ok()?;
+    if info.color_type != png::ColorType::Rgba {
+        return None;
+    }
+    buffer.truncate(info.buffer_size());
+    Some(egui::IconData { rgba: buffer, width: info.width, height: info.height })
+}
+
 /// Open the window and run until it is closed.
 pub fn run(options: DevOptions) -> eframe::Result {
-    let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("OpenStage Capture Express")
-            .with_inner_size(NORMAL_SIZE)
-            .with_min_inner_size(NORMAL_MIN),
-        ..Default::default()
-    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("OpenStage Capture Express")
+        .with_inner_size(NORMAL_SIZE)
+        .with_min_inner_size(NORMAL_MIN);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
+    let native = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native(
         "OpenStage Capture Express",
         native,
@@ -277,7 +319,17 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 cc.egui_ctx.set_theme(forced);
             }
             let screen = options.screen.unwrap_or(Screen::Home);
-            let library = crate::library::default_folder();
+            let settings_path = crate::settings::default_path();
+            let (settings, settings_note) = match &settings_path {
+                // A run that takes a picture of the window must not depend on, or change, the person's settings.
+                Some(path) if options.screenshot.is_none() && options.close_after.is_none() => {
+                    crate::settings::load(path)
+                }
+                _ => (crate::settings::AppSettings::default(), None),
+            };
+            let settings_path = settings_path.filter(|_| options.screenshot.is_none() && options.close_after.is_none());
+            let library = crate::library::guides_folder(settings.guides_path());
+            let exports = crate::library::exports_folder(settings.exports_path(), &library);
             #[cfg(windows)]
             let (app, hotkeys) = {
                 let dev_run = options.screenshot.is_some() || options.close_after.is_some();
@@ -291,7 +343,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         Box::new(openstage_express_windows::system::process_is_running),
                     )
                     .with_system(
-                        crate::library::default_exports_folder(),
+                        exports,
                         crate::export_run::system_pdf().is_some(),
                         Box::new(|start| {
                             openstage_express_windows::dialogs::choose_folder(start, "Choose where to put the exports")
@@ -301,7 +353,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         }),
                     );
                 app.set_hotkey_words(&words);
-                (app, hotkeys)
+                (app.with_settings(settings, settings_path, settings_note), hotkeys)
             };
             #[cfg(not(windows))]
             let (app, hotkeys) = (
@@ -323,6 +375,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 applied_mode: WindowMode::Normal,
                 normal_position: None,
                 last_protected: Instant::now(),
+                applied_appearance: None,
             }))
         }),
     )
