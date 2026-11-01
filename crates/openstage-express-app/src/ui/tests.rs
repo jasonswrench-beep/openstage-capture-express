@@ -268,7 +268,15 @@ fn home_is_a_heading_a_button_a_search_box_and_the_guide_all_with_names() {
 
 #[test]
 fn every_control_on_every_screen_has_a_name_and_can_be_reached_by_the_keyboard() {
-    for screen in [Screen::Home, Screen::Editor, Screen::Bar, Screen::Export, Screen::Settings, Screen::About] {
+    for screen in [
+        Screen::Home,
+        Screen::Editor,
+        Screen::DeletedSteps,
+        Screen::Bar,
+        Screen::Export,
+        Screen::Settings,
+        Screen::About,
+    ] {
         for dark in [true, false] {
             let h = Harness::sized(screen, egui::vec2(1280.0, 720.0), 1.0, dark);
             let mut inputs = 0;
@@ -553,7 +561,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
         [(egui::vec2(900.0, 560.0), 1.0), (egui::vec2(1280.0, 720.0), 2.0), (egui::vec2(900.0, 560.0), 2.0)]
     {
         for dark in [true, false] {
-            for screen in [Screen::Home, Screen::Editor] {
+            for screen in [Screen::Home, Screen::Editor, Screen::DeletedSteps] {
                 let h = Harness::sized(screen, size, scale, dark);
                 let window = Rect::from_min_size(Pos2::ZERO, size / scale * scale);
                 let _ = window;
@@ -568,6 +576,11 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Export => &[(Role::Button, "Back to the guide")],
                     Screen::Settings | Screen::About | Screen::Trash => &[(Role::Button, "Back to guides")],
+                    Screen::DeletedSteps => &[
+                        (Role::Button, "Back to the steps"),
+                        (Role::Button, "Restore all 2 steps"),
+                        (Role::Button, "Restore Note: Tip"),
+                    ],
                     Screen::ChooseWindow => &[(Role::Button, "Back")],
                     Screen::ChooseArea => &[(Role::Button, "Back")],
                     Screen::Editor => &[
@@ -3174,4 +3187,305 @@ fn the_sort_button_is_one_tab_stop_before_the_first_card() {
     let sort = seen.iter().position(|w| w.starts_with("Sort: ")).expect("the sort button is reached");
     assert_eq!(seen[sort - 1], "Trash");
     assert_eq!(seen[sort + 1], "banana, 5 steps", "then the first card");
+}
+
+// ---- deleted steps: the list, and putting them back
+
+/// The Deleted steps button in the steps list, if it is there (its name has the count in it).
+fn deleted_button(h: &Harness) -> Option<String> {
+    h.order
+        .iter()
+        .filter(|id| h.node(**id).role() == Role::Button)
+        .filter_map(|id| h.name(*id))
+        .find(|name| name.starts_with("Deleted steps ("))
+}
+
+/// The Restore buttons on the Deleted steps screen, as a screen reader names them.
+fn restore_buttons(h: &Harness) -> Vec<String> {
+    h.order
+        .iter()
+        .filter(|id| h.node(**id).role() == Role::Button)
+        .filter_map(|id| h.name(*id))
+        .filter(|name| name.starts_with("Restore ") && !name.starts_with("Restore all"))
+        .collect()
+}
+
+#[test]
+fn a_guide_that_has_lost_nothing_has_no_deleted_steps_button_and_the_first_delete_brings_it() {
+    let mut h = Harness::new(Screen::Editor);
+    assert_eq!(deleted_button(&h), None);
+    h.invoke(Role::Button, "Delete step");
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (1)"));
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(deleted_button(&h), None, "undo brought the step back, so nothing is deleted");
+}
+
+#[test]
+fn the_delete_step_button_deletes_the_chosen_step_and_leaves_the_keyboard_on_the_list() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Delete step");
+    assert!(h.status().starts_with("Deleted 1. Click \"Assignments\". Undo brings it back"), "{}", h.status());
+    assert_eq!(h.rows().len(), 6);
+    assert_eq!(chosen(&h), ["1. Click \"New assignment\""], "the step that took its place is chosen");
+    assert_eq!(h.focused_words().as_deref(), Some("1. Click \"New assignment\""), "and has the keyboard");
+    // With several steps chosen this one-step button waits, and the buttons for several do the work.
+    h.invoke(Role::Button, "Choose all steps");
+    assert!(h.node(h.find(Role::Button, "Delete step")).is_disabled());
+}
+
+#[test]
+fn the_deleted_steps_screen_lists_each_step_with_a_restore_button_named_for_it() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Delete step");
+    h.invoke(Role::Button, "Delete step");
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (2)"));
+    h.invoke(Role::Button, "Deleted steps (2)");
+    assert_eq!(h.app.screen, Screen::DeletedSteps);
+    assert_eq!(h.status(), "Deleted steps. 2 can be put back. Restore puts a step back where it was.");
+    assert_eq!(h.node(h.find(Role::Heading, "Deleted steps")).level(), Some(1));
+    h.find(Role::Button, "Back to the steps");
+    h.find(Role::Button, "Restore all 2 steps");
+    let mut buttons = restore_buttons(&h);
+    buttons.sort();
+    assert_eq!(buttons, ["Restore Click \"Assignments\"", "Restore Click \"New assignment\""]);
+    assert!(!h.has(Role::Label, "No steps are deleted."));
+}
+
+#[test]
+fn restoring_puts_the_step_back_where_it_was_says_so_and_moves_the_keyboard_on() {
+    // The example guide with its second step and its note deleted. The second step had a substep, which moved up when it was deleted
+    // and stays where it is.
+    let mut h = Harness::new(Screen::DeletedSteps);
+    assert_eq!(restore_buttons(&h).len(), 2);
+    h.invoke(Role::Button, "Restore Note: Tip");
+    assert_eq!(h.status(), "Restored Note: Tip. Undo deletes it again.");
+    assert_eq!(restore_buttons(&h), ["Restore Click \"New assignment\""]);
+    assert!(!h.has(Role::Button, "Restore all 1 step"), "one step needs no Restore all");
+    assert_eq!(
+        h.focused_words().as_deref(),
+        Some("Restore Click \"New assignment\""),
+        "the button that was pressed is gone, so the keyboard goes to the one that is left"
+    );
+    h.invoke(Role::Button, "Restore Click \"New assignment\"");
+    assert_eq!(h.status(), "Restored 2. Click \"New assignment\". Undo deletes it again.");
+    h.find(Role::Label, "No steps are deleted.");
+    assert_eq!(
+        h.focused_words().as_deref(),
+        Some("Back to the steps"),
+        "nothing is left, so the keyboard goes to Back"
+    );
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert_eq!(h.status(), "Back at the guide.");
+    assert_eq!(
+        h.rows(),
+        [
+            "1. Click \"Assignments\"",
+            "2. Click \"New assignment\"",
+            "3. Type \"Week 3 reflection\"",
+            "4. Select \"Course\"",
+            "Click \"Debug\" (skipped)",
+            "Note: Tip",
+            "5. Click \"Submit\"",
+        ],
+        "both are where they were; the substep stays at the top level"
+    );
+    assert_eq!(chosen(&h), ["2. Click \"New assignment\""], "the step put back last is the chosen one");
+    assert_eq!(h.focused_words().as_deref(), Some("2. Click \"New assignment\""), "and has the keyboard");
+    assert_eq!(deleted_button(&h), None);
+}
+
+#[test]
+fn restore_all_puts_every_step_back_in_its_old_place_as_one_change_and_one_undo_takes_them_away() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[3]);
+    click_row_with(&mut h, shift_held(), &rows[5]);
+    h.invoke(Role::Button, "Delete these steps");
+    assert_eq!(h.rows().len(), 4);
+    h.invoke(Role::Button, "Deleted steps (3)");
+    h.invoke(Role::Button, "Restore all 3 steps");
+    assert_eq!(h.status(), "Restored 3 steps. Undo deletes them again.");
+    h.find(Role::Label, "No steps are deleted.");
+    assert_eq!(h.focused_words().as_deref(), Some("Back to the steps"));
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.rows(), rows, "three steps that were next to each other come back in the same order");
+    assert_eq!(chosen(&h), [rows[3].clone()], "the first of them is the chosen one");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.rows().len(), 4, "one undo takes all three away again");
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (3)"));
+    h.invoke(Role::Button, "Redo");
+    assert_eq!(h.rows(), rows);
+}
+
+#[test]
+fn leaving_the_deleted_steps_screen_without_restoring_changes_nothing() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Delete step");
+    let rows = h.rows();
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert_eq!(h.rows(), rows);
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (1)"), "it is still there to bring back");
+    assert_eq!(h.focused_words().as_deref(), Some(rows[0].as_str()), "the keyboard is back on the list");
+}
+
+#[test]
+fn the_deleted_steps_screen_with_no_guide_open_goes_home() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    h.app.editor = None;
+    h.settle();
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+#[test]
+fn tab_on_the_deleted_steps_screen_goes_to_back_then_restore_all_then_each_restore() {
+    let mut h = Harness::new(Screen::DeletedSteps);
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    assert_eq!(&seen[..2], ["Back to the steps", "Restore all 2 steps"], "{seen:?}");
+    let mut restores = seen[2..].to_vec();
+    restores.sort();
+    assert_eq!(restores, ["Restore Click \"New assignment\"", "Restore Note: Tip"], "{seen:?}");
+    h.key(Key::Tab, NO_MODS);
+    assert_ne!(h.focused_words().as_deref(), Some("Restore Note: Tip"), "Tab goes on round");
+}
+
+#[test]
+fn the_deleted_steps_button_is_one_more_tab_stop_after_choose_all_steps() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Delete step");
+    let mut seen = Vec::new();
+    for _ in 0..30 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    let at = |words: &str| {
+        seen.iter().position(|s| s == words).unwrap_or_else(|| panic!("Tab never reached {words:?}: {seen:?}"))
+    };
+    let order = ["Add a step", "Duplicate step", "Delete step", "Choose all steps", "Deleted steps (1)"];
+    for pair in order.windows(2) {
+        assert!(at(pair[0]) < at(pair[1]), "{} comes before {}: {seen:?}", pair[0], pair[1]);
+    }
+}
+
+/// A real guide folder named `title` in `parent`, with a plain picture file for every step that has one.
+fn guide_with_pictures(parent: &std::path::Path, title: &str) -> std::path::PathBuf {
+    let mut doc = openstage_express_export::demo::demo().document;
+    doc.guide.title = title.to_string();
+    let folder = GuideFolder::create(parent, &doc).unwrap();
+    for image in doc.guide.steps.iter().filter_map(|s| s.image.as_ref()) {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![180u8; image.width as usize * image.height as usize * 3]).unwrap();
+        }
+        std::fs::write(folder.path().join(&image.file), bytes).unwrap();
+    }
+    let path = folder.path().to_path_buf();
+    drop(folder);
+    path
+}
+
+/// The ids of the steps saved in a guide folder, in order, and how many are in its trash.
+fn saved_steps(guide: &std::path::Path) -> (Vec<String>, usize) {
+    let read = |name: &str| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(guide.join(name)).unwrap()).unwrap()
+    };
+    let steps =
+        read("guide.json")["steps"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap().to_string()).collect();
+    let trashed = std::fs::read(guide.join("trash/trash.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .map_or(0, |v| v["entries"].as_array().map_or(0, Vec::len));
+    (steps, trashed)
+}
+
+#[test]
+fn a_deleted_step_and_its_picture_are_kept_in_the_guides_trash_on_disk_and_restoring_moves_them_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    assert_eq!(h.app.screen, Screen::Editor);
+    let (before, none) = saved_steps(&guide);
+    assert_eq!((before.len(), none), (7, 0));
+    let picture = guide.join("images/step-0001.png");
+    assert!(picture.is_file());
+
+    h.invoke(Role::Button, "Delete step");
+    let (after_delete, kept) = saved_steps(&guide);
+    assert_eq!((after_delete.len(), kept), (6, 1), "the guide on disk no longer has the step, and its trash has it");
+    assert!(!picture.exists(), "the picture left images");
+    assert!(guide.join("trash/step-0001.png").is_file(), "and is kept in the guide's trash");
+
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Restore Click \"Assignments\"");
+    let (after_restore, kept) = saved_steps(&guide);
+    assert_eq!((after_restore, kept), (before, 0), "the same steps in the same order, and nothing in the trash");
+    assert!(picture.is_file(), "the picture is back in images");
+    assert!(!guide.join("trash/step-0001.png").exists());
+}
+
+#[test]
+fn a_step_deleted_in_one_visit_can_be_restored_in_the_next_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Delete step");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+    h.invoke(Role::Button, "Alpha, 4 steps");
+    assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (1)"), "the deleted step was kept with the guide");
+    assert!(
+        h.node(h.find(Role::Button, "Undo")).is_disabled(),
+        "there is no undo in a new visit, but the list still works"
+    );
+    h.invoke(Role::Button, "Deleted steps (1)");
+    h.invoke(Role::Button, "Restore Click \"Assignments\"");
+    h.invoke(Role::Button, "Back to the steps");
+    assert_eq!(h.rows().len(), 7);
+    assert_eq!(h.rows()[0], "1. Click \"Assignments\"");
+    assert!(guide.join("images/step-0001.png").is_file());
+}
+
+#[test]
+fn the_dev_switches_for_the_deleted_steps_are_read() {
+    use super::DevOptions;
+    let words = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let options = DevOptions::parse(&words(&["--screen", "deleted"])).unwrap();
+    assert_eq!(options.screen, Some(Screen::DeletedSteps));
+    let options = DevOptions::parse(&words(&["--screen", "editor", "--delete-steps"])).unwrap();
+    assert!(options.delete_steps);
+    let mut app = App::new(Screen::Editor);
+    assert_eq!(app.editor.as_ref().unwrap().deleted_count(), 0, "the example guide starts with nothing deleted");
+    app.delete_demo_steps();
+    assert_eq!(app.editor.as_ref().unwrap().deleted_count(), 2);
+}
+
+#[test]
+fn restoring_the_last_button_of_several_leaves_the_keyboard_on_the_new_last_one() {
+    let mut h = Harness::new(Screen::Editor);
+    for _ in 0..3 {
+        h.invoke(Role::Button, "Delete step");
+    }
+    h.invoke(Role::Button, "Deleted steps (3)");
+    let buttons = restore_buttons(&h);
+    assert_eq!(buttons.len(), 3, "{buttons:?}");
+    h.invoke(Role::Button, &buttons[2]);
+    let left = restore_buttons(&h);
+    assert_eq!(left.len(), 2);
+    assert_eq!(
+        h.focused_words().as_deref(),
+        Some(left[1].as_str()),
+        "the one pressed was last, so the keyboard goes to the new last one"
+    );
 }

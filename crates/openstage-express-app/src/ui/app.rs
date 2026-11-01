@@ -19,6 +19,7 @@ use super::capture::{
 };
 use super::choose_area::{self, AreaAction, AreaScreen};
 use super::choose_window::{self, WindowList, WindowListAction};
+use super::deleted::{self, DeletedAction};
 use super::editor::{self, Leave};
 use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
@@ -51,6 +52,8 @@ pub enum Screen {
     About,
     /// The guides deleted from Home, which can be brought back.
     Trash,
+    /// The steps deleted from the open guide, which can be put back.
+    DeletedSteps,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
     /// The list of open windows, to choose the one to capture (still on top, taller than the bar).
@@ -73,6 +76,8 @@ pub struct App {
     pub home: HomeState,
     /// The guides in the Trash, as they were when the Trash was last opened or changed.
     trash: TrashState,
+    /// Where the keyboard goes on the Deleted steps screen after a step is put back.
+    deleted_keyboard: deleted::KeyboardAt,
     pub editor: Option<EditorState>,
     pub status: Status,
     library: PathBuf,
@@ -117,6 +122,7 @@ impl App {
             screen: Screen::Home,
             home: HomeState::example(),
             trash: TrashState::default(),
+            deleted_keyboard: None,
             editor: None,
             status: Status::default(),
             library: PathBuf::new(),
@@ -151,6 +157,11 @@ impl App {
             Screen::Settings => app.screen = Screen::Settings,
             Screen::About => app.screen = Screen::About,
             Screen::Trash => app.screen = Screen::Trash,
+            Screen::DeletedSteps => {
+                app.open_example();
+                app.delete_demo_steps();
+                app.screen = Screen::DeletedSteps;
+            }
             Screen::Home => {}
         }
         app
@@ -239,6 +250,23 @@ impl App {
         if let (Some(first), Some(third)) = (ids.first(), ids.get(2)) {
             editor.select(first);
             let _ = editor.choose_run_to(third);
+        }
+    }
+
+    /// For looking at the editor without a person: delete the second and the sixth step of the open guide, so the Deleted steps
+    /// button and screen have something to show.
+    pub fn delete_demo_steps(&mut self) {
+        let Some(editor) = self.editor.as_mut() else { return };
+        let ids: Vec<String> = editor.rows().into_iter().map(|r| r.id).collect();
+        for at in [5, 1] {
+            if let Some(id) = ids.get(at) {
+                editor.select(id);
+                let _ = editor.delete_selected();
+            }
+        }
+        if let Some(first) = editor.rows().first() {
+            let first = first.id.clone();
+            editor.select(&first);
         }
     }
 
@@ -399,7 +427,12 @@ impl App {
                 Screen::ChooseWindow | Screen::ChooseArea => {
                     self.status.say("Finish choosing what to capture first, then press the hotkey again.")
                 }
-                Screen::Editor | Screen::Export | Screen::Settings | Screen::About | Screen::Trash => {
+                Screen::Editor
+                | Screen::Export
+                | Screen::Settings
+                | Screen::About
+                | Screen::Trash
+                | Screen::DeletedSteps => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
             },
@@ -744,6 +777,31 @@ impl App {
                 }
                 TrashAction::Restore(index) => self.restore_from_trash(index),
             },
+            Screen::DeletedSteps => {
+                let Some(editor) = self.editor.as_mut() else {
+                    self.screen = Screen::Home;
+                    return;
+                };
+                let rows = editor.deleted_rows();
+                match deleted::show(ui, &rows, &mut self.deleted_keyboard) {
+                    DeletedAction::None => {}
+                    DeletedAction::Back => {
+                        self.screen = Screen::Editor;
+                        editor.focus_row_next = true;
+                        self.status.say("Back at the guide.");
+                    }
+                    DeletedAction::Restore(id) => {
+                        let at = rows.iter().position(|r| r.id == id).unwrap_or(0);
+                        self.status.say_opt(editor.restore_deleted(&id));
+                        // The button that was pressed is gone: the keyboard goes to the next one, or to Back if none is left.
+                        self.deleted_keyboard = Some(at);
+                    }
+                    DeletedAction::RestoreAll => {
+                        self.status.say_opt(editor.restore_all_deleted());
+                        self.deleted_keyboard = Some(0);
+                    }
+                }
+            }
             Screen::Bar => {
                 let view = match &self.capture {
                     // The hotkeys are the ones set now, which the person can change while the program runs.
@@ -903,6 +961,14 @@ impl App {
                 if left == Leave::ToExport {
                     self.screen = Screen::Export;
                     self.status.say("Export. Choose the formats and the folder, then press Export.");
+                    return;
+                }
+                if left == Leave::ToDeleted {
+                    self.screen = Screen::DeletedSteps;
+                    self.deleted_keyboard = None;
+                    let n = editor_state.deleted_count();
+                    self.status
+                        .say(format!("Deleted steps. {n} can be put back. Restore puts a step back where it was."));
                     return;
                 }
                 if left == Leave::ToHome {

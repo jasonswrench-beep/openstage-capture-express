@@ -110,6 +110,15 @@ submit an assignment") to open from the card under "Your guides".
       one; one Undo should take back a whole skip or delete. Does it feel right that the picture stays on one step, and that you cannot
       pick separate steps by keyboard alone (only runs, all, or Ctrl+click with a mouse)? Moving (Alt+Up and Down) and Duplicate are for
       one step and say so. Narrator and NVDA: each chosen row should be read as selected, and the status line says how many are chosen.
+- [ ] Deleted steps (on a guide you can spare): the "Delete step" button (beside Duplicate step) and Ctrl+Shift+Delete delete the
+      chosen step, and a "Deleted steps (1)" button then appears after "Choose all steps". It opens a screen with a Restore button for
+      each step (and "Restore all" from two up); Restore puts the step back where it was and chooses it, and "Back to the steps"
+      returns to the list with the keyboard on it. Close the guide and open it again: the step should still be there to restore, with
+      its picture. Look in the guide's folder: the picture of a deleted step should be in `trash` and be back in `images` after
+      Restore. Does it feel right that the list is a screen of its own, that the button only appears once something is deleted, and
+      that a step with substeps comes back without them (they stay where they moved to)? There is no button to empty a guide's trash
+      for good, so deleted pictures stay in the folder. Narrator and NVDA: the button's count, the heading "Deleted steps", each button
+      named "Restore Click "Save"", and the status line after a restore should be read.
 - [ ] Not built in the editor yet: moving or duplicating several steps at once, panning or zooming the focused crop by hand, and
       cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set

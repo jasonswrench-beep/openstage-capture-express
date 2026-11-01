@@ -6,7 +6,8 @@
 //! the step; Ctrl+Shift+Up and Ctrl+Shift+Down choose the step before or after; Ctrl+Shift+Delete deletes the step; F2 goes to
 //! the title; Up and Down in the list choose a step. To choose several steps: Ctrl+click adds or takes out one, Shift+click or
 //! Shift+Up and Shift+Down chooses a run, Ctrl+A or the button chooses every step; the buttons at the right then skip or delete them
-//! all together, and one undo takes the change back.
+//! all together, and one undo takes the change back. Deleted steps are kept with the guide: the Deleted steps button, there once
+//! something is deleted, opens the list where each can be put back.
 
 use eframe::egui::{self, Key, Modifiers, RichText};
 
@@ -22,6 +23,8 @@ pub enum Leave {
     Stay,
     ToHome,
     ToExport,
+    /// To the list of deleted steps, where each can be put back.
+    ToDeleted,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> Leave {
@@ -52,9 +55,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> 
     // The panels are a fixed share of the window, not draggable: a drag handle is a control with no keyboard route. The steps
     // come first, then the picture, then the details, which is the order a screen reader reads them in.
     let left = (ui.available_width() * 0.26).clamp(240.0, 340.0);
+    let mut to_deleted = false;
     egui::Panel::left("editor-steps").resizable(false).exact_size(left).show(ui, |ui| {
-        steps_list(ui, state, status);
+        steps_list(ui, state, status, &mut to_deleted);
     });
+    if to_deleted {
+        state.commit_pending();
+        leave = Leave::ToDeleted;
+    }
 
     egui::CentralPanel::default().show(ui, |ui| {
         let area = ui.available_rect_before_wrap();
@@ -126,14 +134,16 @@ enum Choice {
     All,
 }
 
-fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, to_deleted: &mut bool) {
     widgets::subheading(ui, "Steps");
     let rows = state.rows();
     let selected = state.selected_id().map(str::to_string);
     let take_keyboard = std::mem::take(&mut state.focus_row_next);
     let mut choice: Option<Choice> = None;
     let mut keyboard_on_selected = false;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 130.0).show(ui, |ui| {
+    // Room for the buttons and the hint under the list: another line when there are deleted steps to open.
+    let below = if state.deleted_count() > 0 { 170.0 } else { 130.0 };
+    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - below).show(ui, |ui| {
         for row in &rows {
             let is_selected = selected.as_deref() == Some(row.id.as_str());
             // A steps list is a list of choices: each row is named for what it says, and each chosen one is marked. Only the
@@ -214,10 +224,19 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         if widgets::button_enabled(ui, state.chosen_count() == 1, "Duplicate step").clicked() {
             status.say_opt(state.duplicate_selected());
         }
+        if widgets::button_enabled(ui, state.chosen_count() == 1, "Delete step").clicked() {
+            status.say_opt(state.delete_selected());
+            state.focus_row_next = true;
+        }
         let can_choose_more = rows.len() > 1 && state.chosen_count() < rows.len();
         if widgets::button_enabled(ui, can_choose_more, "Choose all steps").clicked() {
             status.say_opt(state.choose_all());
             state.focus_row_next = true;
+        }
+        // Only when there is something deleted, so a guide that has lost nothing has no extra control to stop at.
+        let deleted = state.deleted_count();
+        if deleted > 0 && widgets::button(ui, &format!("Deleted steps ({deleted})")).clicked() {
+            *to_deleted = true;
         }
     });
     if rows.len() > 1 {

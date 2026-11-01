@@ -18,8 +18,9 @@ and moves the guide to a `Trash` folder inside the guides folder, never erasing 
 each with a Restore button. **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; before Start you choose what to capture: the whole screen, one window (from a list of the open
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
-made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped, deleted and restored, with undo
-and redo, and every change is saved. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
+made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped and deleted (a Delete step button, or Ctrl+Shift+Delete), with undo
+and redo, and every change is saved. Deleted steps are kept with the guide: once one is deleted a Deleted steps button opens a list
+where each has a Restore button (and from two up a Restore all). In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
 spotlight) are added with buttons or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
 moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
 whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
@@ -35,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 703 passed (247 in the core, 182 in the exports, 44 in the
-  Windows crate, 230 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 721 passed (247 in the core, 182 in the exports, 44 in the
+  Windows crate, 248 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -99,6 +100,20 @@ Written and type-checked, not yet run on Windows:
   searching, renaming, deleting and restoring all keep the chosen order. Tested through the window and on the ordering itself; nobody has
   used it by hand, and Narrator and NVDA have not read the button (its name is "Sort: newest first. Press to change the order."). Twelve
   deliberate faults were each caught.
+
+- Deleted steps in the editor (spec E8, written and tested 2026-11-01): a "Delete step" button beside Duplicate step (before there was
+  only Ctrl+Shift+Delete for one step) and, once anything is deleted, a "Deleted steps (N)" button after "Choose all steps", so a guide
+  that has lost nothing has no extra Tab stop. It opens a screen of its own: each deleted step has a Restore button named for it
+  ("Restore Click "Save""), and from two steps up there is "Restore all N steps". The one deleted last is first, and steps deleted
+  together keep their order in the guide. Restore puts a step back where it was (substeps that moved up when it was deleted stay
+  where they are), chooses it and says so; the keyboard goes to the next Restore button, or to Back when none is left, and "Back to
+  the steps" returns to the list with the keyboard on the chosen step. Restore all puts the steps back in reverse order of deleting, so
+  neighbours come back in order, and is one change: one Undo deletes them all again. The list is the guide's own trash, saved with the
+  guide, so a step deleted in one visit can be restored in the next; a test on a real guide folder with real picture files checks that
+  the picture moves to `trash` and back to `images`. There is no button to empty a guide's trash, so nothing is erased. Nobody has used
+  it by hand, and Narrator and NVDA have not read it. The screens were drawn by the real program and looked at (`--screen deleted`,
+  `--delete-steps`). Twenty-one deliberate faults were each caught by a test (one first slipped through, because two steps deleted in
+  the same second hid it; a test that does not depend on the clock now catches it).
 
 - Choosing several steps in the editor (Ctrl+click adds or takes out one, Shift+click or Shift+Up and Down chooses a run, Ctrl+A or the
   "Choose all steps" button chooses every step; the details give way to Skip, Put back, Delete and Choose just one, each done to all
@@ -183,7 +198,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   checking function has (against the real doubled titles).
 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, moving or duplicating several steps at once, a "Save a copy as one file",
-panning the focused crop by hand, options on the
+panning the focused crop by hand, a button to empty a guide's trash for good (nothing is erased yet), options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.

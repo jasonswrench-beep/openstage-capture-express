@@ -24,12 +24,13 @@ const USAGE: &str = "\
 OpenStage Capture Express: turns what you do on screen into a step-by-step guide
 
   openstage-capture-express                          open the window
-  openstage-capture-express --screen editor          start in the editor (or: home, export, settings, about, trash, bar,
-                                                     choose-window, choose-area)
+  openstage-capture-express --screen editor          start in the editor (or: home, export, settings, about, trash, deleted,
+                                                     bar, choose-window, choose-area)
   openstage-capture-express --theme dark             use the dark or the light colours (or: light) instead of Windows' setting
   openstage-capture-express --height <pixels>        open the window this tall (so a picture shows more of a long screen)
   openstage-capture-express --choose-steps          choose the first three steps of the example guide (for a picture of the editor)
-  openstage-capture-express --scroll <pixels>        keep the Settings page scrolled this far down (for a picture of its lower part)
+  openstage-capture-express --delete-steps          delete two steps of the example guide (for a picture of the Deleted steps button)
+  openstage-capture-express --scroll <pixels>      keep the Settings page scrolled this far down (for a picture of its lower part)
   openstage-capture-express --screenshot <file.png>  save a picture of the window, then close it
   openstage-capture-express --close-after <seconds>  close the window by itself
   openstage-capture-express export-demo --out <dir>  make every export of a made-up guide in a new folder inside <dir>

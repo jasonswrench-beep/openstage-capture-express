@@ -18,7 +18,7 @@ use openstage_express_core::{Document, GuideFolder, Position, Session, Step, Ste
 use openstage_express_export::demo::Demo;
 use openstage_express_export::picture::{DiskPictures, PictureSource};
 
-use super::rows::{rows, Row};
+use super::rows::{deleted_rows, rows, steps_words, DeletedRow, Row};
 
 /// What has been typed for the selected step.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -386,6 +386,59 @@ impl EditorState {
                 Some(format!("Deleted {} steps. Undo brings them back.", ids.len()))
             }
             Err(_) => Some("Those steps could not be deleted.".to_string()),
+        }
+    }
+
+    // ---- deleted steps
+
+    /// The deleted steps, the one deleted last first.
+    pub fn deleted_rows(&self) -> Vec<DeletedRow> {
+        deleted_rows(&self.session.doc().trash)
+    }
+
+    /// How many deleted steps there are to bring back.
+    pub fn deleted_count(&self) -> usize {
+        self.session.doc().trash.entries.len()
+    }
+
+    /// Put a deleted step back where it was (one change, so undo deletes it again). It becomes the chosen step.
+    pub fn restore_deleted(&mut self, id: &str) -> Said {
+        self.commit_pending();
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.restore_step(id, &now)) {
+            Ok(()) => {
+                self.select(id);
+                let row = self.describe_selected();
+                Some(format!("Restored {row}. Undo deletes it again."))
+            }
+            Err(_) => Some("That step could not be put back.".to_string()),
+        }
+    }
+
+    /// Put every deleted step back, as one change. The first of them in the guide becomes the chosen step.
+    pub fn restore_all_deleted(&mut self) -> Said {
+        self.commit_pending();
+        // The last one deleted goes back first, which undoes the deletes in reverse and so puts each step in its old place.
+        let ids: Vec<String> = self.session.doc().trash.entries.iter().rev().map(|e| e.step.id.clone()).collect();
+        if ids.is_empty() {
+            return Some("There are no deleted steps.".to_string());
+        }
+        let now = utc_now_iso();
+        let result = self.session.apply(|d| {
+            for id in &ids {
+                d.restore_step(id, &now)?;
+            }
+            Ok(())
+        });
+        match result {
+            Ok(()) => {
+                let first = self.rows().into_iter().map(|r| r.id).find(|id| ids.contains(id));
+                if let Some(first) = first {
+                    self.select(&first);
+                }
+                Some(format!("Restored {}. Undo deletes them again.", steps_words(ids.len())))
+            }
+            Err(_) => Some("The steps could not be put back.".to_string()),
         }
     }
 
@@ -1115,6 +1168,59 @@ mod tests {
             Buffer { guide_title, ..Buffer::default() },
             "no step's words, but the guide's title is still there"
         );
+    }
+
+    #[test]
+    fn a_deleted_step_goes_back_where_it_was_is_chosen_and_one_undo_deletes_it_again() {
+        let mut e = editor();
+        let before = titles(&e);
+        let course = e.rows().into_iter().find(|r| r.label() == "3. Select \"Course\"").unwrap().id;
+        e.select(&course);
+        e.delete_selected();
+        assert_eq!(e.deleted_count(), 1);
+        assert_eq!(e.deleted_rows()[0].id, course);
+        e.select("step-1");
+        let said = e.restore_deleted(&course).unwrap();
+        assert_eq!(said, "Restored 3. Select \"Course\". Undo deletes it again.");
+        assert_eq!(titles(&e), before);
+        assert_eq!(e.selected_id(), Some(course.as_str()), "the step put back is the chosen one");
+        assert_eq!(e.deleted_count(), 0);
+        e.undo();
+        assert_eq!(e.deleted_count(), 1, "undo puts it back in the deleted steps");
+        assert_eq!(e.rows().len(), before.len() - 1);
+        e.redo();
+        assert_eq!(titles(&e), before);
+    }
+
+    #[test]
+    fn putting_back_a_step_that_is_not_deleted_says_so_and_changes_nothing() {
+        let mut e = editor();
+        let before = titles(&e);
+        assert_eq!(e.restore_deleted("step-1").as_deref(), Some("That step could not be put back."));
+        assert_eq!(e.restore_deleted("no-such-step").as_deref(), Some("That step could not be put back."));
+        assert_eq!(titles(&e), before);
+        assert!(!e.can_undo(), "nothing was recorded");
+        assert_eq!(e.restore_all_deleted().as_deref(), Some("There are no deleted steps."));
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn restore_all_undoes_the_deletes_in_reverse_so_neighbours_come_back_in_order() {
+        let mut e = editor();
+        let before = titles(&e);
+        let ids: Vec<String> = e.rows().into_iter().map(|r| r.id).collect();
+        // Three steps next to each other (3, the skipped one and the note), deleted one by one and then all together.
+        for id in &ids[3..=5] {
+            e.select(id);
+            e.delete_selected();
+        }
+        assert_eq!(e.deleted_count(), 3);
+        let said = e.restore_all_deleted().unwrap();
+        assert_eq!(said, "Restored 3 steps. Undo deletes them again.");
+        assert_eq!(titles(&e), before);
+        assert_eq!(e.selected_id(), Some(ids[3].as_str()), "the first of them in the guide is chosen");
+        e.undo();
+        assert_eq!((e.deleted_count(), e.rows().len()), (3, 4), "one undo takes all three away again");
     }
 
     #[test]
