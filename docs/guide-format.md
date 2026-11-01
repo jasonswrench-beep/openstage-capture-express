@@ -132,8 +132,38 @@ program. Only the person's "Empty the trash" deletes files, and only pictures no
 | `cursor` | `style` (such as `pointer`) | `size` | the pointer's hot spot |
 | `clickMark` | `size` (above zero) | `fill`, `stroke`, `strokeWidth` | the centre of the circle |
 
-Colours are `#RRGGBB` or `#RRGGBBAA`. Fields a type does not use are left out of the file. This table fixes what is stored; how
-each mark is drawn is milestone M3 and will be written here when it is built.
+Colours are `#RRGGBB` or `#RRGGBBAA`. Fields a type does not use are left out of the file. This table fixes what is stored. How marks are drawn is below.
+
+### How marks are drawn
+
+Marks are drawn on a copy of the whole original picture, in list order (a later mark is drawn over an earlier one), and only then
+is the picture cropped to the step's `focus`. So a mark that crosses the edge of the crop stays where it belongs, and nothing is
+ever drawn on the original file. Everything uses whole numbers and plain arithmetic, so the same step always gives the same
+pixels on every computer.
+
+| `type` | What it looks like, and what is used when a field is missing |
+|---|---|
+| `rect` | The `fill` (if any) over the whole rectangle, then the `stroke` as an outline inside it. With neither, a default indigo outline (`#7D87F2`). |
+| `oval` | The same, as an ellipse that fills the rectangle, with smoothed edges. |
+| `line`, `arrow` | A straight line with smoothed edges; an arrow has a head at the end point. `stroke` defaults to indigo. |
+| `highlight` | A translucent yellow (`#FFE60066`) over the rectangle unless `fill` says otherwise. |
+| `blur` | A mosaic: the rectangle is cut into square blocks, a third of its shorter side across (at least 12 and at most 48 pixels), and each block becomes the average colour of what was in it. Detail cannot be got back. To hide a secret, black it out with a solid `rect` instead. |
+| `spotlight` | Everything outside the rectangle is darkened (`fill`, default `#000000A0`); the inside is left as it is. A `stroke` outlines the rectangle. |
+| `text` | A box with its words. `fill` is the box (default navy), `stroke` is the text colour (default white or navy, whichever reads better on the box). `width` is optional: without it the box is made as wide as the words need and kept on the picture; a stated width wraps the words. `fontSize` defaults to one fortieth of the picture's height. If the words do not all fit, the export says which mark. |
+| `number` | A filled circle (`fill`, default indigo) with the number inside in white or navy, whichever reads better (navy on the indigo). `size` is the diameter. |
+| `cursor` | A mouse pointer whose hot spot is at `x`, `y`. `style` is `pointer` (the default, also used for any other word), `hand` or `text` (an I-beam). White with a black edge unless `fill` and `stroke` say otherwise. The artwork is this program's own. |
+| `clickMark` | A circle of diameter `size` round `x`, `y`: `fill` default `#7D87F233` (translucent indigo), `stroke` default indigo. |
+
+`strokeWidth` defaults to one 270th of the picture's height (at least 3), so 4 pixels on a 1080-pixel-tall picture. A colour with
+an alpha part (`#RRGGBBAA`) is mixed with what is under it by that much; a colour that cannot be read is treated as missing.
+A mark that is partly or wholly off the picture is cut off or does nothing; it is never an error.
+
+## The focused view
+
+`focus` is a stored rectangle (picture pixels). When a step is captured with the guide's `focusedView` on, the program works out the
+automatic crop: the picture's own shape, 150 percent closer, centred on the click and moved to stay inside the picture (no click,
+no automatic crop). The person can then move it (drag with Space held) or zoom it (never closer than eight times). A crop is always
+kept inside the picture, at least 8 pixels each way. Exports scale every crop to the same width, so a guide's pictures all line up.
 
 ## `trash/trash.json`
 
