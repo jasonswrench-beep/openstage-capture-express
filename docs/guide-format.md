@@ -18,6 +18,12 @@ How to submit an assignment.osguide/
   guide.before-<v>.json a copy of the guide file as it was before it was brought up to date from version <v>
 ```
 
+- Guides sit side by side in the guides folder. A guide deleted from Home is moved, folder and all and unchanged, into a folder
+  called `Trash` inside the guides folder (`Trash/Title.osguide`, `Trash/Title (2).osguide` and so on if a name repeats). The list of
+  guides never looks inside `Trash` (it has no `.osguide` in its name). Restore moves the guide back into the guides folder under a
+  name that is free. Express never erases a guide in the `Trash`: the person deletes it in Explorer. Neither move, nor renaming a guide
+  from Home, is allowed while another running copy of Express holds the guide's `guide.lock`. Renaming from Home changes `title`
+  and `updatedAt` only; the folder keeps its name, as when the editor renames a guide.
 - The folder name is made from the title (characters Windows forbids become `_`, Windows reserved names get a `_`, at most 80
   characters, `Title (2).osguide` if the name is taken). The `title` inside `guide.json` wins over the folder name.
 - Thumbnails and rendered previews are caches, not part of the format. They may be deleted at any time.
