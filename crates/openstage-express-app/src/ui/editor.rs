@@ -6,7 +6,8 @@
 //! the step; Ctrl+Shift+Up and Ctrl+Shift+Down choose the step before or after; Ctrl+Shift+Delete deletes the step; F2 goes to
 //! the title; Up and Down in the list choose a step. To choose several steps: Ctrl+click adds or takes out one, Shift+click or
 //! Shift+Up and Shift+Down chooses a run, Ctrl+A or the button chooses every step; the buttons at the right then skip or delete them
-//! all together, and one undo takes the change back. Deleted steps are kept with the guide: the Deleted steps button, there once
+//! all together (and move them up or down, with Alt+Up and Alt+Down or the buttons, or duplicate them), and one undo takes the
+//! change back. Deleted steps are kept with the guide: the Deleted steps button, there once
 //! something is deleted, opens the list where each can be put back.
 
 use eframe::egui::{self, Key, Modifiers, RichText};
@@ -267,6 +268,17 @@ fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Statu
     if widgets::button_enabled(ui, any_skipped, "Put these steps back in export").clicked() {
         status.say_opt(state.skip_chosen(false));
     }
+    // Always pressable, like Alt+Up and Alt+Down: at the end of the list they say so, and the keyboard is not left on a button
+    // that has just been switched off.
+    if widgets::button(ui, "Move these steps up").clicked() {
+        status.say_opt(state.move_selected(-1));
+    }
+    if widgets::button(ui, "Move these steps down").clicked() {
+        status.say_opt(state.move_selected(1));
+    }
+    if widgets::button(ui, "Duplicate these steps").clicked() {
+        status.say_opt(state.duplicate_selected());
+    }
     if widgets::button(ui, "Delete these steps").clicked() {
         status.say_opt(state.delete_chosen());
     }
@@ -275,7 +287,11 @@ fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Statu
         status.say_opt(state.choose_only_selected());
         state.focus_row_next = true;
     }
-    ui.label(RichText::new("Undo brings back a skip or a delete, all the steps at once.").size(13.5).color(p.muted));
+    ui.label(
+        RichText::new("Alt+Up and Alt+Down move them too. Undo takes back any of these, all the steps at once.")
+            .size(13.5)
+            .color(p.muted),
+    );
 }
 
 fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
@@ -364,6 +380,17 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         if skip_box.changed() {
             status.say_opt(state.set_skipped(skipped));
         }
+
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            if widgets::button(ui, "Move step up").clicked() {
+                status.say_opt(state.move_selected(-1));
+            }
+            if widgets::button(ui, "Move step down").clicked() {
+                status.say_opt(state.move_selected(1));
+            }
+        });
+        ui.label(RichText::new("Alt+Up and Alt+Down do the same.").size(13.5).color(p.muted));
 
         ui.add_space(10.0);
         marks_panel(ui, state, status);

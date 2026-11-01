@@ -543,11 +543,13 @@ fn tab_visits_every_control_on_home_in_order_and_does_not_get_stuck() {
 fn tab_visits_every_control_in_the_editor_and_comes_back_round() {
     let mut h = Harness::new(Screen::Editor);
     let mut seen = Vec::new();
-    for _ in 0..24 {
+    for _ in 0..40 {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
-    for must in ["Back to guides", "Title", "Description", "Focused view", "Skip in export", "Add a step"] {
+    for must in
+        ["Back to guides", "Title", "Description", "Focused view", "Skip in export", "Move step down", "Add a step"]
+    {
         assert!(seen.iter().any(|w| w == must), "Tab never reached {must:?}: {seen:?}");
     }
     assert!(seen.iter().any(|w| w.starts_with("1. Click")), "the steps list is reachable: {seen:?}");
@@ -2939,15 +2941,126 @@ fn deleting_the_last_steps_leaves_the_step_before_and_the_delete_key_deletes_eve
 }
 
 #[test]
-fn moving_and_duplicating_are_for_one_step_so_several_chosen_are_told_to_choose_one() {
+fn alt_up_and_alt_down_move_all_the_chosen_steps_together_and_one_undo_takes_each_move_back() {
     let mut h = Harness::new(Screen::Editor);
     let rows = example_rows(&h);
     h.invoke(Role::ListBoxOption, &rows[0]);
     click_row_with(&mut h, shift_held(), &rows[1]);
     h.key(Key::ArrowDown, Modifiers::ALT);
-    assert_eq!(h.status(), "Moving works on one step at a time. Choose just one step first.");
-    assert_eq!(h.rows(), rows, "nothing moved");
+    assert_eq!(h.status(), "Moved 2 steps down.");
+    let moved = h.rows();
+    assert_eq!(
+        moved,
+        [
+            "1. Select \"Course\"",
+            "2. Click \"Assignments\"",
+            "3. Click \"New assignment\"",
+            "3.1. Type \"Week 3 reflection\"",
+            "Click \"Debug\" (skipped)",
+            "Note: Tip",
+            "4. Click \"Submit\"",
+        ],
+        "the two steps passed the step below them, as a block, and 3.1 went with its parent"
+    );
     assert_eq!(chosen(&h).len(), 2, "and the choice is kept");
+    h.key(Key::ArrowUp, Modifiers::ALT);
+    assert_eq!(h.status(), "Moved 2 steps up.");
+    assert_eq!(h.rows(), rows);
+    h.key(Key::ArrowUp, Modifiers::ALT);
+    assert_eq!(h.status(), "Cannot move these steps up any further.");
+    assert_eq!(h.rows(), rows, "they are first already");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.rows(), moved, "the failed move left nothing to undo; this undoes the move up");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.rows(), rows);
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled());
+}
+
+#[test]
+fn the_buttons_for_several_chosen_steps_move_and_copy_them_and_keep_the_keyboard_on_the_button() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[3]);
+    click_row_with(&mut h, shift_held(), &rows[4]);
+    for words in ["Move these steps up", "Move these steps down", "Duplicate these steps", "Delete these steps"] {
+        assert!(!h.node(h.find(Role::Button, words)).is_disabled(), "{words}");
+    }
+    h.invoke(Role::Button, "Move these steps down");
+    assert_eq!(h.status(), "Moved 2 steps down.");
+    assert_eq!(
+        h.rows()[3..6],
+        [rows[5].clone(), rows[3].clone(), rows[4].clone()][..],
+        "past the note: {:?}",
+        h.rows()
+    );
+    h.invoke(Role::Button, "Move these steps down");
+    assert_eq!(h.status(), "Moved 2 steps down.", "and then past the last step");
+    // With the keyboard on the button, a press at the end says so and leaves the keyboard where it is.
+    h.focus_on(Role::Button, "Move these steps down");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "Cannot move these steps down any further.", "they are last");
+    assert_eq!(h.focused_words().as_deref(), Some("Move these steps down"), "the keyboard stays on the button");
+    h.invoke(Role::Button, "Move these steps up");
+    h.invoke(Role::Button, "Move these steps up");
+    assert_eq!(h.rows(), rows);
+    // Copying puts the copies after the pair, chooses them, and one undo takes them all away.
+    h.focus_on(Role::Button, "Duplicate these steps");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "Duplicated 2 steps. The copies are chosen. Undo takes them all away.");
+    assert_eq!(h.rows().len(), 9);
+    assert_eq!(h.rows()[3..5], [rows[3].clone(), rows[4].clone()][..], "the originals are where they were");
+    assert_eq!(
+        chosen(&h),
+        ["4. Select \"Course\"", "Click \"Debug\" (skipped)"],
+        "the copies are chosen: {:?}",
+        h.rows()
+    );
+    assert_eq!(h.focused_words().as_deref(), Some("Duplicate these steps"));
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.rows(), rows, "one undo takes both copies away");
+}
+
+#[test]
+fn steps_that_are_apart_each_move_and_a_family_chosen_whole_is_copied_once() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[0]);
+    click_row_with(&mut h, ctrl_held(), &rows[3]);
+    h.invoke(Role::Button, "Move these steps up");
+    assert_eq!(h.status(), "Moved 2 steps up.", "the first stays, the other moves");
+    assert_eq!(h.rows()[0], "1. Click \"Assignments\"");
+    assert_eq!(h.rows()[1], "2. Select \"Course\"");
+    h.invoke(Role::Button, "Undo");
+    // A step chosen with its own substep: the copy carries its own substep, so there is one copy, not two.
+    h.invoke(Role::ListBoxOption, &rows[1]);
+    click_row_with(&mut h, shift_held(), &rows[2]);
+    h.invoke(Role::Button, "Duplicate these steps");
+    assert_eq!(h.status(), "Duplicated 1 step. The copies are chosen. Undo takes them all away.");
+    assert_eq!(h.rows().len(), 9, "the step and its substep came again once");
+}
+
+#[test]
+fn a_single_step_has_move_buttons_that_do_what_alt_up_and_alt_down_do() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::Button, "Move step up");
+    assert_eq!(h.status(), "Cannot move up any further.");
+    assert_eq!(h.rows(), rows);
+    h.invoke(Role::Button, "Move step down");
+    assert_eq!(h.status(), "Moved down. Now 2. Click \"Assignments\".");
+    assert_eq!(
+        h.rows()[2],
+        "2. Click \"Assignments\"",
+        "it passed the step below it and that step's substep: {:?}",
+        h.rows()
+    );
+    h.focus_on(Role::Button, "Move step up");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.rows(), rows);
+    assert_eq!(h.focused_words().as_deref(), Some("Move step up"), "the keyboard stays on the button");
+    // They give way to the buttons for several when several are chosen.
+    h.invoke(Role::Button, "Choose all steps");
+    assert!(!h.has(Role::Button, "Move step up") && h.has(Role::Button, "Move these steps up"));
 }
 
 #[test]

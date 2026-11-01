@@ -579,10 +579,10 @@ impl EditorState {
         self.selected_row().map(|r| r.label()).unwrap_or_default()
     }
 
-    /// Move the selected step up or down one place among its neighbours.
+    /// Move the chosen steps up or down one place among their neighbours, as one change (all of them when several are chosen).
     pub fn move_selected(&mut self, delta: i32) -> Said {
         if self.chosen_count() > 1 {
-            return Some("Moving works on one step at a time. Choose just one step first.".to_string());
+            return self.move_chosen(delta);
         }
         self.commit_pending();
         let id = self.selected.clone()?;
@@ -595,6 +595,20 @@ impl EditorState {
                 Some(format!("Moved {}. Now {now_at}.", if delta < 0 { "up" } else { "down" }))
             }
             _ => Some(format!("Cannot move {} any further.", if delta < 0 { "up" } else { "down" })),
+        }
+    }
+
+    /// Move all the chosen steps up or down one place, as one change: a block of steps that sit together passes the step beside it,
+    /// and one already at the end of its level stays. The choice is kept.
+    fn move_chosen(&mut self, delta: i32) -> Said {
+        self.commit_pending();
+        let ids = self.chosen_ids();
+        let now = utc_now_iso();
+        let way = if delta < 0 { "up" } else { "down" };
+        match self.session.apply(|d| d.move_steps_by(&ids, delta, &now)) {
+            Ok(true) => Some(format!("Moved {} {way}.", steps_words(ids.len()))),
+            Ok(false) => Some(format!("Cannot move these steps {way} any further.")),
+            Err(_) => Some("Those steps could not be moved.".to_string()),
         }
     }
 
@@ -640,10 +654,10 @@ impl EditorState {
         }
     }
 
-    /// Duplicate the selected step (a copy of it, with its picture and marks, goes straight after it).
+    /// Duplicate the selected step (a copy of it, with its picture and marks, goes straight after it), or all the chosen steps.
     pub fn duplicate_selected(&mut self) -> Said {
         if self.chosen_count() > 1 {
-            return Some("Duplicating works on one step at a time. Choose just one step first.".to_string());
+            return self.duplicate_chosen();
         }
         self.commit_pending();
         let id = self.selected.clone()?;
@@ -659,6 +673,28 @@ impl EditorState {
                 Some(format!("Duplicated. The copy is {row}."))
             }
             Err(_) => Some("That step could not be duplicated.".to_string()),
+        }
+    }
+
+    /// Copy all the chosen steps (with their substeps, pictures and marks) as one change. The copies become the chosen steps, the
+    /// first of them the one the picture and the keyboard are on.
+    fn duplicate_chosen(&mut self) -> Said {
+        self.commit_pending();
+        let ids = self.chosen_ids();
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.duplicate_steps(&ids, &now)) {
+            Ok(copies) if !copies.is_empty() => {
+                self.move_to(&copies[0]);
+                self.also = copies[1..].to_vec();
+                self.anchor = Some(copies[0].clone());
+                self.selected_mark = None;
+                Some(format!(
+                    "Duplicated {}. The copies are chosen. Undo takes them all away.",
+                    steps_words(copies.len())
+                ))
+            }
+            Ok(_) => None,
+            Err(_) => Some("Those steps could not be duplicated.".to_string()),
         }
     }
 
@@ -1238,6 +1274,39 @@ mod tests {
         assert!(!e.can_undo(), "nothing was recorded");
         assert_eq!(e.restore_all_deleted().as_deref(), Some("There are no deleted steps."));
         assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn duplicating_several_chosen_steps_chooses_the_copies_and_one_undo_takes_them_away() {
+        let mut e = editor();
+        let ids: Vec<String> = e.rows().into_iter().map(|r| r.id).collect();
+        e.select(&ids[3]);
+        e.choose_run_to(&ids[4]);
+        let before = titles(&e);
+        let said = e.duplicate_selected().unwrap();
+        assert_eq!(said, "Duplicated 2 steps. The copies are chosen. Undo takes them all away.");
+        assert_eq!(e.rows().len(), before.len() + 2);
+        assert_eq!(e.chosen_count(), 2);
+        let chosen = e.chosen_ids();
+        assert!(chosen.iter().all(|id| !ids.contains(id)), "only the copies are chosen: {chosen:?}");
+        assert_eq!(e.selected_id(), Some(chosen[0].as_str()), "the picture and the keyboard are on the first copy");
+        e.undo();
+        assert_eq!(titles(&e), before);
+        assert_eq!(e.chosen_count(), 1);
+    }
+
+    #[test]
+    fn moving_several_chosen_steps_keeps_them_chosen_and_says_when_they_cannot_go_further() {
+        let mut e = editor();
+        let ids: Vec<String> = e.rows().into_iter().map(|r| r.id).collect();
+        e.select(&ids[0]);
+        e.choose_run_to(&ids[1]);
+        assert_eq!(e.move_selected(-1).as_deref(), Some("Cannot move these steps up any further."));
+        assert!(!e.can_undo(), "nothing moved, so nothing was recorded");
+        assert_eq!(e.move_selected(1).as_deref(), Some("Moved 2 steps down."));
+        assert_eq!(e.chosen_count(), 2, "the choice is kept");
+        assert_eq!(e.chosen_ids(), [ids[0].clone(), ids[1].clone()]);
+        assert!(e.can_undo());
     }
 
     #[test]
