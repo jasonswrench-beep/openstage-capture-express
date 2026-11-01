@@ -14,3 +14,15 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       of PASS or FAIL) has never been triggered. It matters on a PC whose processor makes Python crash unpredictably.
 - [ ] Read `docs/guide-format.md` once and say whether the words and the layout of a guide folder are what you expect to see in
       Explorer (folder name `Title.osguide`, `images`, `trash`).
+
+## Milestone M2 (smart titles and the step builder)
+
+- [ ] Have a German speaker and a French speaker read the titles in `crates/openstage-express-core/src/titles.rs`. The spec proposed
+      most of them; the ones for a middle click, for "here" with any verb but Click, and for "Type here" are this program's own
+      proposals.
+- [ ] Compare with a step-guide program on the same program (a step-guide program is installed on Jason's PC): does it say Select for dropdowns and radio
+      buttons, Click for check boxes, and Type for a field you type in? Only its behaviour may be compared, never its code.
+- [ ] Say whether these choices, where the spec is silent, are right (they are listed in the comment at the top of
+      `builder.rs`): a plain click waits half a second in case it becomes a double-click; Escape ends a typing step like Enter and
+      Tab; typing without a click first still makes a Type step, named from the focused field; any click, even one that is not
+      captured, ends a typing step.
