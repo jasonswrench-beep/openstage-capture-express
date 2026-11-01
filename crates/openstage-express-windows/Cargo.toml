@@ -1,0 +1,9 @@
+[package]
+name = "openstage-express-windows"
+description = "The Windows-only parts: hooks, UI Automation, screenshots, hotkeys, clipboard and fonts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]

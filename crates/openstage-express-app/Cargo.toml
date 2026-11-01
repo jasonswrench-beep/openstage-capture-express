@@ -1,0 +1,13 @@
+[package]
+name = "openstage-express-app"
+description = "The program openstage-capture-express.exe: the window, the capture bar and the editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "openstage-capture-express"
+path = "src/main.rs"
+
+[dependencies]

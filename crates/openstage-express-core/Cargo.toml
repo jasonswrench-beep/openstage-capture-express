@@ -1,0 +1,9 @@
+[package]
+name = "openstage-express-core"
+description = "The guide model, edit operations, undo history, smart titles, step builder, annotation drawing and saving. No Windows code."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
