@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 800 passed (269 in the core, 200 in the exports, 44 in the
-  Windows crate, 287 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 807 passed (269 in the core, 200 in the exports, 47 in the
+  Windows crate, 291 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -139,8 +139,18 @@ Written and type-checked, not yet run on Windows:
   `zip.rs`, and `share.rs`. Twenty deliberate faults were each caught by a test, except that taking away the check for a leading
   slash in a file name changes nothing, because a leading slash also gives an empty part, which is refused anyway (two checks for the
   same danger on purpose). Both new screens were drawn by the real program in both colour schemes. Nobody has used it by hand,
-  Browse has never been run, and Narrator and NVDA have not read the new screens. One thing to know: text marks and step-number digits are drawn as blocks of letters by the program as it stands (it uses a
-  test renderer for the editor and every export), so they are blocks in a copy too; see the next item.
+  Browse has never been run, and Narrator and NVDA have not read the new screens.
+
+- The words on marks are real text (2026-11-01, found while building the copy). Until now the editor's picture and every export drew
+  the words on text marks and the numbers on step badges with the test renderer that draws each letter as a block (a gap that was
+  listed as "arrives with capture" and never closed). On Windows the program now draws them with Windows' own text drawing, which
+  Capture's code already had and nobody had run: three tests in the Windows crate prove on this PC that it makes smoothed letters
+  (not blocks), bold, a background, accents and other alphabets, and says when words do not fit. The program's own paths use it (the
+  editor's picture, every export, a copy as one file, `EXPORT DEMO.bat`), and four tests, one for each place, fail if any of them
+  goes back to blocks; four deliberate faults of exactly that kind were each caught. The exported picture of the demo's second step
+  was looked at: "Start here" is in Segoe UI. The words inside the made-up demo screenshots are still blocks, because those
+  screenshots are made up. The other tests keep using the block renderer on purpose, so that their pictures are the same on every
+  computer. Not looked at by hand with a real guide's text marks; Segoe UI is the only font used.
 
 - Moving and zooming the focused crop by hand (spec E5, written and tested 2026-11-01; Jason said 'Yes, build it'). When a step's
   Focused view is on, the details show where its crop is in words ("The crop shows 67 percent of the picture across: 853 by 480 of

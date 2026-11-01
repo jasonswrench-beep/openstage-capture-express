@@ -36,5 +36,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
+openstage-capture-project.workspace = true
 openstage-capture-render.workspace = true
 tempfile.workspace = true

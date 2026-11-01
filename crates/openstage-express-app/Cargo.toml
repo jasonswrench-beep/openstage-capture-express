@@ -23,4 +23,5 @@ eframe = { version = "0.37.0", default-features = false, features = ["accesskit"
 openstage-express-windows = { path = "../openstage-express-windows" }
 
 [dev-dependencies]
+openstage-capture-project.workspace = true
 tempfile.workspace = true

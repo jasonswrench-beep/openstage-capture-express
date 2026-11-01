@@ -5,7 +5,6 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
-use openstage_capture_render::BlockText;
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_export::demo::demo;
 use openstage_express_export::gif::GifOptions;
@@ -29,11 +28,12 @@ pub fn run(out: &Path) -> Result<String, String> {
 /// `pdf` is the engine that makes PDF files, or `None` when this computer has none (the demo then says so and goes on).
 fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<String, String> {
     let guide = demo();
-    let the_plan = plan(&guide.document.guide, &guide.pictures, &BlockText, &ExportOptions::default());
+    let text = crate::text::renderer();
+    let the_plan = plan(&guide.document.guide, &guide.pictures, text, &ExportOptions::default());
     let folder = out.join(run_folder_name(now_iso));
     // The demo turns on the title card and the progress bar, to show them.
     let gif = GifOptions { progress_bar: true, title_card: true, ..GifOptions::default() };
-    let made = make(&the_plan, &Selection::all(), &gif, &BlockText, pdf, &folder)?;
+    let made = make(&the_plan, &Selection::all(), &gif, text, pdf, &folder)?;
     let mut report = String::new();
     writeln!(
         report,
@@ -54,7 +54,8 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
     writeln!(report, "\nEverything is in:\n  {}", folder.display()).ok();
     writeln!(
         report,
-        "\nThe words on the made-up screenshots are drawn as plain blocks. Real text drawing comes with capture."
+        "\nThe words inside the made-up screenshots are drawn as plain blocks, because the screenshots are made up. The words on \
+         marks and the numbers on step badges are drawn with Windows' own fonts."
     )
     .ok();
     Ok(report)

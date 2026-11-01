@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
-use openstage_capture_render::{BlockText, TextRenderer};
+use openstage_capture_render::TextRenderer;
 use openstage_express_core::Guide;
 use openstage_express_export::docx::{export_docx, DocxOptions};
 use openstage_express_export::gif::{export_gif, GifOptions};
@@ -258,13 +258,14 @@ pub fn system_pdf() -> Option<Box<dyn PdfRenderer + Send + Sync>> {
 pub fn spawn(job: Job) -> Receiver<Result<Report, String>> {
     let (tx, rx) = mpsc::channel();
     let started = std::thread::Builder::new().name("express-export".into()).spawn(move || {
-        let the_plan = make_plan(&job.guide, &*job.pictures, &BlockText, &ExportOptions::default());
+        let text = crate::text::renderer();
+        let the_plan = make_plan(&job.guide, &*job.pictures, text, &ExportOptions::default());
         let pdf = if job.selection.contains(Format::Pdf) { system_pdf() } else { None };
         let result = make(
             &the_plan,
             &job.selection,
             &GifOptions::default(),
-            &BlockText,
+            text,
             pdf.as_deref().map(|p| p as &dyn PdfRenderer),
             &job.folder,
         );
@@ -358,7 +359,8 @@ pub fn make_one_file_copy(
 pub fn spawn_copy(job: CopyJob) -> Receiver<Result<CopyReport, String>> {
     let (tx, rx) = mpsc::channel();
     let started = std::thread::Builder::new().name("express-copy".into()).spawn(move || {
-        let _ = tx.send(make_one_file_copy(&job.guide, &*job.pictures, &BlockText, &job.options, &job.folder));
+        let _ =
+            tx.send(make_one_file_copy(&job.guide, &*job.pictures, crate::text::renderer(), &job.options, &job.folder));
     });
     if let Err(why) = started {
         let (tx, rx2) = mpsc::channel();
@@ -371,6 +373,7 @@ pub fn spawn_copy(job: CopyJob) -> Receiver<Result<CopyReport, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openstage_capture_render::BlockText;
     use openstage_express_export::demo::demo;
     use openstage_express_export::pdf::{PrintPage, RenderError};
     use openstage_express_export::plan::{plan, ExportOptions};
@@ -386,6 +389,63 @@ mod tests {
     fn the_plan() -> Plan {
         let d = demo();
         plan(&d.document.guide, &d.pictures, &BlockText, &ExportOptions::default())
+    }
+
+    /// The program itself (not a test that passes a renderer) draws the words on marks with Windows' text, in a copy as in an export.
+    #[cfg(windows)]
+    #[test]
+    fn a_copy_made_by_the_program_has_the_words_on_its_marks_in_windows_text_not_in_blocks() {
+        use openstage_express_core::render::render_marked;
+        use openstage_express_export::picture::decode_png;
+        use openstage_express_export::share::read_copy;
+        let d = demo();
+        let (guide, pictures) = (d.document.guide.clone(), d.pictures);
+        let dir = tempfile::tempdir().unwrap();
+        let job = CopyJob {
+            guide,
+            pictures: Arc::new(pictures),
+            options: CopyOptions::default(),
+            folder: dir.path().to_path_buf(),
+        };
+        let report = spawn_copy(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
+        let copy = read_copy(&std::fs::read(&report.file).unwrap()).unwrap();
+        // The step with a text mark ("Start here").
+        let again = demo();
+        let step = again.document.guide.steps.iter().find(|s| s.title == "Click \"New assignment\"").unwrap();
+        let original = again.pictures.picture(&step.image.as_ref().unwrap().file).unwrap();
+        let in_copy = copy.guide.steps.iter().find(|s| s.title == step.title).unwrap();
+        let (_, bytes) = copy.pictures.iter().find(|(n, _)| *n == in_copy.image.as_ref().unwrap().file).unwrap();
+        let got = decode_png(bytes).unwrap();
+        let windows = render_marked(&original, step, &openstage_express_windows::WindowsText).canvas;
+        let blocks = render_marked(&original, step, &BlockText).canvas;
+        assert_eq!(got.bgra, windows.bgra, "the words are in Windows' text");
+        assert_ne!(got.bgra, blocks.bgra, "and are not blocks");
+    }
+
+    /// An export made by the program (on its thread) draws the words on marks with Windows' text, like a copy does.
+    #[cfg(windows)]
+    #[test]
+    fn an_export_made_by_the_program_has_the_words_on_its_marks_in_windows_text_not_in_blocks() {
+        use openstage_express_windows::WindowsText;
+        let d = demo();
+        let guide = d.document.guide.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let job = Job {
+            guide: guide.clone(),
+            pictures: Arc::new(d.pictures),
+            selection: Selection::none_then(&[Format::Images]),
+            folder: dir.path().to_path_buf(),
+        };
+        spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
+        let pictures = demo().pictures;
+        let expected =
+            |text: &dyn TextRenderer| export_images(&make_plan(&guide, &pictures, text, &ExportOptions::default()));
+        let (windows, blocks) = (expected(&WindowsText), expected(&BlockText));
+        assert_ne!(windows.files, blocks.files, "the two renderers make different pictures");
+        for file in &windows.files {
+            let written = std::fs::read(dir.path().join("images").join(&file.path)).unwrap();
+            assert_eq!(written, file.bytes, "{} is made with Windows' text", file.path);
+        }
     }
 
     #[test]
