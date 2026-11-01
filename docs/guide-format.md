@@ -209,6 +209,58 @@ made: the last complete guide is there, plus possibly one picture nothing uses y
 - Fields a reader does not know are kept and written back unchanged, in every object of the file, so a guide made by a slightly
   newer Express with extra fields survives being opened and saved here.
 
+## The exports
+
+Every export is made from the same plan, so they agree about which steps are in, how they are numbered, and what each picture is.
+
+- **Which steps.** A skipped step is left out, and so are all its substeps. The rest are numbered `1`, `2`, `2.1`, `2.2`, `3` and so
+  on (a substep's number starts with its parent's). A content block (`kind` `block`) is exported but not numbered, and is not in
+  any contents list. A step whose parent cannot be found is left out.
+- **The pictures.** Each is the step's original with its marks drawn on, cropped to its `focus`, and scaled to the same width
+  (1280 pixels by default), as a PNG. Marks and blur are burned in: a blurred area can never be undone in an export. Pictures are
+  named in export order, `images/step-01.png` and so on (not by step id). A picture that cannot be found is left out with a
+  warning, and the step stays.
+- **The words.** A picture's alt text is the author's `imageDescription`, or the step title if there is none. Words drawn on a
+  picture by a `text` mark that are not also in the step's title, description or alt text produce a warning, because a screen
+  reader cannot read a picture.
+- **Nothing is replaced.** An export is written into a folder and stops, without replacing anything, if a file of the same name
+  is already there.
+
+| Export | Files |
+|---|---|
+| HTML | `<title>.html`: one self-contained page (pictures inside it as data, no outside requests, a Content-Security-Policy, headings, a contents list, a skip link, alt text, light and dark colours that pass 4.5 to 1, a print style, pictures that open larger in a dialog). |
+| Markdown | `<title>.md` and `images/step-NN.png`. A step is a heading (`## 1. Title`, one level deeper for a substep), its description as written, and `![alt](images/step-NN.png)`. A content block is a quotation. |
+| JSON | `<title>.json` and `images/step-NN.png`. See below. |
+| Images | `step-NN.png` only. JPG with a quality setting is not built yet. |
+| GIF | `<title>.gif`: one frame per step (a step with no picture is a card with its title), the same width, shorter pictures centred on a background colour, each frame 1, 2, 3, 5 or 8 seconds (3 by default), looping unless turned off, with an optional title card and progress bar. Width between 320 and 1920 (800 by default). A GIF cannot be made accessible. |
+
+### The JSON export
+
+Not the guide's own file: a flatter one for other programs. Field names follow the ones a step-guide program documents publicly for the same
+meanings, as a convenience and not a promise of compatibility. `exportVersion` changes when a field is renamed or removed.
+
+```json
+{
+  "exportFormat": "openstage-express-guide",
+  "exportVersion": 1,
+  "guide": { "title": "How to submit an assignment", "description": "", "language": "en" },
+  "steps": [
+    {
+      "id": "step-1", "index": 1, "indexString": "1", "parentId": null, "kind": "image",
+      "title": "Click \"Assignments\"", "description": "",
+      "altText": "The course site with the Assignments item circled",
+      "screenshotFilename": "step-01.png", "screenshotRelativePath": "images/step-01.png",
+      "width": 1280, "height": 720
+    }
+  ]
+}
+```
+
+`index` is the step's place in the export (from 1). `indexString` is null for a content block. `parentId` is the step above in the
+tree, or null. `altText`, the picture fields and `width` and `height` are null for a step with no picture. Left out on purpose
+because they are private or are for editing: the text typed into a field (it appears only as the step's title), the click, the
+control, the program and the capture time.
+
 ## Not in this document yet
 
-The JSON export (a flatter file for other programs, spec section 7.4) and the settings file are written when they are built.
+The settings file is written when it is built. PDF, Word and PowerPoint exports are not built.

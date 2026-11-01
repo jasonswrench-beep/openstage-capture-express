@@ -11,3 +11,9 @@ name = "openstage-capture-express"
 path = "src/main.rs"
 
 [dependencies]
+openstage-express-core = { path = "../openstage-express-core" }
+openstage-express-export = { path = "../openstage-express-export" }
+openstage-capture-render.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

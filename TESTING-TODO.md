@@ -41,3 +41,33 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       run. It may ask for a GitHub sign-in if the repository is private.
 - [ ] The automatic focused view is 150 percent closer, centred on the click. Does that feel right on your programs? (The
       percentage is a constant, `DEFAULT_ZOOM_PERCENT` in `focus.rs`; a step-guide program's manual does not give its own number.)
+## Milestone M4 (exports)
+
+- [ ] Open the web page from `EXPORT DEMO.bat` (the `html` folder) and read it the way a reader would. Does the order, the numbering
+      ("2.1.") and the wording feel right? Does the page look clean?
+- [ ] Look at the web page in the dark scheme (set Windows to dark mode, then open it). The dark colours pass the 4.5 to 1 test in the
+      code, but a headless browser would not show them, so they have not been seen.
+- [ ] Use the web page with a screen reader (Narrator and NVDA): the skip link, the contents list, the headings, the picture alt
+      text, and opening and closing a picture (Escape, and focus coming back). It has only been checked for structure.
+- [ ] Zoom the web page to 400 percent and make the window narrow (320 pixels). Does it reflow without side scrolling?
+- [ ] Print the web page (or print it to PDF). Does each step stay together and the pictures stay whole?
+- [ ] Open the Markdown file in a Markdown viewer you use (the `markdown` folder), and the JSON in anything that reads it.
+- [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
+      seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
+- [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
+- [ ] PDF, Word, PowerPoint and JPG are not built. See the report for what is needed (a decision about how to make PDFs).
+## Milestone M4 (exports)
+
+- [ ] Open the web page from `EXPORT DEMO.bat` (the `html` folder) and read it the way a reader would. Does the order, the numbering
+      ("2.1.") and the wording feel right? Does the page look clean?
+- [ ] Look at the web page in the dark scheme (set Windows to dark mode, then open it). The dark colours pass the 4.5 to 1 test in the
+      code, but a headless browser would not show them, so they have not been seen.
+- [ ] Use the web page with a screen reader (Narrator and NVDA): the skip link, the contents list, the headings, the picture alt
+      text, and opening and closing a picture (Escape, and focus coming back). It has only been checked for structure.
+- [ ] Zoom the web page to 400 percent and make the window narrow (320 pixels). Does it reflow without side scrolling?
+- [ ] Print the web page (or print it to PDF). Does each step stay together and the pictures stay whole?
+- [ ] Open the Markdown file in a Markdown viewer you use (the `markdown` folder), and the JSON in anything that reads it.
+- [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
+      seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
+- [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
+- [ ] PDF, Word, PowerPoint and JPG are not built. See the report for what is needed (a decision about how to make PDFs).
