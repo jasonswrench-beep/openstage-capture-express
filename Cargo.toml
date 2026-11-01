@@ -26,6 +26,9 @@ crc32fast = "1"
 # OpenStage Capture's crates, read through a path link to the sibling openstage-author folder (see README).
 openstage-capture-project = { path = "../openstage-author/capture/crates/openstage-capture-project" }
 openstage-capture-render = { path = "../openstage-author/capture/crates/openstage-capture-render" }
+# Windows Graphics Capture (the display frames behind the frame ring), reached through its Platform and FrameSource traits. The
+# hooks and the field reading are Express's own, so that no typed character ever leaves the keyboard hook (spec 8.4).
+openstage-capture-windows = { path = "../openstage-author/capture/crates/openstage-capture-windows" }
 
 # Pictures are big, so tests that draw and export them run far faster with a little optimisation.
 [profile.dev]

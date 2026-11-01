@@ -29,6 +29,11 @@ pub type Ms = u64;
 /// How long a click waits for typing before it becomes an ordinary click step, at the least (spec R4).
 pub const PENDING_MIN_MS: Ms = 2000;
 
+/// The picture of a Type step is taken at least this long after the last key went down, so that the screen has caught up with the
+/// text. (A picture asked for the moment Enter is pressed shows the field a few letters short: the program under the keys and
+/// Windows' own picture-taking both lag a little.)
+pub const TYPE_SETTLE_MS: Ms = 120;
+
 /// Stands for one picture of the screen the host holds. The builder never looks inside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShotId(pub u64);
@@ -410,8 +415,8 @@ impl StepBuilder {
         match std::mem::replace(&mut self.state, State::Idle) {
             State::Idle => {}
             State::Held(c) | State::Pending(c) => out.push(self.plain_click(c)),
-            State::Typing { pending, .. } => {
-                self.state = State::Typing { pending, last: at };
+            State::Typing { pending, last } => {
+                self.state = State::Typing { pending, last };
                 self.end_typing(host, at, out);
             }
         }
@@ -523,10 +528,12 @@ impl StepBuilder {
 
     /// End a typing step: read the field and make one `Type` step, or the plain click it came from (R5, R6).
     fn end_typing(&mut self, host: &mut dyn Host, at: Ms, out: &mut Vec<Draft>) {
-        let State::Typing { pending, .. } = std::mem::replace(&mut self.state, State::Idle) else {
+        let State::Typing { pending, last } = std::mem::replace(&mut self.state, State::Idle) else {
             return;
         };
         let field = host.focused_field();
+        // Never earlier than the event that ended the typing, and never before the screen has had time to show the last key.
+        let shot_at = at.max(last.saturating_add(TYPE_SETTLE_MS));
         let language = self.settings.language;
         match field.text {
             // R6: never a Type step, and never any text, for a password field.
@@ -548,7 +555,7 @@ impl StepBuilder {
                         out.push(self.plain_click(c));
                     }
                 } else {
-                    let shot = host.screenshot(at);
+                    let shot = host.screenshot(shot_at);
                     self.discard_pending_shot(&pending);
                     out.push(Draft {
                         kind: DraftKind::TypeUnreadable,
@@ -578,7 +585,7 @@ impl StepBuilder {
                         out.push(self.plain_click(c));
                     }
                 } else {
-                    let shot = host.screenshot(at);
+                    let shot = host.screenshot(shot_at);
                     self.discard_pending_shot(&pending);
                     let name = pending
                         .as_ref()
@@ -853,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_ends_typing_with_the_picture_from_that_moment() {
+    fn enter_right_after_the_last_key_waits_a_moment_for_the_screen_to_show_the_text() {
         let (mut b, mut h) = (builder(), FakeHost::new());
         h.set_text("hello");
         let drafts = run(
@@ -866,8 +873,42 @@ mod tests {
             ],
         );
         assert_eq!(titles(&drafts), ["Type \"hello\""]);
-        assert_eq!(h.time_of(drafts[0].shot), 1150);
+        assert_eq!(
+            h.time_of(drafts[0].shot),
+            1100 + TYPE_SETTLE_MS,
+            "not at the Enter, which is before the text is on the screen"
+        );
         assert!(!b.is_waiting());
+    }
+
+    #[test]
+    fn enter_long_after_the_last_key_takes_the_picture_at_the_enter() {
+        let (mut b, mut h) = (builder(), FakeHost::new());
+        h.set_text("hello");
+        let drafts = run(
+            &mut b,
+            &mut h,
+            vec![
+                field_click(1000, 5, 5, "Search"),
+                Input::Typing { at: 1100 },
+                Input::Key { at: 1100 + TYPE_SETTLE_MS + 300, key: Key::Enter },
+            ],
+        );
+        assert_eq!(h.time_of(drafts[0].shot), 1100 + TYPE_SETTLE_MS + 300);
+    }
+
+    #[test]
+    fn typing_that_times_out_takes_its_picture_when_the_wait_ran_out() {
+        let (mut b, mut h) = (builder(), FakeHost::new());
+        h.set_text("hello");
+        let delay = b.settings().typing_delay_ms;
+        let drafts = run(
+            &mut b,
+            &mut h,
+            vec![field_click(1000, 5, 5, "Search"), Input::Typing { at: 1100 }, Input::Tick { at: 1100 + delay }],
+        );
+        assert_eq!(titles(&drafts), ["Type \"hello\""]);
+        assert_eq!(h.time_of(drafts[0].shot), 1100 + delay);
     }
 
     #[test]

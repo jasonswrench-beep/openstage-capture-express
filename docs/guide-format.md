@@ -4,8 +4,8 @@ This document is the source of truth for what Express writes to disk. The code i
 with it: change this file in the same commit as any code that reads or writes the format. Every change to the format bumps
 `schemaVersion` and ships a migration with a fixture (see "Versions and migrations").
 
-Current version: **0.1.0**. Status: written and tested on any computer (the tests in `crates/openstage-express-core`); not yet used
-by a window or by real capture.
+Current version: **0.1.0**. Status: written and tested on any computer (the tests in `crates/openstage-express-core`), used by the
+window's editor, and written by real capture (see "How capturing fills a guide"; milestone M6).
 
 ## A guide is a folder
 
@@ -198,6 +198,38 @@ written to a temporary file beside it (`guide.json.tmp`), forced to disk, and re
 the old file or the new one. A new picture is written **before** the guide that names it. So a crash costs at most the step being
 made: the last complete guide is there, plus possibly one picture nothing uses yet.
 
+## How capturing fills a guide
+
+Capturing makes a guide folder when the **first step** arrives, so a capture of nothing leaves nothing behind. The guide is called
+"Guide" followed by the date and time capturing started, such as `Guide 2026-11-01 09.38` (the editor cannot rename a guide yet), and
+takes the language `en` until the settings can say otherwise. Each step is then written as it is
+made: its picture first (`images/step-0001.png`, a PNG of the whole display, named by the step number), then `guide.json` in one
+atomic rename, so a crash loses at most the step in flight (see "Saving, and what a crash can lose").
+
+A captured step has these fields filled in, and no others beyond what the format lists:
+
+- `kind` is `image`, `title` is the smart title (`Click "Save"`, `Select "Country"`, `Type "ann@example.org"`, `Screenshot`), and
+  `image` names the picture with its width and height in pixels.
+- `click` is where the click was, **in the picture's own pixels** (the display's top left corner is 0, 0 even when the display sits
+  at a negative place on the desktop). A step made by the capture-now hotkey has no `click` unless the setting "hotkey captures
+  cursor" is on.
+- `control` is the name and kind (English role: `button`, `edit`, `combo box`, ...) Windows' accessibility information gave for the
+  thing clicked. It is absent when Windows gave neither.
+- `typed` is the text of a `Type` step, **read from the field when typing finished**, never built from keys. Express's keyboard hook
+  never passes on which key was pressed. A password field never has a `typed`, a `Type` step, or any of its text anywhere; a field
+  that gives no text, or more than 500 letters (a whole document), gives `Type in "Name"` and no `typed`.
+- `annotations` hold the marker (`clickMark`, size 56) and the cursor (`cursor`, style `pointer`, or `text` over an edit field or
+  document, size 32), both scaled by the display's scaling percent, with ids `a1` and `a2` as the editor would give them. They are
+  ordinary marks: the person can remove or restyle either.
+- `focus` is the automatic focused view (150 percent), set when the focused view is on for new steps and the step has a click.
+- `capturedAt` is the time the step was written.
+
+The picture of a click is the **last picture of the screen taken at or before the click** (so an open menu or a tooltip is still in
+it), kept in a ring of the latest pictures bounded to 64 megabytes. The picture of a `Type` step is taken at least 120 ms after the
+last key, or at the Enter, Tab, Escape or click that ended the typing if that is later, so that the field shows its text. With a
+screenshot delay, the picture is the first one taken that long after the click, or the newest one if the screen did not change.
+Express's own windows are marked `WDA_EXCLUDEFROMCAPTURE`, so they are not in any picture, and a click on one of them is never a
+step.
 ## Versions and migrations
 
 - Opening a guide whose `schemaVersion` is newer than this program's is refused with "This guide was made by a newer Express", and
@@ -338,4 +370,5 @@ A `.pptx` written by Express itself, in the same way.
 
 ## Not in this document yet
 
-The settings file is written when it is built. WebP is not built (spec S3).
+The settings file is written when it is built. WebP is not built (spec S3). Capturing a window or a drawn area (rather than the whole
+display) is not built.

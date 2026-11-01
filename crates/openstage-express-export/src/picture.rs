@@ -29,6 +29,24 @@ impl PictureSource for FolderPictures<'_> {
     }
 }
 
+/// Pictures from a guide folder that is named by its path, so the owner does not have to borrow the open folder (looking in
+/// `images` and then `trash`, as [`FolderPictures`] does). A name that is not an allowed picture path gives nothing.
+#[derive(Debug, Clone)]
+pub struct DiskPictures {
+    pub root: std::path::PathBuf,
+}
+
+impl PictureSource for DiskPictures {
+    fn picture(&self, logical: &str) -> Option<Picture> {
+        if !openstage_express_core::model::is_safe_picture_path(logical) {
+            return None;
+        }
+        let name = logical.strip_prefix("images/")?;
+        let path = ["images", "trash"].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())?;
+        decode_png(&std::fs::read(path).ok()?).ok()
+    }
+}
+
 /// Pictures held in memory, for tests and the demo.
 #[derive(Debug, Default)]
 pub struct MemoryPictures(pub HashMap<String, Picture>);
@@ -106,6 +124,24 @@ mod tests {
         c.fill_rect(PixelRect::new(5, 5, 10, 10), Rgb(200, 30, 60));
         c.fill_rect(PixelRect::new(20, 10, 15, 15), Rgb(10, 120, 240));
         c
+    }
+
+    #[test]
+    fn disk_pictures_read_from_images_then_trash_and_refuse_unsafe_names() {
+        let dir = tempfile::tempdir().unwrap();
+        for sub in ["images", "trash"] {
+            std::fs::create_dir_all(dir.path().join(sub)).unwrap();
+        }
+        let png = encode_png(&striped());
+        std::fs::write(dir.path().join("images").join("step-0001.png"), &png).unwrap();
+        std::fs::write(dir.path().join("trash").join("step-0002.png"), &png).unwrap();
+        let pictures = DiskPictures { root: dir.path().to_path_buf() };
+        assert_eq!(pictures.picture("images/step-0001.png").map(|p| (p.width, p.height)), Some((40, 30)));
+        assert!(pictures.picture("images/step-0002.png").is_some(), "a deleted step's picture is found in the trash");
+        assert!(pictures.picture("images/step-0003.png").is_none(), "a picture that is not there");
+        assert!(pictures.picture("../guide.json").is_none());
+        assert!(pictures.picture("images/../../x.png").is_none());
+        assert!(pictures.picture("C:/Windows/x.png").is_none());
     }
 
     #[test]

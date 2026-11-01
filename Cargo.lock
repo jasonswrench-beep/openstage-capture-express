@@ -1939,6 +1939,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "openstage-capture"
+version = "0.1.0"
+dependencies = [
+ "openstage-capture-project",
+ "openstage-capture-protocol",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "openstage-capture-project"
 version = "0.1.0"
 dependencies = [
@@ -1950,10 +1960,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "openstage-capture-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "openstage-capture-render"
 version = "0.1.0"
 dependencies = [
  "openstage-capture-project",
+]
+
+[[package]]
+name = "openstage-capture-windows"
+version = "0.1.0"
+dependencies = [
+ "openstage-capture",
+ "openstage-capture-project",
+ "openstage-capture-render",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]
@@ -1966,6 +1997,7 @@ dependencies = [
  "openstage-express-export",
  "openstage-express-windows",
  "png 0.17.16",
+ "serde_json",
  "tempfile",
 ]
 
@@ -2006,8 +2038,10 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "openstage-capture-render",
+ "openstage-capture-windows",
  "openstage-express-core",
  "openstage-express-export",
+ "serde",
  "serde_json",
  "tempfile",
  "webview2-com",

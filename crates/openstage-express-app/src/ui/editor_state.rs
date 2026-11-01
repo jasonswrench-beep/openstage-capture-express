@@ -10,9 +10,9 @@ use openstage_capture_render::BlockText;
 use openstage_express_core::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_core::render::render_step;
-use openstage_express_core::{Document, Position, Session, Step, StepDraft};
+use openstage_express_core::{Document, GuideFolder, Position, Session, Step, StepDraft};
 use openstage_express_export::demo::Demo;
-use openstage_express_export::picture::{MemoryPictures, PictureSource};
+use openstage_express_export::picture::{DiskPictures, PictureSource};
 
 use super::rows::{rows, Row};
 
@@ -28,7 +28,11 @@ pub struct Buffer {
 
 pub struct EditorState {
     session: Session,
-    pictures: MemoryPictures,
+    pictures: Box<dyn PictureSource>,
+    /// The guide folder this guide lives in, if it is a real guide (the example guide has none). Changes are saved to it.
+    folder: Option<GuideFolder>,
+    /// What the document looked like when it was last saved, to know when to save again.
+    saved_stamp: Option<Stamp>,
     selected: Option<String>,
     pub buffer: Buffer,
     texture: Option<(String, egui::TextureHandle)>,
@@ -41,12 +45,23 @@ pub struct EditorState {
 /// The words in the status line after something happens (a screen reader says them).
 pub type Said = Option<String>;
 
+/// Enough of the document's state to tell that it has changed since it was saved: how many changes can be undone, whether any can
+/// be redone, and when the guide was last touched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Stamp {
+    undo_depth: usize,
+    can_redo: bool,
+    updated_at: String,
+}
+
 impl EditorState {
     /// An editor over the example guide.
     pub fn new(demo: Demo) -> EditorState {
         let mut state = EditorState {
             session: Session::new(demo.document),
-            pictures: demo.pictures,
+            pictures: Box::new(demo.pictures),
+            folder: None,
+            saved_stamp: None,
             selected: None,
             buffer: Buffer::default(),
             texture: None,
@@ -62,6 +77,58 @@ impl EditorState {
 
     pub fn doc(&self) -> &Document {
         self.session.doc()
+    }
+
+    /// An editor over a real guide in `folder`. Every change is saved to the folder (see [`EditorState::save_if_changed`]).
+    pub fn open(folder: GuideFolder, doc: Document) -> EditorState {
+        let pictures = DiskPictures { root: folder.path().to_path_buf() };
+        let mut state = EditorState {
+            session: Session::new(doc),
+            pictures: Box::new(pictures),
+            folder: Some(folder),
+            saved_stamp: None,
+            selected: None,
+            buffer: Buffer::default(),
+            texture: None,
+            focus_title_next: false,
+            focus_row_next: false,
+        };
+        state.saved_stamp = Some(state.stamp());
+        let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
+        if let Some(id) = first {
+            state.select(&id);
+        }
+        state
+    }
+
+    fn stamp(&self) -> Stamp {
+        Stamp {
+            undo_depth: self.session.undo_depth(),
+            can_redo: self.session.can_redo(),
+            updated_at: self.session.doc().guide.updated_at.clone(),
+        }
+    }
+
+    /// Whether this editor saves to a guide folder.
+    pub fn is_saved_to_disk(&self) -> bool {
+        self.folder.is_some()
+    }
+
+    /// Save the guide if it changed since it was last saved. Returns what to tell the person if the save failed (the editor
+    /// carries on, and tries again at the next change).
+    pub fn save_if_changed(&mut self) -> Option<String> {
+        let folder = self.folder.as_ref()?;
+        let now = self.stamp();
+        if self.saved_stamp.as_ref() == Some(&now) {
+            return None;
+        }
+        match folder.save(self.session.doc()) {
+            Ok(_) => {
+                self.saved_stamp = Some(now);
+                None
+            }
+            Err(why) => Some(format!("The guide could not be saved: {why}")),
+        }
     }
 
     pub fn can_undo(&self) -> bool {

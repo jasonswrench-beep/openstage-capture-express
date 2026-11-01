@@ -10,6 +10,24 @@
 //! `cargo test --workspace` still runs everywhere.
 
 #[cfg(windows)]
+pub mod affinity;
+#[cfg(windows)]
 pub mod console;
 #[cfg(windows)]
+pub mod hotkeys;
+#[cfg(windows)]
+pub mod input;
+#[cfg(windows)]
 pub mod pdf;
+#[cfg(windows)]
+pub mod run;
+#[cfg(windows)]
+pub mod screen;
+#[cfg(windows)]
+pub mod synthetic;
+#[cfg(windows)]
+pub mod system;
+#[cfg(windows)]
+pub mod testwin;
+#[cfg(windows)]
+pub mod uia;
