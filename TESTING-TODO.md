@@ -122,7 +122,7 @@ submit an assignment") to open from the card under "Your guides".
       steps list asks "Empty the trash for good?" with "Keep them" ready; Enter or Escape keeps everything. "Empty the trash for good"
       deletes the steps and their pictures from the guide's folder (look in `trash`: the pictures should be gone, and the pictures of
       the steps that are left still in `images`), and Undo can no longer go back past it. This is permanent: the pictures do not go to
-      the Recycle Bin. Is that what you want, or should they go to the Recycle Bin? Does the question say enough? Does it matter
+      the Recycle Bin (decided 2026-11-01: for good, not the Recycle Bin). Does the question say enough? Does it matter
       that Undo is lost for the steps deleted before as well as the deleted ones? Narrator and NVDA: the question's heading, both
       buttons, and the status line after emptying should be read. Not tried: a picture another program has open (the words are
       tested with a locked file, on this PC only).
