@@ -1510,3 +1510,33 @@ fn a_click_on_empty_picture_with_the_mouse_chooses_no_mark() {
     h.settle();
     assert!(the_editor(&h).selected_mark().is_none());
 }
+
+#[test]
+fn the_guide_is_renamed_in_the_editor_and_home_lists_it_by_the_new_name() {
+    let finished = one_captured_step();
+    let folder_path = finished.folder.path().to_path_buf();
+    let library = folder_path.parent().unwrap().to_path_buf();
+    drop(finished);
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(library, super::capture::cannot_capture());
+    h.invoke(Role::Button, "Captured guide, 1 step");
+    h.focus_on(Role::TextInput, "Guide title");
+    h.key(Key::A, ctrl());
+    h.type_text("Saving a file");
+    h.key(Key::Tab, NO_MODS);
+    assert!(h.status().starts_with("The guide is now called Saving a file."), "{}", h.status());
+    h.find(Role::Heading, "Saving a file");
+    h.invoke(Role::Button, "Back to guides");
+    h.find(Role::Button, "Saving a file, 1 step");
+    let saved = std::fs::read_to_string(folder_path.join("guide.json")).unwrap();
+    assert!(saved.contains("\"title\": \"Saving a file\""), "{saved}");
+}
+
+#[test]
+fn duplicate_step_makes_a_copy_and_says_so() {
+    let mut h = Harness::new(Screen::Editor);
+    let before = h.rows().len();
+    h.invoke(Role::Button, "Duplicate step");
+    assert_eq!(h.rows().len(), before + 1);
+    assert!(h.status().starts_with("Duplicated. The copy is"), "{}", h.status());
+}

@@ -203,7 +203,7 @@ made: the last complete guide is there, plus possibly one picture nothing uses y
 ## How capturing fills a guide
 
 Capturing makes a guide folder when the **first step** arrives, so a capture of nothing leaves nothing behind. The guide is called
-"Guide" followed by the date and time capturing started, such as `Guide 2026-11-01 09.38` (the editor cannot rename a guide yet), and
+"Guide" followed by the date and time capturing started, such as `Guide 2026-11-01 09.38` (the editor's Guide title box renames it), and
 takes the language `en` until the settings can say otherwise. Each step is then written as it is
 made: its picture first (`images/step-0001.png`, a PNG of the whole display, named by the step number), then `guide.json` in one
 atomic rename, so a crash loses at most the step in flight (see "Saving, and what a crash can lose").

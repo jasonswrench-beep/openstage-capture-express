@@ -98,7 +98,7 @@ submit an assignment") to open from the card under "Your guides".
       focused crop as a frame; is that clear? Blur especially: blur a name on a real screenshot, export a PNG, and check it cannot be read
       (it is a coarse mosaic, not a black box; use a solid rectangle to hide something that must stay secret).
 - [ ] Not built in the editor yet: dragging to draw a new shape (a mark starts at a default size and is moved), picking several
-      steps at once, duplicating a step, panning or zooming the focused crop by hand, editing a guide's own title, and cutting the
+      steps at once, panning or zooming the focused crop by hand, deleting or renaming a guide from Home, and cutting the
       picture.
 
 ## Milestone M6 (capture)
@@ -138,7 +138,7 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       engine and tested, but no setting reaches them), sound cues, cancelling after starting (Finish keeps the steps), HDR and
       protected content.
 - [ ] Open a guide in the folder `Documents\OpenStage Express\Guides` after a capture: is that the place you want guides kept? Is
-      "Guide 2026-11-01 09.38" a good first title? The editor cannot rename a guide yet (steps only), so every guide keeps it.
+      "Guide 2026-11-01 09.38" a good first title? Rename it in the editor (the Guide title box) if you like.
 
 ## Milestone M7 (so far: the Export screen)
 
