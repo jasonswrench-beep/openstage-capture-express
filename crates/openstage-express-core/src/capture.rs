@@ -51,6 +51,25 @@ impl Picture {
     pub fn bytes(&self) -> usize {
         self.bgra.len()
     }
+
+    /// The part of this picture inside the rectangle x, y, width, height (measured from the picture's top left corner), as a
+    /// picture of its own. The part of the rectangle that is outside the picture is left out. None if nothing of it is inside.
+    pub fn crop(&self, x: i32, y: i32, width: u32, height: u32) -> Option<Picture> {
+        let (left, top) = (i64::from(x).max(0), i64::from(y).max(0));
+        let right = (i64::from(x) + i64::from(width)).min(i64::from(self.width));
+        let bottom = (i64::from(y) + i64::from(height)).min(i64::from(self.height));
+        if right <= left || bottom <= top {
+            return None;
+        }
+        let (w, h) = ((right - left) as usize, (bottom - top) as usize);
+        let stride = self.width as usize * 4;
+        let mut out = Vec::with_capacity(w * h * 4);
+        for row in 0..h {
+            let from = (top as usize + row) * stride + left as usize * 4;
+            out.extend_from_slice(&self.bgra[from..from + w * 4]);
+        }
+        Picture::new(w as u32, h as u32, out)
+    }
 }
 
 /// A rectangle of the desktop in physical pixels. Its corner can be negative (a display to the left of the main one).
@@ -69,6 +88,20 @@ impl Area {
             && y >= self.y as i64
             && x < self.x as i64 + self.width as i64
             && y < self.y as i64 + self.height as i64
+    }
+
+    /// The part this area shares with another, or None if they do not overlap.
+    pub fn intersect(&self, other: &Area) -> Option<Area> {
+        let left = i64::from(self.x).max(i64::from(other.x));
+        let top = i64::from(self.y).max(i64::from(other.y));
+        let right = (i64::from(self.x) + i64::from(self.width)).min(i64::from(other.x) + i64::from(other.width));
+        let bottom = (i64::from(self.y) + i64::from(self.height)).min(i64::from(other.y) + i64::from(other.height));
+        (right > left && bottom > top).then(|| Area {
+            x: left as i32,
+            y: top as i32,
+            width: (right - left) as u32,
+            height: (bottom - top) as u32,
+        })
     }
 
     /// A point of the desktop in the coordinates of a picture of this area.
@@ -440,6 +473,55 @@ mod tests {
             !Area { x: 0, y: 0, width: 10, height: 10 }.contains(i32::MAX, i32::MAX),
             "no overflow at the far edge"
         );
+    }
+
+    // ---- cropping
+
+    fn numbered(width: u32, height: u32) -> Picture {
+        let mut bgra = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                bgra.extend_from_slice(&[x as u8, y as u8, 0, 255]);
+            }
+        }
+        Picture::new(width, height, bgra).unwrap()
+    }
+
+    #[test]
+    fn a_crop_is_the_part_inside_the_rectangle_with_its_own_corner_at_zero() {
+        let p = numbered(10, 8);
+        let c = p.crop(2, 3, 4, 2).unwrap();
+        assert_eq!((c.width, c.height), (4, 2));
+        assert_eq!(&c.bgra[0..2], &[2, 3], "its first pixel is the picture's pixel at 2, 3");
+        assert_eq!(
+            &c.bgra[(4 + 3) * 4..(4 + 3) * 4 + 2],
+            &[5, 4],
+            "and the pixel at 3, 1 of the crop is 5, 4 of the picture"
+        );
+    }
+
+    #[test]
+    fn a_crop_over_the_edge_keeps_only_what_is_there_and_one_outside_is_nothing() {
+        let p = numbered(10, 8);
+        let c = p.crop(-3, -2, 6, 5).unwrap();
+        assert_eq!((c.width, c.height), (3, 3));
+        assert_eq!(&c.bgra[0..2], &[0, 0]);
+        let c = p.crop(8, 6, 50, 50).unwrap();
+        assert_eq!((c.width, c.height), (2, 2));
+        assert!(p.crop(10, 0, 5, 5).is_none());
+        assert!(p.crop(-5, 0, 5, 5).is_none());
+        assert!(p.crop(0, 0, 0, 5).is_none());
+        assert!(p.crop(i32::MAX, i32::MAX, u32::MAX, u32::MAX).is_none(), "no overflow");
+    }
+
+    #[test]
+    fn areas_overlap_by_what_they_share() {
+        let a = Area { x: 0, y: 0, width: 100, height: 100 };
+        let b = Area { x: 60, y: -20, width: 100, height: 50 };
+        assert_eq!(a.intersect(&b), Some(Area { x: 60, y: 0, width: 40, height: 30 }));
+        assert_eq!(b.intersect(&a), a.intersect(&b));
+        assert_eq!(a.intersect(&Area { x: 100, y: 0, width: 5, height: 5 }), None, "touching is not overlapping");
+        assert_eq!(a.intersect(&a), Some(a));
     }
 
     // ---- the frame ring

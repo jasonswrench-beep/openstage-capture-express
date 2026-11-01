@@ -13,6 +13,8 @@ use openstage_express_core::Language;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::target::{AreaChoice, TargetKind};
+
 pub const SCHEMA_VERSION: &str = "0.1.0";
 
 /// The colour scheme.
@@ -119,6 +121,10 @@ pub struct AppSettings {
     /// Draw a circle round each click.
     pub mark_clicked_area: bool,
     pub capture_typing: bool,
+    /// What to capture: the whole screen, one window or an area (the window or area itself is chosen each time, but the last area
+    /// is kept).
+    pub capture_target: TargetKind,
+    pub last_area: Option<AreaChoice>,
     pub title_language: TitleLanguage,
     /// How long to wait after a click before taking its picture (so an animation can finish).
     pub screenshot_delay_ms: u64,
@@ -149,6 +155,8 @@ impl Default for AppSettings {
             show_cursor: true,
             mark_clicked_area: true,
             capture_typing: true,
+            capture_target: TargetKind::Screen,
+            last_area: None,
             title_language: TitleLanguage::En,
             screenshot_delay_ms: 0,
             typing_delay_ms: 1000,

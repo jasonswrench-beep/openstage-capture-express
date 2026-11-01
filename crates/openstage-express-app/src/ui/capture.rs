@@ -4,10 +4,12 @@
 
 use std::path::Path;
 
+use openstage_express_core::capture::Picture;
 use openstage_express_core::{Document, GuideFolder};
 
 use super::bar::{BarAction, BarView};
 use crate::settings::AppSettings;
+use crate::target::Target;
 
 /// A key pressed anywhere in Windows that Express listens for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,10 +45,104 @@ pub trait CaptureControl {
     fn finished(&mut self) -> Option<Outcome>;
 }
 
-/// Starts a capture into the guides folder.
-pub type Starter = Box<dyn FnMut(&Path, &AppSettings) -> Result<Box<dyn CaptureControl>, String>>;
+/// Starts a capture into the guides folder, of what the person chose to capture.
+pub type Starter = Box<dyn FnMut(&Path, &AppSettings, &Target) -> Result<Box<dyn CaptureControl>, String>>;
 
 /// The starter for a system that cannot capture.
 pub fn cannot_capture() -> Starter {
-    Box::new(|_, _| Err("Capturing needs Windows.".to_string()))
+    Box::new(|_, _, _| Err("Capturing needs Windows.".to_string()))
+}
+
+/// One open window in the list the person chooses from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRow {
+    pub handle: isize,
+    pub title: String,
+    pub process: String,
+    /// What the list shows and a screen reader says.
+    pub words: String,
+}
+
+/// One display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayRow {
+    /// 1 is the main display.
+    pub number: u32,
+    pub width: u32,
+    pub height: u32,
+    pub words: String,
+}
+
+/// What the window needs to know about the desktop to let the person choose what to capture.
+pub trait Desktop {
+    /// The open windows, the one in front first, without this program's own.
+    fn windows(&self) -> Result<Vec<WindowRow>, String>;
+    fn displays(&self) -> Result<Vec<DisplayRow>, String>;
+    /// A picture of one display as it is now (this program's own windows are not in it).
+    fn snapshot(&self, display: u32) -> Result<Picture, String>;
+}
+
+/// A made-up desktop (a few windows, one display, a drawn picture), for looking at the choosing screens without showing anyone's real
+/// windows. Used by `--screen choose-window` and `--screen choose-area`.
+pub struct DemoDesktop;
+
+impl Desktop for DemoDesktop {
+    fn windows(&self) -> Result<Vec<WindowRow>, String> {
+        let row = |handle: isize, title: &str, process: &str, size: &str| WindowRow {
+            handle,
+            title: title.to_string(),
+            process: process.to_string(),
+            words: format!("{process}: {title} ({size})"),
+        };
+        Ok(vec![
+            row(1, "Course site: Assignments", "msedge.exe", "1600 by 900"),
+            row(2, "Untitled", "notepad.exe", "800 by 600"),
+            row(3, "Grades.xlsx", "excel.exe", "1280 by 720"),
+        ])
+    }
+
+    fn displays(&self) -> Result<Vec<DisplayRow>, String> {
+        Ok(vec![DisplayRow {
+            number: 1,
+            width: 1920,
+            height: 1080,
+            words: "Display 1, 1920 by 1080, main display".to_string(),
+        }])
+    }
+
+    fn snapshot(&self, _: u32) -> Result<Picture, String> {
+        let (w, h) = (1920u32, 1080u32);
+        let mut bgra = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let (title_bar, panel) = (y < 60, (300..1500).contains(&x) && (200..900).contains(&y));
+                let shade = if title_bar {
+                    60
+                } else if panel {
+                    235
+                } else {
+                    150 + (y / 12) as u8
+                };
+                bgra.extend_from_slice(&[shade, shade.saturating_sub(10), shade.saturating_sub(30), 255]);
+            }
+        }
+        Picture::new(w, h, bgra).ok_or_else(|| "no picture".to_string())
+    }
+}
+
+/// The desktop of a system that cannot capture.
+pub struct NoDesktop;
+
+impl Desktop for NoDesktop {
+    fn windows(&self) -> Result<Vec<WindowRow>, String> {
+        Err("Choosing a window needs Windows.".to_string())
+    }
+
+    fn displays(&self) -> Result<Vec<DisplayRow>, String> {
+        Err("Choosing an area needs Windows.".to_string())
+    }
+
+    fn snapshot(&self, _: u32) -> Result<Picture, String> {
+        Err("A picture of the screen needs Windows.".to_string())
+    }
 }

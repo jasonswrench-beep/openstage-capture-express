@@ -14,7 +14,8 @@ editing, undo, saving, smart titles, the step builder, drawing of marks, the foc
 a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the WebView2 engine that Windows ships, a Word file and a
 PowerPoint file that Express writes itself, a window, and (since 2026-11-01) real capture.** Home lists the guides in the guides
 folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the window into a small capture bar that stays on top
-while you work in other programs; each click and each field you type in becomes a step, with its picture, written to disk as it is
+while you work in other programs; before Start you choose what to capture: the whole screen, one window (from a list of the open
+windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
 and redo, and every change is saved. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
 spotlight) are added with buttons, listed, moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
@@ -29,8 +30,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 573 passed (214 in the core, 182 in the exports, 33 in the
-  Windows crate, 144 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 607 passed (225 in the core, 182 in the exports, 42 in the
+  Windows crate, 158 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -116,7 +117,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing one window or a drawn area, dragging to draw a new shape, picking several steps, deleting or renaming a guide from Home,
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, dragging to draw a new shape, picking several steps, deleting or renaming a guide from Home,
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), changing the hotkeys, sounds, the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window

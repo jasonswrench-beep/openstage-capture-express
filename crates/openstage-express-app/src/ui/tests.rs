@@ -561,6 +561,8 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Export => &[(Role::Button, "Back to the guide")],
                     Screen::Settings | Screen::About => &[(Role::Button, "Back to guides")],
+                    Screen::ChooseWindow => &[(Role::Button, "Back")],
+                    Screen::ChooseArea => &[(Role::Button, "Back")],
                     Screen::Editor => &[
                         (Role::Button, "Back to guides"),
                         (Role::Button, "Undo"),
@@ -708,6 +710,8 @@ impl CaptureControl for FakeCapture {
             steps: s.steps,
             last: None,
             what: "the whole screen".to_string(),
+            target: crate::target::TargetKind::Screen,
+            can_start: false,
             hotkeys: String::new(),
         }
     }
@@ -734,7 +738,7 @@ impl CaptureControl for FakeCapture {
 
 fn fake_starter(state: &Rc<RefCell<FakeState>>) -> Starter {
     let state = Rc::clone(state);
-    Box::new(move |_, _| Ok(Box::new(FakeCapture(Rc::clone(&state))) as Box<dyn CaptureControl>))
+    Box::new(move |_, _, _| Ok(Box::new(FakeCapture(Rc::clone(&state))) as Box<dyn CaptureControl>))
 }
 
 impl Harness {
@@ -845,7 +849,7 @@ fn capture_that_cannot_start_says_why_and_stays_on_the_bar() {
     let mut h = Harness::new(Screen::Home);
     h.with_capture(
         std::path::PathBuf::new(),
-        Box::new(|_, _| Err("Windows would not let the program watch the mouse.".to_string())),
+        Box::new(|_, _, _| Err("Windows would not let the program watch the mouse.".to_string())),
     );
     h.invoke(Role::Button, "Start capturing");
     h.invoke(Role::Button, "Start");
@@ -1195,7 +1199,7 @@ fn what_is_chosen_reaches_the_next_capture() {
     let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
     h.app = app.with_capture(
         PathBuf::new(),
-        Box::new(move |_, settings| {
+        Box::new(move |_, settings, _| {
             *record.borrow_mut() = Some(settings.clone());
             Ok(Box::new(FakeCapture(Rc::clone(&fake))) as Box<dyn CaptureControl>)
         }),
@@ -1539,4 +1543,281 @@ fn duplicate_step_makes_a_copy_and_says_so() {
     h.invoke(Role::Button, "Duplicate step");
     assert_eq!(h.rows().len(), before + 1);
     assert!(h.status().starts_with("Duplicated. The copy is"), "{}", h.status());
+}
+
+// ---- choosing what to capture: the screen, one window, or an area
+
+use super::capture::{Desktop, DisplayRow, WindowRow};
+use crate::target::TargetKind;
+use openstage_express_core::capture::Picture;
+
+/// A desktop of made-up windows and displays that takes no pictures. `snapshots` records which displays were looked at.
+struct FakeDesktop {
+    windows: Vec<WindowRow>,
+    displays: Vec<DisplayRow>,
+    snapshots: Rc<RefCell<Vec<u32>>>,
+}
+
+fn window_row(handle: isize, title: &str, process: &str) -> WindowRow {
+    WindowRow {
+        handle,
+        title: title.into(),
+        process: process.into(),
+        words: format!("{process}: {title} (800 by 600)"),
+    }
+}
+
+fn display_row(number: u32) -> DisplayRow {
+    DisplayRow { number, width: 400, height: 300, words: format!("Display {number}, 400 by 300") }
+}
+
+impl Desktop for FakeDesktop {
+    fn windows(&self) -> Result<Vec<WindowRow>, String> {
+        Ok(self.windows.clone())
+    }
+
+    fn displays(&self) -> Result<Vec<DisplayRow>, String> {
+        Ok(self.displays.clone())
+    }
+
+    fn snapshot(&self, display: u32) -> Result<Picture, String> {
+        self.snapshots.borrow_mut().push(display);
+        let shade = display as u8 * 40;
+        Picture::new(400, 300, vec![shade; 400 * 300 * 4]).ok_or_else(|| "no picture".to_string())
+    }
+}
+
+type Asked = Rc<RefCell<Vec<crate::target::Target>>>;
+type Looked = Rc<RefCell<Vec<u32>>>;
+
+/// A window on the capture bar with a made-up desktop, settings saved in `dir`, and a starter that records what it was asked to
+/// capture.
+fn choosing_harness(dir: &std::path::Path, windows: Vec<WindowRow>, displays: u32) -> (Harness, Asked, Looked) {
+    let asked: Asked = Rc::default();
+    let looked: Looked = Rc::default();
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let (record, fake) = (Rc::clone(&asked), Rc::clone(&state));
+    let mut h = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app
+        .with_capture(
+            PathBuf::new(),
+            Box::new(move |_, _, target| {
+                record.borrow_mut().push(target.clone());
+                Ok(Box::new(FakeCapture(Rc::clone(&fake))) as Box<dyn CaptureControl>)
+            }),
+            "the whole screen",
+            Box::new(|_| false),
+        )
+        .with_desktop(Box::new(FakeDesktop {
+            windows,
+            displays: (1..=displays).map(display_row).collect(),
+            snapshots: Rc::clone(&looked),
+        }))
+        .with_settings(AppSettings::default(), Some(dir.join("settings.json")), None);
+    h.settle();
+    h.invoke(Role::Button, "Start capturing");
+    (h, asked, looked)
+}
+
+#[test]
+fn the_ready_bar_offers_the_screen_a_window_or_an_area() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    for kind in TargetKind::ALL {
+        h.find(Role::RadioButton, kind.name());
+    }
+    assert_eq!(h.node(h.find(Role::RadioButton, "The whole screen")).toggled(), Some(accesskit::Toggled::True));
+    assert!(!h.has(Role::Button, "Choose window..."), "nothing to choose for the whole screen");
+    assert!(!h.node(h.find(Role::Button, "Start")).is_disabled());
+}
+
+#[test]
+fn choosing_one_window_needs_a_window_chosen_before_start_and_remembers_the_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, asked, _) = choosing_harness(dir.path(), vec![window_row(7, "Untitled", "notepad.exe")], 1);
+    h.invoke(Role::RadioButton, "One window");
+    assert_eq!(h.app.target.kind, TargetKind::Window);
+    h.find(Role::Button, "Choose window...");
+    assert!(h.node(h.find(Role::Button, "Start")).is_disabled(), "no window yet");
+    h.find(Role::Label, "Captures no window yet. Choose one first.");
+    h.app.hotkey(super::capture::HotkeyAction::StartOrFinish);
+    h.settle();
+    assert_eq!(h.status(), "Choose the window to capture first.");
+    assert!(asked.borrow().is_empty(), "nothing was started");
+    let (saved, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(saved.capture_target, TargetKind::Window, "the kind is remembered");
+}
+
+#[test]
+fn the_list_of_windows_is_read_out_and_choosing_one_returns_to_the_bar_ready_to_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = vec![window_row(7, "Untitled", "notepad.exe"), window_row(9, "Inbox", "outlook.exe")];
+    let (mut h, asked, _) = choosing_harness(dir.path(), rows, 1);
+    h.invoke(Role::RadioButton, "One window");
+    h.invoke(Role::Button, "Choose window...");
+    assert_eq!(h.app.screen, Screen::ChooseWindow);
+    assert_eq!(h.app.window_mode(), WindowMode::Tall, "the strip is made taller for the list");
+    h.find(Role::Heading, "Choose a window");
+    assert_eq!(h.mark_rows().len(), 0);
+    h.find(Role::ListBoxOption, "notepad.exe: Untitled (800 by 600)");
+    h.find(Role::ListBoxOption, "outlook.exe: Inbox (800 by 600)");
+    assert!(h.status().starts_with("Choose a window. 2 windows are open."), "{}", h.status());
+    h.key(Key::ArrowDown, NO_MODS);
+    h.invoke(Role::Button, "Use this window");
+    assert_eq!(h.app.screen, Screen::Bar);
+    assert_eq!(h.app.window_mode(), WindowMode::Bar);
+    h.find(Role::Label, "Captures the window \"Inbox\" of outlook.exe.");
+    assert!(!h.node(h.find(Role::Button, "Start")).is_disabled());
+    h.invoke(Role::Button, "Start");
+    let target = asked.borrow()[0].clone();
+    assert_eq!(target.kind, TargetKind::Window);
+    assert_eq!(target.window.map(|w| w.handle), Some(9), "the capture was asked for the window that was chosen");
+}
+
+#[test]
+fn an_empty_list_of_windows_says_so_and_back_returns_to_the_bar() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "One window");
+    h.invoke(Role::Button, "Choose window...");
+    h.find(
+        Role::Label,
+        "No window is open that can be captured. Open the program you want to explain, then refresh the list.",
+    );
+    assert!(h.node(h.find(Role::Button, "Use this window")).is_disabled());
+    h.invoke(Role::Button, "Refresh the list");
+    h.invoke(Role::Button, "Back");
+    assert_eq!(h.app.screen, Screen::Bar);
+}
+
+#[test]
+fn drawing_an_area_shows_a_picture_of_the_display_and_the_numbers_can_be_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, asked, looked) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "An area I draw");
+    assert!(h.node(h.find(Role::Button, "Start")).is_disabled());
+    h.invoke(Role::Button, "Draw the area...");
+    assert_eq!(h.app.screen, Screen::ChooseArea);
+    assert_eq!(h.app.window_mode(), WindowMode::Normal, "the whole window, to see the picture");
+    assert_eq!(*looked.borrow(), [1]);
+    h.find(Role::Heading, "Draw the area to capture");
+    h.find(Role::Label, "The area is the whole display, 400 by 300.");
+    h.find(Role::Image, "A picture of the display. The area is the whole display, 400 by 300.");
+    // Type the four numbers, as a keyboard user would.
+    for (name, value) in
+        [("Left, in pixels", "50"), ("Top, in pixels", "40"), ("Width, in pixels", "200"), ("Height, in pixels", "150")]
+    {
+        h.focus_on(Role::TextInput, name);
+        h.key(Key::A, ctrl());
+        h.type_text(value);
+        h.key(Key::Tab, NO_MODS);
+    }
+    h.find(Role::Label, "The area is 200 by 150, 50 pixels from the left and 40 from the top.");
+    h.invoke(Role::Button, "Use this area");
+    assert_eq!(h.app.screen, Screen::Bar);
+    h.find(Role::Label, "Captures an area of Display 1: 200 by 150, 50 pixels from the left and 40 from the top.");
+    h.invoke(Role::Button, "Start");
+    let target = asked.borrow()[0].clone();
+    let area = target.area.expect("the area went to the capture");
+    assert_eq!((area.display, area.x, area.y, area.width, area.height), (1, 50, 40, 200, 150));
+    let (saved, _) = crate::settings::load(&dir.path().join("settings.json"));
+    assert_eq!(saved.last_area, Some(area), "the last area is remembered");
+}
+
+#[test]
+fn numbers_that_cannot_be_used_are_refused_in_words_and_change_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "An area I draw");
+    h.invoke(Role::Button, "Draw the area...");
+    h.focus_on(Role::TextInput, "Width, in pixels");
+    h.key(Key::A, ctrl());
+    h.type_text("900");
+    h.key(Key::Tab, NO_MODS);
+    h.find(Role::Label, "The width can be at most 400 pixels, because the area starts 0 pixels from the left and the display is 400 pixels wide.");
+    h.find(Role::Label, "The area is the whole display, 400 by 300.");
+    h.focus_on(Role::TextInput, "Height, in pixels");
+    h.key(Key::A, ctrl());
+    h.type_text("tall");
+    h.key(Key::Tab, NO_MODS);
+    h.find(Role::Label, "Each box needs a whole number of pixels, such as 640.");
+}
+
+#[test]
+fn the_buttons_move_and_resize_the_area_and_the_whole_display_button_resets_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "An area I draw");
+    h.invoke(Role::Button, "Draw the area...");
+    h.invoke(Role::Button, "Narrower");
+    h.invoke(Role::Button, "Shorter");
+    h.find(Role::Label, "The area is 390 by 290, 0 pixels from the left and 0 from the top.");
+    h.invoke(Role::Button, "Move right");
+    h.invoke(Role::Button, "Move down");
+    h.find(Role::Label, "The area is 390 by 290, 10 pixels from the left and 10 from the top.");
+    h.invoke(Role::Button, "Use the whole display");
+    h.find(Role::Label, "The area is the whole display, 400 by 300.");
+}
+
+#[test]
+fn a_second_display_can_be_chosen_and_its_picture_is_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, looked) = choosing_harness(dir.path(), vec![], 2);
+    h.invoke(Role::RadioButton, "An area I draw");
+    h.invoke(Role::Button, "Draw the area...");
+    h.find(Role::RadioButton, "Display 1, 400 by 300");
+    h.invoke(Role::RadioButton, "Display 2, 400 by 300");
+    assert_eq!(*looked.borrow(), [1, 2]);
+    h.invoke(Role::Button, "Use this area");
+    assert_eq!(h.app.target.area.map(|a| a.display), Some(2));
+}
+
+#[test]
+fn dragging_on_the_picture_with_the_mouse_draws_a_new_area() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "An area I draw");
+    h.invoke(Role::Button, "Draw the area...");
+    for _ in 0..10 {
+        h.invoke(Role::Button, "Narrower"); // the area no longer covers the right of the picture: it is now 300 wide
+    }
+    let image = h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).expect("the picture");
+    let b = h.node(image).bounds().unwrap();
+    let scale = (b.x1 - b.x0) as f32 / 400.0;
+    let at = |x: f32, y: f32| Pos2::new(b.x0 as f32 + x * scale, b.y0 as f32 + y * scale);
+    let press = |pos: Pos2, down: bool| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: down,
+        modifiers: NO_MODS,
+    };
+    // Press on empty picture (the strip the area no longer covers), drag, let go.
+    h.events.push(Event::PointerMoved(at(360.0, 60.0)));
+    h.frame();
+    h.events.push(press(at(360.0, 60.0), true));
+    h.frame();
+    h.events.push(Event::PointerMoved(at(160.0, 200.0)));
+    h.frame();
+    h.frame();
+    h.events.push(press(at(160.0, 200.0), false));
+    h.frame();
+    h.settle();
+    let area = h.app.target.clone();
+    let _ = area;
+    h.invoke(Role::Button, "Use this area");
+    let chosen = h.app.target.area.expect("an area was chosen");
+    assert!((chosen.x as i32 - 160).abs() <= 3 && (chosen.y as i32 - 60).abs() <= 3, "{chosen:?}");
+    assert!((chosen.width as i32 - 200).abs() <= 3 && (chosen.height as i32 - 140).abs() <= 3, "{chosen:?}");
+}
+
+#[test]
+fn back_from_drawing_the_area_returns_to_the_bar_without_choosing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _, _) = choosing_harness(dir.path(), vec![], 1);
+    h.invoke(Role::RadioButton, "An area I draw");
+    h.invoke(Role::Button, "Draw the area...");
+    h.invoke(Role::Button, "Back");
+    assert_eq!(h.app.screen, Screen::Bar);
+    assert!(h.app.target.area.is_none());
 }

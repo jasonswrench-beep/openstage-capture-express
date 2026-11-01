@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 use openstage_express_core::capture::{Area, Captured, MarkOptions};
 use openstage_express_core::GuideFolder;
 use openstage_express_windows::hotkeys::{Action, Hotkeys, DEFAULTS};
-use openstage_express_windows::run::{CaptureRun, Command as RunCommand, RunEvent, RunOptions, RunState};
+use openstage_express_windows::run::{
+    CaptureRun, CaptureTarget, Command as RunCommand, RunEvent, RunOptions, RunState,
+};
 use openstage_express_windows::synthetic;
 use openstage_express_windows::testwin::{Beacon, Layout, BEACON_BGRA, READY};
 use openstage_express_windows::{affinity, screen};
@@ -492,7 +494,140 @@ pub fn run(out: &Path, wait_for_quiet: Duration) -> bool {
         .collect();
     report.check(leaked.is_empty(), "the password is in no file of the guide", &format!("{leaked:?}"));
     println!("\nThe guide it captured is in {}", folder.display());
+    window_and_area(&mut report, &layout);
     finish(report)
+}
+
+/// Capture only the test window, then only an area round it, and check that each picture is the size of what was chosen and that the
+/// click is placed in it. The window is moved between two clicks, to see that its frame is found again at each click.
+fn window_and_area(report: &mut Report, layout: &Layout) {
+    println!("\nCapturing one window, then one area:");
+    let Some(frame) = screen::window_area(layout.window) else {
+        report.fail("the test window has a frame", "Windows would not say where it is");
+        return;
+    };
+    let display = match screen::displays().ok().and_then(|all| screen::display_of(&frame, &all).cloned()) {
+        Some(d) => d,
+        None => {
+            report.fail("the test window is on a display", "no display holds it");
+            return;
+        }
+    };
+    let origin = screen::area_of(&display);
+    // One window.
+    let mut heard = Heard::default();
+    match CaptureRun::start(RunOptions {
+        target: CaptureTarget::Window { handle: layout.window },
+        ..RunOptions::default()
+    }) {
+        Err(why) => report.fail("capturing one window starts", &why),
+        Ok(run) => {
+            listen(&run, &mut heard, Duration::from_millis(1200));
+            synthetic::left_click(layout.save.0, layout.save.1);
+            let first = listen(&run, &mut heard, Duration::from_millis(1600));
+            let near = |step: &Captured, at: (i32, i32), within: &Area| {
+                step.draft.click.as_ref().is_some_and(|c| {
+                    let (ex, ey) = within.to_picture(at.0, at.1);
+                    (c.x - ex).abs() <= 2 && (c.y - ey).abs() <= 2
+                })
+            };
+            match first.first() {
+                Some(step) => {
+                    report.check(
+                        (step.picture.width, step.picture.height) == (frame.width, frame.height),
+                        "in window mode a picture is the size of the window",
+                        &format!(
+                            "{} by {}, the window is {} by {}",
+                            step.picture.width, step.picture.height, frame.width, frame.height
+                        ),
+                    );
+                    report.check(
+                        step.draft.title == "Click \"Save\"",
+                        "the window's button is titled with its name",
+                        &step.draft.title,
+                    );
+                    report.check(
+                        near(step, layout.save, &frame),
+                        "the click is placed inside the window's picture",
+                        &format!("{:?}", step.draft.click),
+                    );
+                }
+                None => report.fail("in window mode a click makes a step", "no step was made"),
+            }
+            // Move the window and click again: the picture is still the window, and the click is still where the button is in it.
+            let (dx, dy) = (60, 40);
+            if synthetic::move_window(layout.window, frame.x + dx, frame.y + dy) {
+                std::thread::sleep(Duration::from_millis(500));
+                synthetic::left_click(layout.check.0 + dx, layout.check.1 + dy);
+                let second = listen(&run, &mut heard, Duration::from_millis(1600));
+                let moved = screen::window_area(layout.window).unwrap_or(frame);
+                match second.first() {
+                    Some(step) => {
+                        report.check(
+                            (step.picture.width, step.picture.height) == (frame.width, frame.height),
+                            "after the window is moved the picture is still the window",
+                            &format!("{} by {}", step.picture.width, step.picture.height),
+                        );
+                        report.check(
+                            near(step, (layout.check.0 + dx, layout.check.1 + dy), &moved),
+                            "the click is placed in the window's picture where the button is",
+                            &format!("{:?}", step.draft.click),
+                        );
+                    }
+                    None => report.fail("a click in the moved window makes a step", "no step was made"),
+                }
+                synthetic::move_window(layout.window, frame.x, frame.y);
+                std::thread::sleep(Duration::from_millis(300));
+            } else {
+                report.skip("the window is moved", "Windows would not move the test window");
+            }
+            run.send(RunCommand::Finish);
+            listen(&run, &mut heard, Duration::from_millis(2000));
+            report.check(run.join().lost == 0, "no step was lost in window mode", "a step was lost");
+        }
+    }
+    // One area, drawn round the test window.
+    let region = CaptureTarget::Region {
+        x: (frame.x - origin.x).max(0) as u32,
+        y: (frame.y - origin.y).max(0) as u32,
+        width: frame.width,
+        height: frame.height,
+    };
+    let mut heard = Heard::default();
+    match CaptureRun::start(RunOptions { target: region, display_number: display.number, ..RunOptions::default() }) {
+        Err(why) => report.fail("capturing an area starts", &why),
+        Ok(run) => {
+            listen(&run, &mut heard, Duration::from_millis(1200));
+            synthetic::left_click(layout.check.0, layout.check.1);
+            let first = listen(&run, &mut heard, Duration::from_millis(1600));
+            match first.first() {
+                Some(step) => {
+                    report.check(
+                        (step.picture.width, step.picture.height) == (frame.width, frame.height),
+                        "in area mode a picture is the size of the area",
+                        &format!("{} by {}", step.picture.width, step.picture.height),
+                    );
+                    let (ex, ey) = (layout.check.0 - frame.x, layout.check.1 - frame.y);
+                    let placed =
+                        step.draft.click.as_ref().is_some_and(|c| (c.x - ex).abs() <= 2 && (c.y - ey).abs() <= 2);
+                    report.check(
+                        placed,
+                        "the click is placed inside the area's picture",
+                        &format!("{:?}", step.draft.click),
+                    );
+                    report.check(
+                        step.draft.title == "Click \"Check me\"",
+                        "the area's click is titled with the button's name",
+                        &step.draft.title,
+                    );
+                }
+                None => report.fail("in area mode a click makes a step", "no step was made"),
+            }
+            run.send(RunCommand::Finish);
+            listen(&run, &mut heard, Duration::from_millis(2000));
+            report.check(run.join().lost == 0, "no step was lost in area mode", "a step was lost");
+        }
+    }
 }
 
 fn finish(report: Report) -> bool {

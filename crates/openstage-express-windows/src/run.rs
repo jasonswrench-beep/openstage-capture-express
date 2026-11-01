@@ -11,6 +11,7 @@
 //! The run does not write anything. It sends [`RunEvent::Step`] with the step's picture; the program that started it encodes and
 //! saves the picture and the guide, so a slow disk never slows the noting of clicks.
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -22,7 +23,7 @@ use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowThreadProcessId, WindowFromPoint};
 
 use crate::input::{Hooks, Raw};
-use crate::screen::{area_of, displays, dpi_percent, ScreenFeed};
+use crate::screen::{area_of, display_of, displays, dpi_percent, window_area, window_is_open, ScreenFeed};
 use crate::uia::Uia;
 
 /// How often the engine is told that time has passed, so that waits can end.
@@ -74,15 +75,28 @@ pub struct RunSummary {
     pub cancelled: bool,
 }
 
+/// What part of the screen a run captures (spec C3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureTarget {
+    /// The whole of a display.
+    Screen,
+    /// One window, by Windows' number for it. The display it is on is captured whole and each step's picture is cut to the window's
+    /// frame as it is at the click, so a menu or a tooltip that is still open stays in the picture when it lies inside the frame.
+    Window { handle: isize },
+    /// A rectangle of a display, in pixels from that display's top left corner.
+    Region { x: u32, y: u32, width: u32, height: u32 },
+}
+
 pub struct RunOptions {
     pub settings: Settings,
-    /// 1 is the main display.
+    /// 1 is the main display. A window is captured on the display it is on, whatever this says.
     pub display_number: u32,
+    pub target: CaptureTarget,
 }
 
 impl Default for RunOptions {
     fn default() -> RunOptions {
-        RunOptions { settings: Settings::default(), display_number: 1 }
+        RunOptions { settings: Settings::default(), display_number: 1, target: CaptureTarget::Screen }
     }
 }
 
@@ -103,19 +117,44 @@ impl CaptureRun {
     /// Start capturing. Fails, in words, if Windows will not give the pictures or let the hooks in.
     pub fn start(options: RunOptions) -> Result<CaptureRun, String> {
         // Asking for the displays also makes this program aware of display scaling, which the click positions rely on.
-        displays()?;
-        let feed = ScreenFeed::start(options.display_number, PICTURE_GAP)?;
+        let all = displays()?;
+        let display_number = match options.target {
+            CaptureTarget::Window { handle } => {
+                let frame = window_area(handle)
+                    .ok_or("That window is not open any more, or it is minimised. Choose it again.")?;
+                display_of(&frame, &all).map(|d| d.number).unwrap_or(options.display_number)
+            }
+            _ => options.display_number,
+        };
+        let feed = ScreenFeed::start(display_number, PICTURE_GAP)?;
+        let display_area = area_of(feed.display());
+        let fixed = match options.target {
+            CaptureTarget::Region { x, y, width, height } => {
+                let wanted = Area { x: display_area.x + x as i32, y: display_area.y + y as i32, width, height };
+                Some(wanted.intersect(&display_area).ok_or("The area is not on the display. Draw it again.")?)
+            }
+            _ => None,
+        };
         let hooks = Hooks::start()?;
         let (area, percent, display) = {
             let d = feed.display();
-            (area_of(d), dpi_percent(d), d.describe())
+            let area = match options.target {
+                CaptureTarget::Window { handle } => {
+                    window_area(handle).and_then(|w| w.intersect(&display_area)).unwrap_or(display_area)
+                }
+                _ => fixed.unwrap_or(display_area),
+            };
+            (area, dpi_percent(d), d.describe())
         };
         let (commands, command_rx) = mpsc::channel();
         let (event_tx, events) = mpsc::channel();
         let settings = options.settings;
+        let target = options.target;
         let thread = std::thread::Builder::new()
             .name("express-noting".into())
-            .spawn(move || noting(settings, area, hooks, feed, command_rx, event_tx))
+            .spawn(move || {
+                noting(settings, Where { display: display_area, target, fixed }, hooks, feed, command_rx, event_tx)
+            })
             .map_err(|e| format!("The program could not start its capture thread: {e}"))?;
         Ok(CaptureRun { area, dpi_percent: percent, display, commands, events, thread: Some(thread) })
     }
@@ -180,9 +219,48 @@ fn cursor() -> Option<(i32, i32)> {
     unsafe { GetCursorPos(&mut at) }.ok().map(|_| (at.x, at.y))
 }
 
+/// Which part of the desktop the pictures are cut to, and how it is found.
+struct Where {
+    /// The whole display the pictures are taken of.
+    display: Area,
+    target: CaptureTarget,
+    /// The rectangle of a region, which never moves.
+    fixed: Option<Area>,
+}
+
+impl Where {
+    /// The area now. A window's frame is asked for each time, since the window can move; last keeps the last answer. None when
+    /// the window cannot be found (closed or minimised).
+    fn now(&self, last: &mut Area) -> Option<Area> {
+        match self.target {
+            CaptureTarget::Screen => Some(self.display),
+            CaptureTarget::Region { .. } => self.fixed,
+            CaptureTarget::Window { handle } => {
+                let frame = window_area(handle)?.intersect(&self.display)?;
+                *last = frame;
+                Some(frame)
+            }
+        }
+    }
+
+    /// Cut a finished step's picture to the area it was made in: the area stamped at its click, or the latest before it.
+    fn cut(&self, captured: Captured, stamps: &VecDeque<(Ms, Area)>, last: Area) -> Option<Captured> {
+        if self.target == CaptureTarget::Screen {
+            return Some(captured);
+        }
+        let area = stamps.iter().rev().find(|(at, _)| *at <= captured.draft.at).map(|(_, a)| *a).unwrap_or(last);
+        if area == self.display {
+            return Some(captured);
+        }
+        let picture =
+            captured.picture.crop(area.x - self.display.x, area.y - self.display.y, area.width, area.height)?;
+        Some(Captured { draft: captured.draft, picture })
+    }
+}
+
 fn noting(
     settings: Settings,
-    area: Area,
+    place: Where,
     hooks: Hooks,
     feed: ScreenFeed,
     commands: Receiver<Command>,
@@ -198,6 +276,10 @@ fn noting(
     let mut last_tick = started;
     let mut told_dropped = 0u64;
     let mut told_lost = 0u32;
+    let mut outside = 0u32;
+    let mut told_outside = 0u32;
+    let mut last_area = place.fixed.unwrap_or(place.display);
+    let mut stamps: VecDeque<(Ms, Area)> = VecDeque::new();
     let receiver_gone = std::cell::Cell::new(false);
 
     let say = |events: &Sender<RunEvent>, event: RunEvent| {
@@ -220,8 +302,13 @@ fn noting(
     macro_rules! emit {
         ($steps:expr) => {
             for captured in $steps {
-                summary.steps += 1;
-                say(&events, RunEvent::Step(captured));
+                match place.cut(captured, &stamps, last_area) {
+                    Some(cut) => {
+                        summary.steps += 1;
+                        say(&events, RunEvent::Step(cut));
+                    }
+                    None => outside += 1,
+                }
             }
         };
     }
@@ -248,6 +335,8 @@ fn noting(
                 }
                 Ok(Command::CaptureNow) if state == RunState::Capturing => {
                     let now = ms(Instant::now());
+                    let area = place.now(&mut last_area).unwrap_or(last_area);
+                    stamps.push_back((now, area));
                     let at = cursor().map(|(x, y)| area.to_picture(x, y));
                     emit!(engine.input(Input::CaptureNow { at: now, cursor: at }, &mut fields));
                 }
@@ -279,6 +368,12 @@ fn noting(
                             Some(e) => e.process_id == unsafe { GetCurrentProcessId() },
                             None => window_at_is_ours(x, y),
                         };
+                        let found = place.now(&mut last_area);
+                        let area = found.unwrap_or(last_area);
+                        stamps.push_back((at, area));
+                        if stamps.len() > 64 {
+                            stamps.pop_front();
+                        }
                         let (px, py) = area.to_picture(x, y);
                         Input::Click {
                             at,
@@ -287,7 +382,7 @@ fn noting(
                             y: py,
                             target: element.map(|e| Target { name: e.name, role: e.role, editable: e.editable }),
                             mods,
-                            inside_area: area.contains(x, y),
+                            inside_area: found.is_some() && area.contains(x, y),
                             own_window,
                         }
                     }
@@ -328,6 +423,29 @@ fn noting(
                     ),
                 );
             }
+            if outside > told_outside {
+                told_outside = outside;
+                say(
+                    &events,
+                    RunEvent::Notice(
+                        "A step's picture was outside the part of the screen being captured, so the step was left out. Is the window on another display?"
+                            .to_string(),
+                    ),
+                );
+            }
+            if let CaptureTarget::Window { handle } = place.target {
+                if !window_is_open(handle) {
+                    say(
+                        &events,
+                        RunEvent::Notice(
+                            "The window was closed, so capturing has stopped. The steps so far are kept.".to_string(),
+                        ),
+                    );
+                    let now = ms(Instant::now());
+                    emit!(engine.settle(now, true, &mut fields));
+                    break;
+                }
+            }
             if let Some(why) = feed.ended() {
                 say(&events, RunEvent::Notice(format!("The screen capture stopped: {why} The steps so far are kept.")));
                 let now = ms(Instant::now());
@@ -337,9 +455,105 @@ fn noting(
         }
     }
 
-    summary.lost = engine.lost();
+    summary.lost = engine.lost() + outside;
     summary.dropped_events = hooks.dropped();
     summary.skipped_pictures = feed.skipped();
     say(&events, RunEvent::State(RunState::Finished));
     summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openstage_express_core::builder::{Draft, DraftKind, ShotId};
+    use openstage_express_core::capture::Picture;
+
+    /// A display picture whose pixel at (x, y) is (x mod 256, y mod 256), so a crop shows where it came from.
+    fn display_picture(width: u32, height: u32) -> Picture {
+        let mut bgra = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                bgra.extend_from_slice(&[x as u8, y as u8, 7, 255]);
+            }
+        }
+        Picture::new(width, height, bgra).unwrap()
+    }
+
+    fn captured(at: Ms, picture: Picture) -> Captured {
+        Captured {
+            draft: Draft {
+                kind: DraftKind::Click,
+                title: "Click here".into(),
+                shot: ShotId(1),
+                click: None,
+                control: None,
+                typed: None,
+                at,
+            },
+            picture,
+        }
+    }
+
+    fn place(target: CaptureTarget, fixed: Option<Area>) -> Where {
+        Where { display: Area { x: -1000, y: 0, width: 400, height: 300 }, target, fixed }
+    }
+
+    #[test]
+    fn the_whole_screen_is_left_as_it_is() {
+        let w = place(CaptureTarget::Screen, None);
+        let out = w.cut(captured(5, display_picture(400, 300)), &VecDeque::new(), w.display).unwrap();
+        assert_eq!((out.picture.width, out.picture.height), (400, 300));
+    }
+
+    #[test]
+    fn a_region_is_cut_from_the_display_with_a_negative_corner() {
+        let fixed = Area { x: -900, y: 50, width: 120, height: 80 };
+        let w = place(CaptureTarget::Region { x: 100, y: 50, width: 120, height: 80 }, Some(fixed));
+        let out = w.cut(captured(5, display_picture(400, 300)), &VecDeque::new(), fixed).unwrap();
+        assert_eq!((out.picture.width, out.picture.height), (120, 80));
+        assert_eq!(&out.picture.bgra[0..2], &[100, 50], "its first pixel is the display's pixel 100, 50");
+    }
+
+    #[test]
+    fn a_window_step_is_cut_to_the_frame_it_had_at_its_click_not_the_frame_it_has_now() {
+        let w = place(CaptureTarget::Window { handle: 1 }, None);
+        let before = Area { x: -950, y: 20, width: 100, height: 60 };
+        let after = Area { x: -800, y: 120, width: 100, height: 60 };
+        let stamps: VecDeque<(Ms, Area)> = [(100, before), (500, after)].into_iter().collect();
+        let early = w.cut(captured(300, display_picture(400, 300)), &stamps, after).unwrap();
+        assert_eq!(&early.picture.bgra[0..2], &[50, 20], "the frame at 100, which was still the latest at 300");
+        let late = w.cut(captured(600, display_picture(400, 300)), &stamps, after).unwrap();
+        assert_eq!(&late.picture.bgra[0..2], &[200, 120], "the frame at 500");
+        let first = w.cut(captured(10, display_picture(400, 300)), &stamps, after).unwrap();
+        assert_eq!(&first.picture.bgra[0..2], &[200, 120], "before any click is known, the last frame found");
+        assert_eq!((early.picture.width, early.picture.height), (100, 60));
+    }
+
+    #[test]
+    fn a_window_that_is_off_the_captured_display_gives_no_step_picture() {
+        let w = place(CaptureTarget::Window { handle: 1 }, None);
+        let elsewhere = Area { x: 5000, y: 5000, width: 100, height: 100 };
+        let stamps: VecDeque<(Ms, Area)> = [(100, elsewhere)].into_iter().collect();
+        assert!(w.cut(captured(300, display_picture(400, 300)), &stamps, elsewhere).is_none());
+    }
+
+    #[test]
+    fn a_window_that_is_the_whole_display_needs_no_cutting() {
+        let w = place(CaptureTarget::Window { handle: 1 }, None);
+        let stamps: VecDeque<(Ms, Area)> = [(100, w.display)].into_iter().collect();
+        let out = w.cut(captured(300, display_picture(400, 300)), &stamps, w.display).unwrap();
+        assert_eq!((out.picture.width, out.picture.height), (400, 300));
+    }
+
+    #[test]
+    fn the_area_now_for_a_region_is_fixed_and_for_the_screen_is_the_display() {
+        let fixed = Area { x: -900, y: 50, width: 120, height: 80 };
+        let mut last = fixed;
+        assert_eq!(
+            place(CaptureTarget::Region { x: 0, y: 0, width: 1, height: 1 }, Some(fixed)).now(&mut last),
+            Some(fixed)
+        );
+        let screen = place(CaptureTarget::Screen, None);
+        assert_eq!(screen.now(&mut last), Some(screen.display));
+    }
 }

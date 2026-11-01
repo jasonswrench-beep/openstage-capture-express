@@ -12,7 +12,9 @@ use openstage_express_export::demo::demo;
 
 use super::about;
 use super::bar::{self, BarAction, BarView};
-use super::capture::{cannot_capture, CaptureControl, HotkeyAction, Outcome, Starter};
+use super::capture::{cannot_capture, CaptureControl, Desktop, HotkeyAction, NoDesktop, Outcome, Starter};
+use super::choose_area::{self, AreaAction, AreaScreen};
+use super::choose_window::{self, WindowList, WindowListAction};
 use super::editor::{self, Leave};
 use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
@@ -23,6 +25,8 @@ use super::widgets::{self, Status};
 use crate::export_run::{self, Job, Report};
 use crate::library;
 use crate::settings::{self, AppSettings, Appearance};
+use crate::target::{AreaChoice, Target, TargetKind, WindowChoice};
+use openstage_express_core::area::AreaRect;
 
 /// Asks the person for a folder (Windows' own dialog), starting at the one given; None when they cancel.
 pub type FolderChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
@@ -42,6 +46,10 @@ pub enum Screen {
     About,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
+    /// The list of open windows, to choose the one to capture (still on top, taller than the bar).
+    ChooseWindow,
+    /// A picture of a display with the area to capture drawn on it.
+    ChooseArea,
 }
 
 /// How the window itself should look: the whole program, or the strip of the capture bar.
@@ -49,6 +57,8 @@ pub enum Screen {
 pub enum WindowMode {
     Normal,
     Bar,
+    /// The bar made taller, for the list of windows.
+    Tall,
 }
 
 pub struct App {
@@ -71,6 +81,11 @@ pub struct App {
     /// Something to say about the settings file (damaged, newer), shown on the Settings screen.
     settings_note: Option<String>,
     export_job: Option<Receiver<Result<Report, String>>>,
+    /// What to capture, as chosen so far.
+    pub target: Target,
+    desktop: Box<dyn Desktop>,
+    window_list: WindowList,
+    area_screen: Option<AreaScreen>,
     /// Asks the person for a folder (Windows' own dialog), starting at the one given.
     chooser: FolderChooser,
     /// Shows a folder to the person (opens it in Explorer).
@@ -97,12 +112,16 @@ impl App {
             settings_path: None,
             settings_note: None,
             export_job: None,
+            target: Target::default(),
+            desktop: Box::new(NoDesktop),
+            window_list: WindowList::default(),
+            area_screen: None,
             chooser: Box::new(|_| None),
             opener: Box::new(|_| {}),
         };
         match screen {
             Screen::Editor => app.open_example(),
-            Screen::Bar => app.screen = Screen::Bar,
+            Screen::Bar | Screen::ChooseWindow | Screen::ChooseArea => app.screen = Screen::Bar,
             Screen::Export => {
                 app.open_example();
                 app.screen = Screen::Export;
@@ -149,6 +168,8 @@ impl App {
     /// settings file.
     pub fn with_settings(mut self, settings: AppSettings, path: Option<PathBuf>, note: Option<String>) -> App {
         self.export.open_after = settings.open_folder_after_export;
+        self.target.kind = settings.capture_target;
+        self.target.area = settings.last_area;
         let formats: Vec<_> = crate::export_run::Format::ALL
             .into_iter()
             .filter(|f| settings.export_formats.iter().any(|name| name == f.folder()))
@@ -212,11 +233,17 @@ impl App {
     }
 
     pub fn window_mode(&self) -> WindowMode {
-        if self.screen == Screen::Bar {
-            WindowMode::Bar
-        } else {
-            WindowMode::Normal
+        match self.screen {
+            Screen::Bar => WindowMode::Bar,
+            Screen::ChooseWindow => WindowMode::Tall,
+            _ => WindowMode::Normal,
         }
+    }
+
+    /// Give the program a way to look at the desktop (the list of windows, the displays, a picture of a display).
+    pub fn with_desktop(mut self, desktop: Box<dyn Desktop>) -> App {
+        self.desktop = desktop;
+        self
     }
 
     /// Whether a capture is running (or paused), so the window must keep checking for what it has to say.
@@ -271,7 +298,15 @@ impl App {
     }
 
     fn begin_capture(&mut self) {
-        match (self.starter)(&self.library, &self.settings) {
+        if !self.target.is_ready() {
+            self.screen = Screen::Bar;
+            self.status.say(match self.target.kind {
+                TargetKind::Window => "Choose the window to capture first.",
+                _ => "Draw the area to capture first.",
+            });
+            return;
+        }
+        match (self.starter)(&self.library, &self.settings, &self.target) {
             Ok(control) => {
                 self.capture = Some(control);
                 self.screen = Screen::Bar;
@@ -294,6 +329,9 @@ impl App {
         match (action, self.capture.is_some()) {
             (HotkeyAction::StartOrFinish, false) => match self.screen {
                 Screen::Home | Screen::Bar => self.begin_capture(),
+                Screen::ChooseWindow | Screen::ChooseArea => {
+                    self.status.say("Finish choosing what to capture first, then press the hotkey again.")
+                }
                 Screen::Editor | Screen::Export | Screen::Settings | Screen::About => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
@@ -312,6 +350,14 @@ impl App {
         match action {
             BarAction::None => {}
             BarAction::Start => self.begin_capture(),
+            BarAction::SetTarget(kind) => {
+                self.target.kind = kind;
+                self.settings.capture_target = kind;
+                self.save_settings();
+                self.status.say(format!("Capturing {}.", self.target.words(&self.what)));
+            }
+            BarAction::ChooseWindow => self.open_window_list(),
+            BarAction::ChooseArea => self.open_area_screen(1),
             BarAction::Cancel => {
                 self.screen = Screen::Home;
                 self.status.say("Cancelled. Nothing was captured.");
@@ -321,6 +367,59 @@ impl App {
                     capture.act(other);
                 }
             }
+        }
+    }
+
+    /// For looking at the screen without a person: the window list, over whatever desktop the program was given.
+    pub fn show_choose_window(&mut self) {
+        self.target.kind = TargetKind::Window;
+        self.open_window_list();
+    }
+
+    /// The same for drawing an area.
+    pub fn show_choose_area(&mut self) {
+        self.target.kind = TargetKind::Area;
+        self.open_area_screen(1);
+    }
+
+    fn open_window_list(&mut self) {
+        let (rows, problem) = match self.desktop.windows() {
+            Ok(rows) => (rows, None),
+            Err(why) => (Vec::new(), Some(why)),
+        };
+        self.window_list = WindowList::new(rows, problem);
+        self.screen = Screen::ChooseWindow;
+        let n = self.window_list.rows.len();
+        self.status.say(format!("Choose a window. {n} {} open.", if n == 1 { "window is" } else { "windows are" }));
+    }
+
+    fn open_area_screen(&mut self, display: u32) {
+        let displays = match self.desktop.displays() {
+            Ok(d) if !d.is_empty() => d,
+            Ok(_) => {
+                self.status.say("Windows reports no display.");
+                return;
+            }
+            Err(why) => {
+                self.status.say(why);
+                return;
+            }
+        };
+        let display =
+            self.target.area.map(|a| a.display).filter(|n| displays.iter().any(|d| d.number == *n)).unwrap_or(display);
+        match self.desktop.snapshot(display) {
+            Ok(picture) => {
+                let initial = self.target.area.filter(|a| a.display == display).map(|a| AreaRect {
+                    x: a.x,
+                    y: a.y,
+                    width: a.width,
+                    height: a.height,
+                });
+                self.area_screen = Some(AreaScreen::new(displays, display, picture, initial));
+                self.screen = Screen::ChooseArea;
+                self.status.say("Draw the area to capture on the picture of the display, or type its numbers.");
+            }
+            Err(why) => self.status.say(format!("A picture of the display could not be taken. {why}")),
         }
     }
 
@@ -450,10 +549,71 @@ impl App {
             Screen::Bar => {
                 let view = match &self.capture {
                     Some(capture) => capture.view(),
-                    None => BarView::ready(&self.what, &self.hotkey_words),
+                    None => BarView {
+                        target: self.target.kind,
+                        can_start: self.target.is_ready(),
+                        ..BarView::ready(&self.target.words(&self.what), &self.hotkey_words)
+                    },
                 };
                 let action = bar::show(ui, &view);
                 self.bar_action(action);
+            }
+            Screen::ChooseWindow => match choose_window::show(ui, &mut self.window_list) {
+                WindowListAction::None => {}
+                WindowListAction::Back => {
+                    self.screen = Screen::Bar;
+                    self.status.say("Back at the capture bar.");
+                }
+                WindowListAction::Refresh => self.open_window_list(),
+                WindowListAction::Use(i) => {
+                    if let Some(row) = self.window_list.rows.get(i) {
+                        self.target.window = Some(WindowChoice {
+                            handle: row.handle,
+                            title: row.title.clone(),
+                            process: row.process.clone(),
+                        });
+                        self.target.kind = TargetKind::Window;
+                        self.settings.capture_target = TargetKind::Window;
+                        self.save_settings();
+                        self.screen = Screen::Bar;
+                        self.status.say(format!(
+                            "Capturing {}. Press Start when you are ready.",
+                            self.target.words(&self.what)
+                        ));
+                    }
+                }
+            },
+            Screen::ChooseArea => {
+                let Some(area) = self.area_screen.as_mut() else {
+                    self.screen = Screen::Bar;
+                    return;
+                };
+                match choose_area::show(ui, area) {
+                    AreaAction::None => {}
+                    AreaAction::Back => {
+                        self.screen = Screen::Bar;
+                        self.status.say("Back at the capture bar.");
+                    }
+                    AreaAction::ChangeDisplay(n) => match self.desktop.snapshot(n) {
+                        Ok(picture) => area.show_display(n, picture),
+                        Err(why) => self.status.say(format!("A picture of that display could not be taken. {why}")),
+                    },
+                    AreaAction::Use => {
+                        let r = area.editor.rect();
+                        let chosen =
+                            AreaChoice { display: area.display, x: r.x, y: r.y, width: r.width, height: r.height };
+                        self.target.area = Some(chosen);
+                        self.target.kind = TargetKind::Area;
+                        self.settings.capture_target = TargetKind::Area;
+                        self.settings.last_area = Some(chosen);
+                        self.save_settings();
+                        self.screen = Screen::Bar;
+                        self.status.say(format!(
+                            "Capturing {}. Press Start when you are ready.",
+                            self.target.words(&self.what)
+                        ));
+                    }
+                }
             }
             Screen::About => {
                 if about::show(ui) {

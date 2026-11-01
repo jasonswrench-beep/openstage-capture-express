@@ -226,6 +226,11 @@ A captured step has these fields filled in, and no others beyond what the format
 - `focus` is the automatic focused view (150 percent), set when the focused view is on for new steps and the step has a click.
 - `capturedAt` is the time the step was written.
 
+What a picture is of depends on what was chosen to capture. The whole screen: the whole display (`images/step-0001.png` is as big as the display).
+One window: the window's visible frame (without Windows' invisible borders) as it was at the click, cut from a picture of the display it is on, so
+a menu or tooltip that lies inside the frame is still in it. An area: the rectangle that was drawn on a display. In all three `click` is in
+the picture's own pixels, and a click outside the chosen window or area makes no step.
+
 The picture of a click is the **last picture of the screen taken at or before the click** (so an open menu or a tooltip is still in
 it), kept in a ring of the latest pictures bounded to 64 megabytes. The picture of a `Type` step is taken at least 120 ms after the
 last key, or at the Enter, Tab, Escape or click that ended the typing if that is later, so that the field shows its text. With a
@@ -372,5 +377,5 @@ A `.pptx` written by Express itself, in the same way.
 
 ## Not in this document yet
 
-The settings file is written when it is built. WebP is not built (spec S3). Capturing a window or a drawn area (rather than the whole
-display) is not built.
+The settings file is written when it is built. WebP is not built (spec S3). A window that is dragged to another display while it is being
+captured has no picture (its steps are left out, with a message).

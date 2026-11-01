@@ -11,13 +11,15 @@ use std::thread::JoinHandle;
 
 use openstage_express_core::capture::{Captured, MarkOptions};
 use openstage_express_windows::hotkeys::{Action, Hotkey, DEFAULTS};
-use openstage_express_windows::run::{CaptureRun, Command, RunEvent, RunOptions, RunState, RunSummary};
+use openstage_express_windows::run::{CaptureRun, CaptureTarget, Command, RunEvent, RunOptions, RunState, RunSummary};
 use openstage_express_windows::screen;
 
 use crate::guide_writer::GuideWriter;
 use crate::settings::AppSettings;
+use crate::target::{Target, TargetKind};
 use crate::ui::bar::{BarAction, BarPhase, BarView};
-use crate::ui::capture::{CaptureControl, Finished, HotkeyAction, Outcome, Starter};
+use crate::ui::capture::{CaptureControl, Desktop, DisplayRow, Finished, HotkeyAction, Outcome, Starter, WindowRow};
+use openstage_express_core::capture::Picture;
 
 /// What the saving thread tells back.
 enum Saved {
@@ -74,6 +76,7 @@ pub struct WindowsCapture {
     steps: usize,
     last: Option<String>,
     what: String,
+    kind: TargetKind,
     hotkeys: String,
     save_failures: Vec<String>,
     summary: Option<RunSummary>,
@@ -83,8 +86,8 @@ pub struct WindowsCapture {
 }
 
 impl WindowsCapture {
-    fn new(run: CaptureRun, parent: &Path, hotkeys: &str, settings: &AppSettings) -> WindowsCapture {
-        let what = format!("the whole screen ({})", run.display);
+    fn new(run: CaptureRun, parent: &Path, hotkeys: &str, settings: &AppSettings, target: &Target) -> WindowsCapture {
+        let what = target.words(&format!("the whole screen ({})", run.display));
         let marks = settings.mark_options(run.dpi_percent);
         WindowsCapture {
             run: Some(run),
@@ -98,6 +101,7 @@ impl WindowsCapture {
             steps: 0,
             last: None,
             what,
+            kind: target.kind,
             hotkeys: hotkeys.to_string(),
             save_failures: Vec::new(),
             summary: None,
@@ -120,6 +124,8 @@ impl CaptureControl for WindowsCapture {
             steps: self.steps,
             last: self.last.clone(),
             what: self.what.clone(),
+            target: self.kind,
+            can_start: false,
             hotkeys: self.hotkeys.clone(),
         }
     }
@@ -224,10 +230,54 @@ impl CaptureControl for WindowsCapture {
 
 /// How to start a capture into the guides folder.
 pub fn starter(hotkeys: String) -> Starter {
-    Box::new(move |library: &Path, settings: &AppSettings| {
-        let run = CaptureRun::start(RunOptions { settings: settings.builder_settings(), ..RunOptions::default() })?;
-        Ok(Box::new(WindowsCapture::new(run, library, &hotkeys, settings)) as Box<dyn CaptureControl>)
+    Box::new(move |library: &Path, settings: &AppSettings, target: &Target| {
+        let (what, display_number) = capture_target(target)?;
+        let run =
+            CaptureRun::start(RunOptions { settings: settings.builder_settings(), display_number, target: what })?;
+        Ok(Box::new(WindowsCapture::new(run, library, &hotkeys, settings, target)) as Box<dyn CaptureControl>)
     })
+}
+
+/// What the person chose, as what a run captures, and the display to capture (a window is captured on the display it is on).
+fn capture_target(target: &Target) -> Result<(CaptureTarget, u32), String> {
+    match target.kind {
+        TargetKind::Screen => Ok((CaptureTarget::Screen, 1)),
+        TargetKind::Window => target
+            .window
+            .as_ref()
+            .map(|w| (CaptureTarget::Window { handle: w.handle }, 1))
+            .ok_or_else(|| "Choose the window to capture first.".to_string()),
+        TargetKind::Area => target
+            .area
+            .map(|a| (CaptureTarget::Region { x: a.x, y: a.y, width: a.width, height: a.height }, a.display))
+            .ok_or_else(|| "Draw the area to capture first.".to_string()),
+    }
+}
+
+/// The real desktop: the open windows, the displays, and a picture of a display.
+pub struct WindowsDesktop;
+
+impl Desktop for WindowsDesktop {
+    fn windows(&self) -> Result<Vec<WindowRow>, String> {
+        Ok(screen::windows()?
+            .into_iter()
+            .map(|w| WindowRow { words: w.describe(), handle: w.handle, title: w.title, process: w.process })
+            .collect())
+    }
+
+    fn displays(&self) -> Result<Vec<DisplayRow>, String> {
+        Ok(screen::displays()?
+            .into_iter()
+            .map(|d| DisplayRow { number: d.number, width: d.width, height: d.height, words: d.describe() })
+            .collect())
+    }
+
+    fn snapshot(&self, display: u32) -> Result<Picture, String> {
+        let feed = screen::ScreenFeed::start(display, std::time::Duration::from_millis(40))?;
+        feed.next(std::time::Duration::from_secs(5))
+            .map(|(_, picture)| picture)
+            .map_err(|_| "Windows gave no picture of the display in five seconds.".to_string())
+    }
 }
 
 /// The words for the ready bar: what will be captured.
@@ -286,6 +336,31 @@ mod tests {
         assert_eq!(hotkey_sentence(&all), "");
     }
 
+    #[test]
+    fn what_the_person_chose_becomes_what_a_run_captures() {
+        use crate::target::{AreaChoice, WindowChoice};
+        assert_eq!(capture_target(&Target::default()), Ok((CaptureTarget::Screen, 1)));
+        let window = Target {
+            kind: TargetKind::Window,
+            window: Some(WindowChoice { handle: 77, title: "t".into(), process: "p.exe".into() }),
+            area: None,
+        };
+        assert_eq!(capture_target(&window), Ok((CaptureTarget::Window { handle: 77 }, 1)));
+        let area = Target {
+            kind: TargetKind::Area,
+            window: None,
+            area: Some(AreaChoice { display: 2, x: 10, y: 20, width: 300, height: 200 }),
+        };
+        assert_eq!(capture_target(&area), Ok((CaptureTarget::Region { x: 10, y: 20, width: 300, height: 200 }, 2)));
+        assert!(capture_target(&Target { kind: TargetKind::Window, ..Target::default() })
+            .unwrap_err()
+            .contains("Choose the window"));
+        assert!(capture_target(&Target { kind: TargetKind::Area, ..Target::default() })
+            .unwrap_err()
+            .contains("Draw the area"));
+        // Only the kind chosen counts: a window picked earlier does not make the area ready.
+        assert!(capture_target(&Target { kind: TargetKind::Area, ..window }).is_err());
+    }
     #[test]
     fn hotkeys_map_one_to_one() {
         assert_eq!(hotkey_action(Action::CaptureNow), HotkeyAction::CaptureNow);
