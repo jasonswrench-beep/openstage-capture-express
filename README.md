@@ -13,7 +13,9 @@ small program with its own window.
 editing, undo, saving, smart titles, the step builder, drawing of marks, the focused view, exports to a web page, Markdown, JSON,
 a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the WebView2 engine that Windows ships, a Word file and a
 PowerPoint file that Express writes itself, a window, and (since 2026-11-01) real capture.** Home lists the guides in the guides
-folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the window into a small capture bar that stays on top
+folder (`Documents\OpenStage Express\Guides`), newest first, with a search box; each has a Rename and a Delete button (Delete asks first
+and moves the guide to a `Trash` folder inside the guides folder, never erasing it), and the Trash button lists what was deleted,
+each with a Restore button. **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; before Start you choose what to capture: the whole screen, one window (from a list of the open
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
@@ -33,8 +35,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 657 passed (247 in the core, 182 in the exports, 44 in the
-  Windows crate, 184 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 680 passed (247 in the core, 182 in the exports, 44 in the
+  Windows crate, 207 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -90,6 +92,14 @@ Run on Windows, and working:
   reader and Python's `zipfile` read both files too.
 
 Written and type-checked, not yet run on Windows:
+
+- Renaming, deleting and restoring guides from Home (spec A1): the folder moves and the rename were run for real on this PC, but only
+  on made-up guides in temporary folders (a moved guide is byte for byte the same, comes back whole under a free name, is never
+  moved from outside the guides folder, and is refused while another running copy of Express holds its lock), and the Home and
+  Trash screens are tested through the window with simulated clicks and keys (Delete asks first with "Keep it" ready; Escape and
+  Enter work in the rename box). Nobody has used them on a real guide by hand, nothing has been spoken by Narrator or NVDA, and the
+  guides folder being inside OneDrive on this PC (so a move is synced) has not been looked at (`TESTING-TODO.md`). Twenty deliberate
+  faults in this code were each caught by a test. Home's step count now leaves out skipped steps and notes, as the editor does.
 
 - Drawing a new shape by dragging on the picture in the editor (nine shapes; a click without a drag places the usual size; Escape
   stops it): `core::marks::drawn_mark` turns a drag into a mark (any direction, kept on the picture, a step number's circle across
@@ -157,7 +167,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, picking several steps, deleting or renaming a guide from Home,
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, picking several steps, sorting the list of guides on Home, a "Save a copy as one file",
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
@@ -254,7 +264,8 @@ TESTING-TODO.md                 what only a person can check
   telemetry crates. Exported web pages make no outside requests either.
 - Accessibility is not optional: every feature works by keyboard and with a screen reader, and nothing traps focus.
 - Typed text is read from the field, never logged key by key, and never for a password field.
-- Nothing is erased by the software. Delete means the trash folder, and only the person's "Empty the trash" deletes files. An
+- Nothing is erased by the software. Delete means the trash folder, and only the person's "Empty the trash" deletes files (for a
+  whole guide there is no such button: it is moved to a `Trash` folder and the person deletes it in Explorer). An
   export never replaces a file that is already there.
 - The format is the source of truth: change `docs/guide-format.md` in the same commit as any code that reads or writes it.
 - a step-guide program is commercial. Use facts and behaviour only, never its code, templates, strings, artwork or file format.

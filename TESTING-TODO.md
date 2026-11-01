@@ -104,8 +104,17 @@ submit an assignment") to open from the card under "Your guides".
       feels right, only a person can say. The tests send the same pointer events through the window without a mouse; nobody has
       done it by hand. Narrator and NVDA: the heading folds open by keyboard and each choice is named ("Draw an oval"); Add and
       Move still do everything by keyboard.
-- [ ] Not built in the editor yet: picking several steps at once, panning or zooming the focused crop by hand, deleting or
-      renaming a guide from Home, and cutting the picture.
+- [ ] Not built in the editor yet: picking several steps at once, panning or zooming the focused crop by hand, and cutting the
+      picture.
+- [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
+      Settings, Folders to it): Rename opens a box with the name, Enter saves, Escape cancels; Delete asks first with Keep it ready,
+      then the guide leaves the list and its folder is in `Trash` beside the guides; Trash lists it and Restore brings it back and it
+      opens with all its steps. Does it feel right that each guide has three Tab stops (the card, Rename, Delete)? Is Trash easy
+      to find? Try it while the guide is open in a second copy of Express: both should say it is in use. With the guides folder in
+      OneDrive (it is on this PC), the move syncs like any other: check OneDrive shows the folder in `Trash` and not in both places.
+      Home's step count now leaves out skipped steps and notes, as the editor does (it used to count them).
+- [ ] Narrator and NVDA on Home with real guides, only when you are away and on your go: each button is named for its guide
+      ("Rename Submit an assignment"), the question's heading and the status line are read, and the Trash screen reads its list.
 
 ## Milestone M6 (capture)
 

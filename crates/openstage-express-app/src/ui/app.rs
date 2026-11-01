@@ -25,6 +25,7 @@ use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
 use super::rows::{step_count, steps_words};
 use super::settings::{self as settings_screen, HotkeyEdit, SettingsAction, SettingsInfo};
+use super::trash::{self, TrashAction, TrashState};
 use super::widgets::{self, Status};
 use crate::export_run::{self, Job, Report};
 use crate::library;
@@ -48,6 +49,8 @@ pub enum Screen {
     Settings,
     /// What the program is, its licence and the licences of what it is built from.
     About,
+    /// The guides deleted from Home, which can be brought back.
+    Trash,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
     /// The list of open windows, to choose the one to capture (still on top, taller than the bar).
@@ -68,6 +71,8 @@ pub enum WindowMode {
 pub struct App {
     pub screen: Screen,
     pub home: HomeState,
+    /// The guides in the Trash, as they were when the Trash was last opened or changed.
+    trash: TrashState,
     pub editor: Option<EditorState>,
     pub status: Status,
     library: PathBuf,
@@ -111,6 +116,7 @@ impl App {
         let mut app = App {
             screen: Screen::Home,
             home: HomeState::example(),
+            trash: TrashState::default(),
             editor: None,
             status: Status::default(),
             library: PathBuf::new(),
@@ -144,6 +150,7 @@ impl App {
             }
             Screen::Settings => app.screen = Screen::Settings,
             Screen::About => app.screen = Screen::About,
+            Screen::Trash => app.screen = Screen::Trash,
             Screen::Home => {}
         }
         app
@@ -380,7 +387,7 @@ impl App {
                 Screen::ChooseWindow | Screen::ChooseArea => {
                     self.status.say("Finish choosing what to capture first, then press the hotkey again.")
                 }
-                Screen::Editor | Screen::Export | Screen::Settings | Screen::About => {
+                Screen::Editor | Screen::Export | Screen::Settings | Screen::About | Screen::Trash => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
             },
@@ -597,23 +604,126 @@ impl App {
         });
     }
 
+    /// What the person asked for on Home.
+    fn home_action(&mut self, action: Action) {
+        match action {
+            Action::None => {}
+            Action::StartCapturing => self.show_bar(),
+            Action::About => {
+                self.screen = Screen::About;
+                self.status.say("About OpenStage Capture Express, its licence and what it is built from.");
+            }
+            Action::Settings => {
+                self.screen = Screen::Settings;
+                self.status.say("Settings. Each change is saved as you make it.");
+            }
+            Action::Trash => {
+                self.refresh_trash();
+                self.screen = Screen::Trash;
+                let n = self.trash.entries.len();
+                self.status.say(if n == 0 {
+                    "The Trash is empty.".to_string()
+                } else {
+                    format!("The Trash has {n} guide{}. Restore brings one back.", if n == 1 { "" } else { "s" })
+                });
+            }
+            Action::Open(index) => match self.home.guides.get(index).and_then(|g| g.path.clone()) {
+                Some(path) => self.open_guide(&path),
+                None => self.open_example(),
+            },
+            Action::Rename(index) => {
+                if self.home.start_renaming(index) {
+                    let title = self.home.renaming.as_ref().map(|r| r.title.clone()).unwrap_or_default();
+                    self.status
+                        .say(format!("Renaming {title}. Type the new name and press Enter, or Escape to cancel."));
+                }
+            }
+            Action::SaveName => self.save_name(),
+            Action::CancelRename => {
+                self.home.renaming = None;
+                self.status.say("Cancelled. The name was not changed.");
+            }
+            Action::Delete(index) => {
+                if self.home.start_deleting(index) {
+                    let title = self.home.deleting.as_ref().map(|d| d.title.clone()).unwrap_or_default();
+                    self.status.say(format!(
+                        "Move {title} to the Trash? Nothing is erased. Press Move to the Trash, or Keep it."
+                    ));
+                }
+            }
+            Action::KeepGuide => {
+                let title = self.home.deleting.take().map(|d| d.title).unwrap_or_default();
+                self.status.say(format!("Kept {title}."));
+            }
+            Action::ConfirmDelete => self.move_to_trash(),
+        }
+    }
+
+    /// Look at the Trash folder again.
+    fn refresh_trash(&mut self) {
+        self.trash.entries =
+            if self.library.as_os_str().is_empty() { Vec::new() } else { library::scan_trash(&self.library) };
+    }
+
+    /// Use the name typed in the rename box.
+    fn save_name(&mut self) {
+        let Some(rename) = self.home.renaming.clone() else { return };
+        match library::rename_guide(&rename.path, &rename.text, &*self.is_running) {
+            Ok(kept) => {
+                self.home.renaming = None;
+                self.refresh_home();
+                self.status.say(format!("Renamed to {kept}."));
+            }
+            // The box stays open, so the name can be fixed, or cancelled.
+            Err(why) => self.status.say(format!("{} was not renamed. {why}", rename.title)),
+        }
+    }
+
+    /// The person said yes to moving the guide to the Trash.
+    fn move_to_trash(&mut self) {
+        let Some(delete) = self.home.deleting.take() else { return };
+        match library::move_to_trash(&delete.path, &self.library, &*self.is_running) {
+            Ok(_) => {
+                self.refresh_home();
+                self.status.say(format!("Moved {} to the Trash. Open the Trash to bring it back.", delete.title));
+            }
+            Err(why) => self.status.say(format!("{} was not moved. {why}", delete.title)),
+        }
+    }
+
+    /// Bring a guide back from the Trash.
+    fn restore_from_trash(&mut self, index: usize) {
+        let Some(entry) = self.trash.entries.get(index).cloned() else { return };
+        match library::restore(&entry.path, &self.library) {
+            Ok(_) => {
+                self.refresh_trash();
+                self.refresh_home();
+                self.status.say(format!("Brought {} back to your guides.", entry.title));
+            }
+            Err(why) => self.status.say(format!("{} was not brought back. {why}", entry.title)),
+        }
+    }
+
     fn draw_screen(&mut self, ui: &mut egui::Ui) {
         match self.screen {
-            Screen::Home => match home::show(ui, &mut self.home) {
-                Action::None => {}
-                Action::StartCapturing => self.show_bar(),
-                Action::About => {
-                    self.screen = Screen::About;
-                    self.status.say("About OpenStage Capture Express, its licence and what it is built from.");
+            Screen::Home => {
+                let action = home::show(ui, &mut self.home);
+                self.home_action(action);
+            }
+            Screen::Trash => match trash::show(ui, &self.trash) {
+                TrashAction::None => {}
+                TrashAction::Back => {
+                    self.screen = Screen::Home;
+                    self.status.say("Back at your guides.");
                 }
-                Action::Settings => {
-                    self.screen = Screen::Settings;
-                    self.status.say("Settings. Each change is saved as you make it.");
+                TrashAction::ShowFolder => {
+                    let folder = library::trash_folder(&self.library);
+                    // The folder is only made when something is first deleted; show the guides folder until then.
+                    let shown = if folder.is_dir() { folder } else { self.library.clone() };
+                    (self.opener)(&shown);
+                    self.status.say("Showing the Trash folder in Explorer.");
                 }
-                Action::Open(index) => match self.home.guides.get(index).and_then(|g| g.path.clone()) {
-                    Some(path) => self.open_guide(&path),
-                    None => self.open_example(),
-                },
+                TrashAction::Restore(index) => self.restore_from_trash(index),
             },
             Screen::Bar => {
                 let view = match &self.capture {

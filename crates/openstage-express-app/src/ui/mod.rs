@@ -21,6 +21,7 @@ pub mod home;
 pub mod rows;
 pub mod settings;
 pub mod theme;
+pub mod trash;
 pub mod widgets;
 
 #[cfg(test)]
@@ -64,18 +65,19 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor, export, settings, about, bar, choose-window or choose-area")?.as_str() {
+                    options.screen = Some(match value("home, editor, export, settings, about, trash, bar, choose-window or choose-area")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
                         "export" => Screen::Export,
                         "settings" => Screen::Settings,
                         "about" => Screen::About,
+                        "trash" => Screen::Trash,
                         "choose-window" => Screen::ChooseWindow,
                         "choose-area" => Screen::ChooseArea,
                         "bar" => Screen::Bar,
                         other => {
                             return Err(format!(
-                                "--screen is home, editor, export, settings, about, bar, choose-window or choose-area, not {other:?}."
+                                "--screen is home, editor, export, settings, about, trash, bar, choose-window or choose-area, not {other:?}."
                             ))
                         }
                     })

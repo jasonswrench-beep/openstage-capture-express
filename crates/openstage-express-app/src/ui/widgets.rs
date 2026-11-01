@@ -36,6 +36,16 @@ pub fn button(ui: &mut Ui, text: &str) -> Response {
     response
 }
 
+/// A button with short words on it (`Rename`) whose name for a screen reader says what it is for (`Rename How to sign in`), so that
+/// a list of them is not a list of buttons all called Rename.
+pub fn button_named(ui: &mut Ui, text: &str, name: &str) -> Response {
+    let response = ui.button(text);
+    let name = name.to_string();
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+    ring(ui, &response);
+    response
+}
+
 /// An ordinary button that may be switched off. A switched-off button is still read by a screen reader, as unavailable.
 pub fn button_enabled(ui: &mut Ui, enabled: bool, text: &str) -> Response {
     let response = ui.add_enabled(enabled, egui::Button::new(text));
@@ -108,10 +118,10 @@ pub fn list_row(ui: &mut Ui, label: &str, selected: bool, muted: bool, indent: f
 }
 
 /// A card that opens something (a guide on Home): the title on the left, a few words on the right. A button for a screen reader,
-/// named `name`.
-pub fn card(ui: &mut Ui, title: &str, trailing: &str, name: &str) -> Response {
+/// named `name`. It is as wide as the room allows, but no wider than `most` (to leave room for buttons beside it).
+pub fn card(ui: &mut Ui, title: &str, trailing: &str, name: &str, most: f32) -> Response {
     let p = palette(ui);
-    let width = ui.available_width().min(760.0);
+    let width = ui.available_width().min(most);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 56.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
         let fill = if response.hovered() { p.raised_hover } else { p.raised };

@@ -520,8 +520,9 @@ fn tab_visits_every_control_on_home_in_order_and_does_not_get_stuck() {
     assert_eq!(seen[1], "Search");
     assert_eq!(seen[2], "Settings");
     assert_eq!(seen[3], "About and licences");
-    assert_eq!(seen[4], "How to submit an assignment, 5 steps, example guide");
-    assert!(seen[5..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
+    assert_eq!(seen[4], "Trash");
+    assert_eq!(seen[5], "How to submit an assignment, 5 steps, example guide");
+    assert!(seen[6..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
 }
 
 #[test]
@@ -560,7 +561,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     ],
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Export => &[(Role::Button, "Back to the guide")],
-                    Screen::Settings | Screen::About => &[(Role::Button, "Back to guides")],
+                    Screen::Settings | Screen::About | Screen::Trash => &[(Role::Button, "Back to guides")],
                     Screen::ChooseWindow => &[(Role::Button, "Back")],
                     Screen::ChooseArea => &[(Role::Button, "Back")],
                     Screen::Editor => &[
@@ -2412,4 +2413,298 @@ fn a_shape_being_drawn_is_in_the_picture_until_it_is_cancelled() {
     let after = e.texture(&ctx).unwrap();
     assert_ne!(after.id(), during.id(), "the picture is made again without the shape once it is cancelled");
     assert_eq!(e.marks().len(), openstage_express_export::demo::demo().document.guide.steps[0].annotations.len());
+}
+
+// ---- renaming and deleting guides from Home, and the Trash
+
+use openstage_express_core::GuideFolder;
+
+/// A guides folder holding one real guide for each title (each the example guide under that title).
+fn guides_dir(titles: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for title in titles {
+        let mut doc = openstage_express_export::demo::demo().document;
+        doc.guide.title = title.to_string();
+        drop(GuideFolder::create(dir.path(), &doc).unwrap());
+    }
+    dir
+}
+
+/// Where the window was asked to show a folder.
+type Shown = Rc<RefCell<Vec<PathBuf>>>;
+
+/// Home over the guides in `dir`, where the process numbers `running` are other copies of Express that are running.
+fn home_over(dir: &std::path::Path, running: &'static [u32]) -> (Harness, Shown) {
+    let shown: Shown = Rc::default();
+    let record = Rc::clone(&shown);
+    let mut h = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app
+        .with_capture(
+            dir.to_path_buf(),
+            super::capture::cannot_capture(),
+            "the whole screen",
+            Box::new(move |pid| running.contains(&pid)),
+        )
+        .with_system(
+            dir.join("exports"),
+            false,
+            Box::new(|_| None),
+            Box::new(move |folder| record.borrow_mut().push(folder.to_path_buf())),
+        );
+    h.settle();
+    (h, shown)
+}
+
+fn lock_held_by(guide: &std::path::Path, pid: u32) {
+    std::fs::write(guide.join("guide.lock"), format!("{{\"pid\": {pid}, \"startedAt\": \"2026-11-01T09:00:00Z\"}}"))
+        .unwrap();
+}
+
+#[test]
+fn a_guide_on_disk_has_rename_and_delete_buttons_named_for_it_and_the_example_has_none() {
+    let h = Harness::new(Screen::Home);
+    assert!(!h.has(Role::Button, "Rename How to submit an assignment"));
+    assert!(!h.has(Role::Button, "Delete How to submit an assignment"), "the example is not a guide on disk");
+    let dir = guides_dir(&["Alpha", "Beta"]);
+    let (h, _) = home_over(dir.path(), &[]);
+    for title in ["Alpha", "Beta"] {
+        h.find(Role::Button, &format!("{title}, 5 steps"));
+        h.find(Role::Button, &format!("Rename {title}"));
+        h.find(Role::Button, &format!("Delete {title}"));
+    }
+    h.find(Role::Button, "Trash");
+}
+
+#[test]
+fn renaming_opens_a_box_with_the_name_and_enter_saves_it() {
+    let dir = guides_dir(&["Alpha", "Beta"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Rename Alpha");
+    h.find(Role::Heading, "Rename \"Alpha\"");
+    let id = h.find(Role::TextInput, "New name for Alpha");
+    assert_eq!(h.node(id).value(), Some("Alpha"));
+    assert_eq!(h.focused_words().as_deref(), Some("New name for Alpha"), "the keyboard is in the box");
+    assert!(h.status().starts_with("Renaming Alpha."), "{}", h.status());
+    h.key(Key::A, ctrl());
+    h.type_text("Alpha two");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "Renamed to Alpha two.");
+    assert!(!h.has(Role::TextInput, "New name for Alpha"), "the box has gone");
+    h.find(Role::Button, "Alpha two, 5 steps");
+    assert!(!h.has(Role::Button, "Alpha, 5 steps"));
+    h.find(Role::Button, "Rename Alpha two");
+    assert!(dir.path().join("Alpha.osguide").is_dir(), "the folder keeps its name, as when the editor renames a guide");
+    assert!(dir.path().join("Alpha.osguide").join("guide.json").is_file());
+    assert!(!dir.path().join("Alpha.osguide").join("guide.lock").exists());
+}
+
+#[test]
+fn the_save_button_saves_and_cancel_and_escape_leave_the_name_alone() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Rename Alpha");
+    h.key(Key::A, ctrl());
+    h.type_text("Typed but not kept");
+    h.invoke(Role::Button, "Cancel");
+    assert_eq!(h.status(), "Cancelled. The name was not changed.");
+    h.find(Role::Button, "Alpha, 5 steps");
+    assert!(!h.has(Role::TextInput, "New name for Alpha"));
+    h.invoke(Role::Button, "Rename Alpha");
+    h.key(Key::A, ctrl());
+    h.type_text("Typed but not kept either");
+    h.key(Key::Escape, NO_MODS);
+    assert_eq!(h.status(), "Cancelled. The name was not changed.");
+    h.find(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Rename Alpha");
+    h.key(Key::A, ctrl());
+    h.type_text("  Saved by the button  ");
+    h.invoke(Role::Button, "Save name");
+    assert_eq!(h.status(), "Renamed to Saved by the button.");
+    h.find(Role::Button, "Saved by the button, 5 steps");
+}
+
+#[test]
+fn a_name_that_is_empty_is_refused_in_words_and_the_box_stays_to_be_fixed() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Rename Alpha");
+    h.key(Key::A, ctrl());
+    h.key(Key::Backspace, NO_MODS);
+    h.invoke(Role::Button, "Save name");
+    assert!(h.status().starts_with("Alpha was not renamed. A guide needs a name."), "{}", h.status());
+    h.find(Role::TextInput, "New name for Alpha");
+    h.find(Role::Button, "Alpha, 5 steps");
+}
+
+#[test]
+fn a_guide_another_copy_has_open_is_not_renamed_or_moved_and_the_reason_is_said() {
+    let dir = guides_dir(&["Busy"]);
+    lock_held_by(&dir.path().join("Busy.osguide"), 4242);
+    let (mut h, _) = home_over(dir.path(), &[4242]);
+    h.invoke(Role::Button, "Rename Busy");
+    h.key(Key::A, ctrl());
+    h.type_text("Other");
+    h.invoke(Role::Button, "Save name");
+    assert!(
+        h.status().contains("Busy was not renamed. It is open in another copy of Express (process 4242)"),
+        "{}",
+        h.status()
+    );
+    h.invoke(Role::Button, "Cancel");
+    h.invoke(Role::Button, "Delete Busy");
+    h.invoke(Role::Button, "Move to the Trash");
+    assert!(
+        h.status().contains("Busy was not moved. It is open in another copy of Express (process 4242)"),
+        "{}",
+        h.status()
+    );
+    h.find(Role::Button, "Busy, 5 steps");
+    assert!(dir.path().join("Busy.osguide").join("guide.json").is_file());
+    assert!(dir.path().join("Busy.osguide").join("guide.lock").exists(), "the other copy's lock is left alone");
+}
+
+#[test]
+fn delete_asks_first_with_keep_it_ready_and_then_moves_the_guide_to_the_trash() {
+    let dir = guides_dir(&["Alpha", "Beta"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Delete Alpha");
+    h.find(Role::Heading, "Move \"Alpha\" to the Trash?");
+    assert_eq!(h.focused_words().as_deref(), Some("Keep it"), "Enter by accident keeps the guide");
+    assert!(h.status().starts_with("Move Alpha to the Trash?"), "{}", h.status());
+    assert!(dir.path().join("Alpha.osguide").is_dir(), "nothing has moved yet");
+    h.invoke(Role::Button, "Move to the Trash");
+    assert_eq!(h.status(), "Moved Alpha to the Trash. Open the Trash to bring it back.");
+    assert!(!h.has(Role::Button, "Alpha, 5 steps"));
+    h.find(Role::Button, "Beta, 5 steps");
+    assert!(!h.has(Role::Heading, "Move \"Alpha\" to the Trash?"), "the question has gone");
+    assert!(!dir.path().join("Alpha.osguide").exists());
+    assert!(dir.path().join("Trash").join("Alpha.osguide").join("guide.json").is_file(), "all of it is in the Trash");
+    assert!(dir.path().join("Trash").join("Alpha.osguide").join("images").is_dir());
+}
+
+#[test]
+fn keep_it_and_escape_both_leave_the_guide_where_it_is() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Delete Alpha");
+    h.invoke(Role::Button, "Keep it");
+    assert_eq!(h.status(), "Kept Alpha.");
+    assert!(!h.has(Role::Button, "Move to the Trash"));
+    h.invoke(Role::Button, "Delete Alpha");
+    h.key(Key::Escape, NO_MODS);
+    assert_eq!(h.status(), "Kept Alpha.");
+    assert!(dir.path().join("Alpha.osguide").is_dir() && !dir.path().join("Trash").exists());
+    // One question at a time: asking to delete drops a rename that was open, and the other way round.
+    h.invoke(Role::Button, "Rename Alpha");
+    h.invoke(Role::Button, "Delete Alpha");
+    assert!(!h.has(Role::TextInput, "New name for Alpha"));
+    h.find(Role::Heading, "Move \"Alpha\" to the Trash?");
+    h.invoke(Role::Button, "Rename Alpha");
+    assert!(!h.has(Role::Button, "Move to the Trash"));
+}
+
+#[test]
+fn the_trash_lists_what_was_deleted_and_restore_brings_it_back_whole() {
+    let dir = guides_dir(&["Alpha", "Beta"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Trash");
+    assert_eq!(h.app.screen, Screen::Trash);
+    h.find(Role::Heading, "Trash");
+    h.find(Role::Label, "The Trash is empty.");
+    assert_eq!(h.status(), "The Trash is empty.");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+    h.invoke(Role::Button, "Delete Alpha");
+    h.invoke(Role::Button, "Move to the Trash");
+    h.invoke(Role::Button, "Trash");
+    assert_eq!(h.status(), "The Trash has 1 guide. Restore brings one back.");
+    h.find(Role::Label, "Alpha");
+    h.find(Role::Button, "Restore Alpha");
+    assert!(!h.has(Role::Label, "The Trash is empty."));
+    h.invoke(Role::Button, "Restore Alpha");
+    assert_eq!(h.status(), "Brought Alpha back to your guides.");
+    h.find(Role::Label, "The Trash is empty.");
+    assert!(dir.path().join("Alpha.osguide").join("guide.json").is_file());
+    assert!(!dir.path().join("Trash").join("Alpha.osguide").exists());
+    h.invoke(Role::Button, "Back to guides");
+    h.find(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    assert_eq!(h.app.screen, Screen::Editor, "and it opens, with its steps");
+}
+
+#[test]
+fn show_the_trash_folder_opens_it_or_the_guides_folder_until_something_has_been_deleted() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, shown) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Trash");
+    h.invoke(Role::Button, "Show the Trash folder");
+    assert_eq!(*shown.borrow(), [dir.path().to_path_buf()], "there is no Trash folder yet");
+    h.invoke(Role::Button, "Back to guides");
+    h.invoke(Role::Button, "Delete Alpha");
+    h.invoke(Role::Button, "Move to the Trash");
+    h.invoke(Role::Button, "Trash");
+    h.invoke(Role::Button, "Show the Trash folder");
+    assert_eq!(shown.borrow().last(), Some(&dir.path().join("Trash")));
+    assert_eq!(h.status(), "Showing the Trash folder in Explorer.");
+}
+
+#[test]
+fn deleting_the_last_guide_brings_the_example_back_to_the_list() {
+    let dir = guides_dir(&["Only one"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    assert!(!h.app.home.shows_example());
+    h.invoke(Role::Button, "Delete Only one");
+    h.invoke(Role::Button, "Move to the Trash");
+    assert!(h.app.home.shows_example());
+    h.find(Role::Button, "How to submit an assignment, 5 steps, example guide");
+    assert!(!h.has(Role::Button, "Delete How to submit an assignment"));
+}
+
+#[test]
+fn the_rename_and_delete_buttons_follow_their_guide_in_the_tab_order() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    let mut seen = Vec::new();
+    for _ in 0..8 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    let card = seen.iter().position(|w| w == "Alpha, 5 steps").expect("the card is reached");
+    assert_eq!(seen[card + 1], "Rename Alpha");
+    assert_eq!(seen[card + 2], "Delete Alpha");
+}
+
+#[test]
+fn every_control_on_home_and_the_trash_has_a_name_and_a_keyboard_route() {
+    let dir = guides_dir(&["Alpha"]);
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Rename Alpha");
+    for stage in 0..3 {
+        for id in &h.order {
+            let node = h.node(*id);
+            if egui::accessibility::is_input(node.role()) {
+                assert!(h.name(*id).is_some_and(|w| !w.trim().is_empty()), "unnamed {:?}\n{}", node.role(), h.dump());
+                assert!(
+                    node.supports_action(Action::Focus) || node.is_disabled(),
+                    "{:?} {:?}",
+                    node.role(),
+                    h.name(*id)
+                );
+            }
+        }
+        match stage {
+            0 => {
+                h.invoke(Role::Button, "Cancel");
+                h.invoke(Role::Button, "Delete Alpha");
+            }
+            1 => {
+                h.invoke(Role::Button, "Keep it");
+                h.invoke(Role::Button, "Delete Alpha");
+                h.invoke(Role::Button, "Move to the Trash");
+                h.invoke(Role::Button, "Trash");
+            }
+            _ => {}
+        }
+    }
 }

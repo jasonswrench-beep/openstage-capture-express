@@ -24,7 +24,7 @@ const USAGE: &str = "\
 OpenStage Capture Express: turns what you do on screen into a step-by-step guide
 
   openstage-capture-express                          open the window
-  openstage-capture-express --screen editor          start in the editor (or: home, export, settings, about, bar,
+  openstage-capture-express --screen editor          start in the editor (or: home, export, settings, about, trash, bar,
                                                      choose-window, choose-area)
   openstage-capture-express --theme dark             use the dark or the light colours (or: light) instead of Windows' setting
   openstage-capture-express --height <pixels>        open the window this tall (so a picture shows more of a long screen)
