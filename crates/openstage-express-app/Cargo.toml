@@ -14,6 +14,8 @@ path = "src/main.rs"
 openstage-express-core = { path = "../openstage-express-core" }
 openstage-express-export = { path = "../openstage-express-export" }
 openstage-capture-render.workspace = true
+png.workspace = true
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu"] }
 
 [target.'cfg(windows)'.dependencies]
 openstage-express-windows = { path = "../openstage-express-windows" }

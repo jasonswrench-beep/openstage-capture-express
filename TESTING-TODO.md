@@ -60,6 +60,41 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       quality 50 and 70 (not offered anywhere until the window exists, milestone M5): are the marks still readable? JPGs of the
       flat demo screenshots are larger than the PNGs; check a real screenshot with a photograph in it.
 
+## Milestone M5 (the window)
+
+Double-click `OPEN EXPRESS.bat`. It builds the program if needed and opens the window on Home, with an example guide ("How to
+submit an assignment") to open from the card under "Your guides".
+
+- [ ] Run the Narrator and NVDA pass. Only when you are away from the computer (NVDA logs everything it speaks) and only on your go.
+      The window has been read back through Windows UI Automation (roles, names, which control can be invoked, Invoke works), which
+      is what a screen reader reads, but no screen reader has spoken it. Check, on Home and in the editor: each control is named
+      and its role is right; Tab goes through the controls in a sensible order and never gets stuck; the steps list is one stop and
+      the Up and Down keys move through it, each step is said with its number and title and whether it is chosen; the line at the
+      foot is said when a message appears ("Opened the example guide", "Back at your guides"); the same message twice in a row is
+      said twice. If this pass fails, the plan is to move the window to Tauri (spec D5).
+- [ ] Use the keyboard only, no mouse, on Home and in the editor: Tab and Shift+Tab, Enter on a button or card, Up and Down in the
+      steps list, Alt+Up and Alt+Down to move a step, Ctrl+Shift+Delete to delete one, F2 to edit the title, Ctrl+Z and Ctrl+Y.
+      The tests send these keys to the window, but how fast and how natural they feel only a person can say. Is the focus ring
+      always easy to see?
+- [ ] Look at the window in dark and light (Windows Settings, Personalisation, Colours), at 125, 150 and 200 percent display
+      scaling, and with a Windows contrast theme on. The colours pass the contrast tests in the code (text at least 4.5 to 1,
+      outlines and rings at least 3 to 1), and the window has been seen as a picture in both schemes at 100 percent, but not at the
+      other scalings or in a contrast theme. egui does not follow a Windows contrast theme by itself; say if it is unreadable.
+- [ ] The two side panels cannot be dragged to a different width (the spec says they are resizable). A drag handle is a mouse-only
+      control, so none was built; say whether a keyboard way to change the widths is wanted.
+- [ ] A black console box may show for a moment behind the window when the program is started by double-clicking. The program lets
+      go of its console as soon as the window opens; the first moment before that has not been watched. A proper fix (a program
+      with no console at all) comes with the packaging milestone (M7).
+- [ ] The window uses Segoe UI from your Windows fonts folder (Tahoma, then Arial, then the bundled Roboto if it is missing).
+      Look at the text: is it sharp, and does it look like a Windows program? egui draws its own text, so it will not look exactly
+      like Notepad.
+- [ ] The window has no icon yet (the icon files are used only from milestone M7). The title bar and the taskbar show the default.
+- [ ] Double-click the finished `openstage-capture-express.exe` in `target\release` from Explorer, on an ARM64 PC, and on a PC with an
+      older graphics driver (the window draws through wgpu, which chooses the graphics interface itself). It has been run only on
+      this PC.
+- [ ] The editor does not yet let you draw marks, blur a name, crop, zoom or add notes; there is no tool row. Those come after capture.
+      Home's "Start capturing" says it is not built yet.
+
 ## PDF export (WebView2)
 
 - [ ] Open the PDF from `EXPORT DEMO.bat` (the `pdf` folder) in a desktop PDF reader and in Edge. It has been looked at only as pictures drawn
