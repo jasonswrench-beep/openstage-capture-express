@@ -69,10 +69,24 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 /// the Up and Down keys for itself (the screen then chooses the row above or below and passes the keyboard to it).
 /// `take_keyboard` gives the keyboard to this row now (used right after Up or Down chose it).
 pub fn list_row(ui: &mut Ui, label: &str, selected: bool, muted: bool, indent: f32, take_keyboard: bool) -> Response {
+    list_row_of_many(ui, label, selected, selected, muted, indent, take_keyboard)
+}
+
+/// A row of a list in which several rows can be chosen: every chosen row is marked, but `has_keyboard_stop` is true for the one row
+/// the Tab key can reach and the keyboard goes to (the list is still one stop however many rows are chosen).
+pub fn list_row_of_many(
+    ui: &mut Ui,
+    label: &str,
+    selected: bool,
+    has_keyboard_stop: bool,
+    muted: bool,
+    indent: f32,
+    take_keyboard: bool,
+) -> Response {
     let p = palette(ui);
-    let sense = if selected { egui::Sense::click() } else { egui::Sense::CLICK };
+    let sense = if has_keyboard_stop { egui::Sense::click() } else { egui::Sense::CLICK };
     let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), sense);
-    if selected && take_keyboard {
+    if has_keyboard_stop && take_keyboard {
         response.request_focus();
     }
     if response.has_focus() {

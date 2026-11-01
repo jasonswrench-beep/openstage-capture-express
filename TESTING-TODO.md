@@ -104,8 +104,14 @@ submit an assignment") to open from the card under "Your guides".
       feels right, only a person can say. The tests send the same pointer events through the window without a mouse; nobody has
       done it by hand. Narrator and NVDA: the heading folds open by keyboard and each choice is named ("Draw an oval"); Add and
       Move still do everything by keyboard.
-- [ ] Not built in the editor yet: picking several steps at once, panning or zooming the focused crop by hand, and cutting the
-      picture.
+- [ ] Choose several steps by hand (on a guide you can spare): Ctrl+click adds or takes out a step, Shift+click chooses a run, and
+      with the keyboard on the list Shift+Up and Shift+Down lengthen or shorten a run and Ctrl+A chooses every step ("Choose all steps"
+      does the same by button). The right-hand side should change to "Several steps chosen" with Skip, Put back, Delete and Choose just
+      one; one Undo should take back a whole skip or delete. Does it feel right that the picture stays on one step, and that you cannot
+      pick separate steps by keyboard alone (only runs, all, or Ctrl+click with a mouse)? Moving (Alt+Up and Down) and Duplicate are for
+      one step and say so. Narrator and NVDA: each chosen row should be read as selected, and the status line says how many are chosen.
+- [ ] Not built in the editor yet: moving or duplicating several steps at once, panning or zooming the focused crop by hand, and
+      cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
       Settings, Folders to it): Rename opens a box with the name, Enter saves, Escape cancels; Delete asks first with Keep it ready,
       then the guide leaves the list and its folder is in `Trash` beside the guides; Trash lists it and Restore brings it back and it

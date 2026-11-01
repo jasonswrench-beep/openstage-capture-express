@@ -55,6 +55,11 @@ pub struct EditorState {
     mark_words_for: Option<String>,
     /// A mark being dragged with the mouse: shown moved or resized, and only kept (as one change) when the mouse is let go.
     drag: Option<Drag>,
+    /// Steps chosen besides the selected one, so that several can be skipped or deleted together (the selected step is the one the
+    /// picture and the keyboard are on).
+    also: Vec<String>,
+    /// Where a run of chosen steps starts: the step chosen last by a plain choice or a Ctrl+click.
+    anchor: Option<String>,
     /// The kind of mark the mouse draws when it is dragged over the picture, if the person chose one. It is used once.
     draw_tool: Option<Tool>,
     /// A new mark being drawn with the mouse: shown as it will be, and only added (as one change) when the mouse is let go.
@@ -115,6 +120,8 @@ impl EditorState {
             mark_words: String::new(),
             mark_words_for: None,
             drag: None,
+            also: Vec::new(),
+            anchor: None,
             draw_tool: None,
             drawing: None,
         };
@@ -147,6 +154,8 @@ impl EditorState {
             mark_words: String::new(),
             mark_words_for: None,
             drag: None,
+            also: Vec::new(),
+            anchor: None,
             draw_tool: None,
             drawing: None,
         };
@@ -219,8 +228,17 @@ impl EditorState {
         self.rows().into_iter().find(|r| r.id == id)
     }
 
-    /// Select a step, keeping what was typed for the one before.
+    /// Select a step, and only that one, keeping what was typed for the one before.
     pub fn select(&mut self, id: &str) {
+        self.move_to(id);
+        if self.selected.as_deref() == Some(id) {
+            self.also.clear();
+            self.anchor = Some(id.to_string());
+        }
+    }
+
+    /// Make this step the selected one (the picture and the keyboard are on it), leaving the other chosen steps as they are.
+    fn move_to(&mut self, id: &str) {
         self.commit_pending();
         if self.session.doc().guide.step(id).is_some() {
             if self.selected.as_deref() != Some(id) {
@@ -231,6 +249,144 @@ impl EditorState {
             self.selected = Some(id.to_string());
         }
         self.reload_buffer();
+    }
+
+    // ---- choosing several steps
+
+    /// Whether the step is among the chosen ones (the selected step always is).
+    pub fn is_chosen(&self, id: &str) -> bool {
+        self.selected.as_deref() == Some(id) || self.also.iter().any(|a| a == id)
+    }
+
+    /// How many steps are chosen.
+    pub fn chosen_count(&self) -> usize {
+        if self.selected.is_none() {
+            0
+        } else {
+            1 + self.also.len()
+        }
+    }
+
+    /// The chosen steps, in the order of the list.
+    pub fn chosen_ids(&self) -> Vec<String> {
+        self.rows().into_iter().filter(|r| self.is_chosen(&r.id)).map(|r| r.id).collect()
+    }
+
+    /// What to say when several steps are chosen (nothing when there is one).
+    pub fn chosen_words(&self) -> Said {
+        let n = self.chosen_count();
+        (n > 1).then(|| {
+            format!("{n} steps chosen. Use the buttons at the right to skip or delete them, or choose just one.")
+        })
+    }
+
+    /// Ctrl+click: add the step to the chosen ones, or take it out. One step always stays chosen.
+    pub fn toggle_chosen(&mut self, id: &str) -> Said {
+        self.session.doc().guide.step(id)?;
+        if self.selected.as_deref() == Some(id) {
+            if self.also.is_empty() {
+                return None;
+            }
+            // The selected step is let go: another chosen step becomes the selected one.
+            let next = self.also.remove(0);
+            self.move_to(&next);
+        } else if let Some(at) = self.also.iter().position(|a| a == id) {
+            self.also.remove(at);
+        } else {
+            self.also.push(id.to_string());
+        }
+        self.anchor = Some(id.to_string());
+        self.chosen_words().or_else(|| self.selected_row().map(|r| r.label()))
+    }
+
+    /// Shift+click, or Shift+Up and Down: choose every step from where the run started to this one. This step becomes the selected one.
+    pub fn choose_run_to(&mut self, id: &str) -> Said {
+        let ids: Vec<String> = self.rows().into_iter().map(|r| r.id).collect();
+        let to = ids.iter().position(|i| i == id)?;
+        let from = self
+            .anchor
+            .as_deref()
+            .and_then(|a| ids.iter().position(|i| i == a))
+            .or_else(|| ids.iter().position(|i| Some(i.as_str()) == self.selected.as_deref()))?;
+        let (first, last) = (from.min(to), from.max(to));
+        self.move_to(id);
+        self.also = ids[first..=last].iter().filter(|i| i.as_str() != id).cloned().collect();
+        self.anchor = Some(ids[from].clone());
+        self.chosen_words().or_else(|| self.selected_row().map(|r| r.label()))
+    }
+
+    /// Choose every step.
+    pub fn choose_all(&mut self) -> Said {
+        let ids: Vec<String> = self.rows().into_iter().map(|r| r.id).collect();
+        if ids.is_empty() {
+            return None;
+        }
+        let keep = self.selected.clone().filter(|s| ids.contains(s)).unwrap_or_else(|| ids[0].clone());
+        self.move_to(&keep);
+        self.also = ids.iter().filter(|i| **i != keep).cloned().collect();
+        self.anchor = Some(ids[0].clone());
+        Some(format!("All {} steps chosen. Use the buttons at the right to skip or delete them.", ids.len()))
+    }
+
+    /// Go back to choosing only the selected step.
+    pub fn choose_only_selected(&mut self) -> Said {
+        let id = self.selected.clone()?;
+        self.select(&id);
+        self.selected_row().map(|r| r.label())
+    }
+
+    /// Leave all the chosen steps out of every export (`true`) or put them back (`false`), as one change.
+    pub fn skip_chosen(&mut self, skipped: bool) -> Said {
+        self.commit_pending();
+        let ids = self.chosen_ids();
+        if ids.len() < 2 {
+            return None;
+        }
+        let now = utc_now_iso();
+        let result = self.session.apply(|d| {
+            for id in &ids {
+                d.set_skipped(id, skipped, &now)?;
+            }
+            Ok(())
+        });
+        Some(match (result, skipped) {
+            (Ok(()), true) => format!("{} steps will be left out of exports. Undo brings them back.", ids.len()),
+            (Ok(()), false) => format!("{} steps will be in exports.", ids.len()),
+            (Err(_), _) => "Those steps could not be changed.".to_string(),
+        })
+    }
+
+    /// Delete all the chosen steps (they go to the trash, and one undo brings them all back).
+    pub fn delete_chosen(&mut self) -> Said {
+        self.commit_pending();
+        let ids = self.chosen_ids();
+        if ids.len() < 2 {
+            return self.delete_selected();
+        }
+        // Afterwards the keyboard goes to the step after the last one deleted, or else the one before the first, that is still there.
+        let all: Vec<String> = self.rows().into_iter().map(|r| r.id).collect();
+        let last = all.iter().rposition(|i| ids.contains(i)).unwrap_or(0);
+        let first = all.iter().position(|i| ids.contains(i)).unwrap_or(0);
+        let next = all[last + 1..]
+            .iter()
+            .find(|i| !ids.contains(i))
+            .or_else(|| all[..first].iter().rev().find(|i| !ids.contains(i)))
+            .cloned();
+        let now = utc_now_iso();
+        let result = self.session.apply(|d| {
+            for id in &ids {
+                d.delete_step(id, &now)?;
+            }
+            Ok(())
+        });
+        match result {
+            Ok(()) => {
+                self.selected = next;
+                self.keep_selection_valid();
+                Some(format!("Deleted {} steps. Undo brings them back.", ids.len()))
+            }
+            Err(_) => Some("Those steps could not be deleted.".to_string()),
+        }
     }
 
     fn reload_buffer(&mut self) {
@@ -285,6 +441,7 @@ impl EditorState {
     fn keep_selection_valid(&mut self) {
         self.drag = None;
         self.drawing = None;
+        self.also.clear();
         let still_there = self
             .selected_mark
             .as_deref()
@@ -335,6 +492,9 @@ impl EditorState {
 
     /// Move the selected step up or down one place among its neighbours.
     pub fn move_selected(&mut self, delta: i32) -> Said {
+        if self.chosen_count() > 1 {
+            return Some("Moving works on one step at a time. Choose just one step first.".to_string());
+        }
         self.commit_pending();
         let id = self.selected.clone()?;
         let before = self.session.doc().guide.steps.iter().position(|s| s.id == id);
@@ -380,7 +540,9 @@ impl EditorState {
         });
         match result {
             Ok(id) => {
-                self.selected = Some(id);
+                self.selected = Some(id.clone());
+                self.also.clear();
+                self.anchor = Some(id);
                 self.reload_buffer();
                 self.focus_title_next = true;
                 Some("Added an empty step. Type its title.".to_string())
@@ -391,12 +553,17 @@ impl EditorState {
 
     /// Duplicate the selected step (a copy of it, with its picture and marks, goes straight after it).
     pub fn duplicate_selected(&mut self) -> Said {
+        if self.chosen_count() > 1 {
+            return Some("Duplicating works on one step at a time. Choose just one step first.".to_string());
+        }
         self.commit_pending();
         let id = self.selected.clone()?;
         let now = utc_now_iso();
         match self.session.apply(|d| d.duplicate_step(&id, &now)) {
             Ok(copy) => {
-                self.selected = Some(copy);
+                self.selected = Some(copy.clone());
+                self.also.clear();
+                self.anchor = Some(copy);
                 self.selected_mark = None;
                 self.reload_buffer();
                 let row = self.describe_selected();

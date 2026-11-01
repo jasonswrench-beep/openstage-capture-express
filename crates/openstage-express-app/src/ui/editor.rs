@@ -4,7 +4,9 @@
 //!
 //! Keys: Ctrl+Z and Ctrl+Y undo and redo (while a text box has the keyboard they belong to the box); Alt+Up and Alt+Down move
 //! the step; Ctrl+Shift+Up and Ctrl+Shift+Down choose the step before or after; Ctrl+Shift+Delete deletes the step; F2 goes to
-//! the title; Up and Down in the list choose a step.
+//! the title; Up and Down in the list choose a step. To choose several steps: Ctrl+click adds or takes out one, Shift+click or
+//! Shift+Up and Shift+Down chooses a run, Ctrl+A or the button chooses every step; the buttons at the right then skip or delete them
+//! all together, and one undo takes the change back.
 
 use eframe::egui::{self, Key, Modifiers, RichText};
 
@@ -105,11 +107,23 @@ fn keys(ctx: &egui::Context, state: &mut EditorState, status: &mut Status) {
         }
     }
     if delete {
-        status.say_opt(state.delete_selected());
+        status.say_opt(state.delete_chosen());
     }
     if rename {
         state.focus_title_next = true;
     }
+}
+
+/// What a click or a key did to the choice of steps.
+enum Choice {
+    /// Only this step is chosen.
+    Only(String),
+    /// Ctrl+click: add the step to the chosen ones, or take it out.
+    Toggle(String),
+    /// Shift+click or Shift+Up and Down: the run from where it started to this step.
+    RunTo(String),
+    /// Ctrl+A or the button: every step.
+    All,
 }
 
 fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
@@ -117,16 +131,31 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let rows = state.rows();
     let selected = state.selected_id().map(str::to_string);
     let take_keyboard = std::mem::take(&mut state.focus_row_next);
-    let mut chosen: Option<String> = None;
+    let mut choice: Option<Choice> = None;
     let mut keyboard_on_selected = false;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 56.0).show(ui, |ui| {
+    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 130.0).show(ui, |ui| {
         for row in &rows {
             let is_selected = selected.as_deref() == Some(row.id.as_str());
-            // A steps list is a list of choices: each row is named for what it says, and the chosen one is marked.
-            let response =
-                widgets::list_row(ui, &row.label(), is_selected, row.skipped, row.depth as f32 * 22.0, take_keyboard);
-            if response.clicked() && !is_selected {
-                chosen = Some(row.id.clone());
+            // A steps list is a list of choices: each row is named for what it says, and each chosen one is marked. Only the
+            // selected row takes the keyboard.
+            let response = widgets::list_row_of_many(
+                ui,
+                &row.label(),
+                state.is_chosen(&row.id),
+                is_selected,
+                row.skipped,
+                row.depth as f32 * 22.0,
+                take_keyboard,
+            );
+            if response.clicked() {
+                let (command, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
+                if command {
+                    choice = Some(Choice::Toggle(row.id.clone()));
+                } else if shift {
+                    choice = Some(Choice::RunTo(row.id.clone()));
+                } else if !is_selected || state.chosen_count() > 1 {
+                    choice = Some(Choice::Only(row.id.clone()));
+                }
                 state.focus_row_next = true;
             }
             keyboard_on_selected |= is_selected && response.has_focus();
@@ -136,35 +165,98 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         }
     });
     // Up and Down choose the step above or below while the chosen row has the keyboard, and the keyboard goes with the choice.
-    // A screen reader says the row it lands on, so nothing is added to the status line for this.
+    // Shift with them lengthens or shortens a run of chosen steps, and Ctrl+A chooses every step. A screen reader says the row it
+    // lands on, so nothing is added to the status line for a single step.
     if keyboard_on_selected {
-        let (up, down) = ui.ctx().input_mut(|i| {
-            (i.consume_key(Modifiers::NONE, Key::ArrowUp), i.consume_key(Modifiers::NONE, Key::ArrowDown))
+        let (up, down, shift_up, shift_down, all) = ui.ctx().input_mut(|i| {
+            // The keys with Shift are taken first, so that Shift+Up is not also a plain Up.
+            let shift_up = i.consume_key(Modifiers::SHIFT, Key::ArrowUp);
+            let shift_down = i.consume_key(Modifiers::SHIFT, Key::ArrowDown);
+            (
+                i.consume_key(Modifiers::NONE, Key::ArrowUp),
+                i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                shift_up,
+                shift_down,
+                i.consume_key(Modifiers::COMMAND, Key::A),
+            )
         });
-        let target = if up {
-            state.neighbour(-1)
+        let target = if shift_up {
+            state.neighbour(-1).map(Choice::RunTo)
+        } else if shift_down {
+            state.neighbour(1).map(Choice::RunTo)
+        } else if up {
+            state.neighbour(-1).map(Choice::Only)
         } else if down {
-            state.neighbour(1)
+            state.neighbour(1).map(Choice::Only)
+        } else if all {
+            Some(Choice::All)
         } else {
             None
         };
-        if let Some(id) = target {
-            chosen = Some(id);
+        if target.is_some() {
+            choice = target;
             state.focus_row_next = true;
         }
     }
-    if let Some(id) = chosen {
-        state.select(&id);
+    if let Some(choice) = choice {
+        match choice {
+            Choice::Only(id) => state.select(&id),
+            Choice::Toggle(id) => status.say_opt(state.toggle_chosen(&id)),
+            Choice::RunTo(id) => status.say_opt(state.choose_run_to(&id)),
+            Choice::All => status.say_opt(state.choose_all()),
+        }
     }
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if widgets::button(ui, "Add a step").clicked() {
             status.say_opt(state.add_step());
         }
-        if widgets::button_enabled(ui, state.selected_step().is_some(), "Duplicate step").clicked() {
+        if widgets::button_enabled(ui, state.chosen_count() == 1, "Duplicate step").clicked() {
             status.say_opt(state.duplicate_selected());
         }
+        let can_choose_more = rows.len() > 1 && state.chosen_count() < rows.len();
+        if widgets::button_enabled(ui, can_choose_more, "Choose all steps").clicked() {
+            status.say_opt(state.choose_all());
+            state.focus_row_next = true;
+        }
     });
+    if rows.len() > 1 {
+        ui.label(RichText::new("Ctrl+click or Shift+click chooses several.").size(13.5).color(palette(ui).muted));
+    }
+}
+
+/// What can be done to several chosen steps at once, in place of the details of one.
+fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+    let p = palette(ui);
+    widgets::subheading(ui, "Several steps chosen");
+    let ids = state.chosen_ids();
+    ui.label(RichText::new(format!("{} steps are chosen:", ids.len())).color(p.text));
+    let rows = state.rows();
+    let shown = 8;
+    for row in rows.iter().filter(|r| ids.contains(&r.id)).take(shown) {
+        ui.label(RichText::new(row.label()).color(p.muted));
+    }
+    if ids.len() > shown {
+        ui.label(RichText::new(format!("and {} more", ids.len() - shown)).color(p.muted));
+    }
+    ui.add_space(6.0);
+    let any_skipped = rows.iter().any(|r| ids.contains(&r.id) && r.skipped);
+    let any_in = rows.iter().any(|r| ids.contains(&r.id) && !r.skipped);
+    if widgets::button_enabled(ui, any_in, "Skip these steps in export").clicked() {
+        status.say_opt(state.skip_chosen(true));
+    }
+    if widgets::button_enabled(ui, any_skipped, "Put these steps back in export").clicked() {
+        status.say_opt(state.skip_chosen(false));
+    }
+    if widgets::button(ui, "Delete these steps").clicked() {
+        status.say_opt(state.delete_chosen());
+    }
+    let only = state.selected_row().map(|r| r.label()).unwrap_or_default();
+    if widgets::button_named(ui, "Choose just one", &format!("Choose just one step: {only}")).clicked() {
+        status.say_opt(state.choose_only_selected());
+        state.focus_row_next = true;
+    }
+    ui.label(RichText::new("Undo brings back a skip or a delete, all the steps at once.").size(13.5).color(p.muted));
 }
 
 fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
@@ -185,6 +277,10 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     widgets::subheading(ui, "Step details");
     if state.selected_step().is_none() {
         ui.label(RichText::new("No step is chosen. Add a step, or choose one from the list.").color(p.muted));
+        return;
+    }
+    if state.chosen_count() > 1 {
+        several_chosen(ui, state, status);
         return;
     }
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -495,6 +591,10 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
             painter.rect_filled(square, 1.0, egui::Color32::WHITE);
             painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Inside);
         }
+    }
+    // With several steps chosen the picture is only shown: the marks belong to one step.
+    if state.chosen_count() > 1 {
+        return;
     }
     // The mouse: press on a mark (or a handle of the chosen mark) to pick it up, move to drag it, let go to keep it.
     let origin_id = ui.make_persistent_id("mark-drag-origin");

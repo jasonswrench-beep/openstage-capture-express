@@ -18,7 +18,7 @@ and moves the guide to a `Trash` folder inside the guides folder, never erasing 
 each with a Restore button. **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; before Start you choose what to capture: the whole screen, one window (from a list of the open
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
-made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
+made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped, deleted and restored, with undo
 and redo, and every change is saved. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
 spotlight) are added with buttons or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
 moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
@@ -35,8 +35,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 680 passed (247 in the core, 182 in the exports, 44 in the
-  Windows crate, 207 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 694 passed (247 in the core, 182 in the exports, 44 in the
+  Windows crate, 221 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -92,6 +92,14 @@ Run on Windows, and working:
   reader and Python's `zipfile` read both files too.
 
 Written and type-checked, not yet run on Windows:
+
+- Choosing several steps in the editor (Ctrl+click adds or takes out one, Shift+click or Shift+Up and Down chooses a run, Ctrl+A or the
+  "Choose all steps" button chooses every step; the details give way to Skip, Put back, Delete and Choose just one, each done to all
+  the chosen steps as one undo; the picture and the marks are left alone, and moving or duplicating asks for one step): tested through
+  the window with simulated clicks that hold Ctrl or Shift, and with keys. The steps list is still one stop for the Tab key however many
+  are chosen (a test caught every chosen row becoming a stop). Nobody has done it with a real mouse or keyboard, a screen reader has
+  not read it, and a person who cannot use Ctrl+click can use Shift+arrows, Ctrl+A and the button, but cannot pick separate steps
+  by keyboard alone. Twenty deliberate faults were each caught.
 
 - Renaming, deleting and restoring guides from Home (spec A1): the folder moves and the rename were run for real on this PC, but only
   on made-up guides in temporary folders (a moved guide is byte for byte the same, comes back whole under a free name, is never
@@ -167,7 +175,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, picking several steps, sorting the list of guides on Home, a "Save a copy as one file",
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, moving or duplicating several steps at once, sorting the list of guides on Home, a "Save a copy as one file",
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
