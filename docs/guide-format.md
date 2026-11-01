@@ -234,6 +234,8 @@ Every export is made from the same plan, so they agree about which steps are in,
 | Images | `step-NN.png` only. JPG with a quality setting is not built yet. |
 | GIF | `<title>.gif`: one frame per step (a step with no picture is a card with its title), the same width, shorter pictures centred on a background colour, each frame 1, 2, 3, 5 or 8 seconds (3 by default), looping unless turned off, with an optional title card and progress bar. Width between 320 and 1920 (800 by default). A GIF cannot be made accessible. |
 | PDF | `<title>.pdf`, made by the WebView2 engine on Windows. See below. |
+| Word | `<title>.docx`, written by Express as Office Open XML. See below. |
+| PowerPoint | `<title>.pptx`, one slide for each step. See below. |
 
 ### The PDF export
 
@@ -290,6 +292,50 @@ tree, or null. `altText`, the picture fields and `width` and `height` are null f
 because they are private or are for editing: the text typed into a field (it appears only as the step's title), the click, the
 control, the program and the capture time.
 
+### The Word export
+
+A `.docx` written by Express itself (a ZIP file of XML and pictures, with fixed dates, so the same guide gives the same bytes).
+
+- **Structure.** The guide's title is in the Title style. Every step is a heading: Heading 1 for a step, Heading 2 for a substep,
+  Heading 3 for anything deeper. The step number is real text (`2.1. Type "Week 3 reflection"`). A content block is a shaded
+  "Express Note" paragraph with no number, and is not in the contents list. Word's navigation pane, its accessibility checker and
+  screen readers find all of this.
+- **Contents.** A real Word `TOC` field (`TOC \o "1-3" \h \z \n`) that is already filled in with a link to every step, so it is
+  complete when the file is opened. It has no page numbers, which only Word can work out; a right click and "Update field" in Word
+  rebuilds it from the headings and gives the same entries (checked in Word).
+- **Pictures.** Inline, each with its alt text, at most the width of the text and never larger than their natural size (96 pixels
+  to the inch), and never taller than the page less its margins and 40 mm for the heading.
+- **Descriptions** keep bold, italic, links (only web and mail addresses become links) and bullet and numbered lists; every
+  numbered list starts again at 1.
+- **Options.** Paper A4, Letter, A3, A5 or Legal; portrait or landscape; margins of 10 to 40 mm (25 by default); the contents list;
+  "Page 3 of 12" in the footer (in the guide's language); every top-level step on a new page.
+- **Language and properties.** The text is marked with the guide's language (`en-US`, `de-DE`, `fr-FR`, or the code as written);
+  the title and language are in the document properties. No dates are written.
+- **Fonts.** Calibri, which Word has. Nothing is embedded: Roboto, which the PDF carries, is not embedded in Word files yet.
+- **Checked in Word** (Microsoft 365, version 16) on 2026-11-01: it opens with no repair prompt, not in compatibility mode, with
+  the Title and heading styles and outline levels, one table of contents, a bookmark behind every heading, every picture's alt
+  text, the list paragraphs, the footer fields and the A4 page size.
+
+### The PowerPoint export
+
+A `.pptx` written by Express itself, in the same way.
+
+- **One 16:9 slide for each step** (13.33 by 7.5 inches). The slide's title is the step's number and title, in a real title
+  placeholder, so the outline view, the accessibility checker and screen readers see it. Under it are the picture (with alt text)
+  and the first two lines of the description, cut short with an ellipsis after 240 characters or when there is more. A step with
+  no picture (a content block, or a picture that could not be found) shows all its text in a large box.
+- **Speaker notes** hold the *full* description of every step that has one: paragraphs, list items with a bullet or their number,
+  links written out as `label (address)`.
+- **Order for a screen reader:** title, picture, description, footer, slide number.
+- **Options.** A cover slide with the guide's title and description (on by default); agenda slides listing the top-level steps, ten
+  to a slide (off by default); a footer line; slide numbers (on); speaker notes (on).
+- **Fonts and colours.** Calibri, not embedded; the theme uses the same colours as the web page. The spec's optional logo is not
+  built.
+- **Checked in PowerPoint** (Microsoft 365, version 16) on 2026-11-01: it opens with no repair prompt, with seven slides at
+  960 by 540 points, each with its title, the right layout, every picture's alt text, the slide numbers and the notes.
+- **`tools/check-office.ps1`** opens the demo's Word and PowerPoint files in the real programs and checks these things again. It
+  skips a program that is already open, so it cannot disturb a person's work.
+
 ## Not in this document yet
 
-The settings file is written when it is built. Word and PowerPoint exports are not built.
+The settings file is written when it is built. JPG is not built.

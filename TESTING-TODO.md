@@ -56,7 +56,7 @@ milestones are built; tick an item (and say on which PC and when) once it has be
 - [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
       seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
 - [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
-- [ ] Word, PowerPoint and JPG are not built yet.
+- [ ] JPG is not built yet.
 
 ## PDF export (WebView2)
 
@@ -79,3 +79,26 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       minutes.
 - [ ] Roboto (Apache-2.0, version 2.137) was copied from the fonts installed on your PC into `crates/openstage-express-export/fonts`
       and is recorded in `NOTICE`. Say whether you are happy to ship it, or whether it should come from Google Fonts instead.
+
+## Word and PowerPoint exports
+
+- [ ] Open the Word file from `EXPORT DEMO.bat` (the `word` folder) yourself. It has been opened by a script in Word 16 and its
+      pages looked at as pictures, but not by a person. Does it read well? Right click the contents list and choose Update field:
+      the entries should stay the same.
+- [ ] Open the PowerPoint file (the `powerpoint` folder) and play it as a slide show. Do the pictures, the first lines of text and
+      the speaker notes (press S in the show, or open Notes) feel right? Is two lines of text under a picture the right amount?
+- [ ] Run Word's Check Accessibility and PowerPoint's Check Accessibility on the two files. Neither has been run. The headings,
+      alt text, slide titles, reading order and document language are all set, but no checker has confirmed it.
+- [ ] Read both files with a screen reader (NVDA or Narrator), in Word and in PowerPoint. Only when you are away from the
+      computer: NVDA logs everything it speaks.
+- [ ] Open the files in a program other than Microsoft's (LibreOffice, Google Docs or Slides, Pages or Keynote on a Mac). They have
+      only been opened in Microsoft 365 Word and PowerPoint, so how others show the contents list, the footer and the slide
+      layout is not known.
+- [ ] Both files use Calibri without embedding it. On a computer without Calibri (some Linux machines) the text will use another
+      font. Roboto, as the spec suggests, is not embedded in either yet. Say whether that matters.
+- [ ] The page-per-step, A3, A5 and Legal options of the Word export, and the cover, agenda and footer options of the PowerPoint
+      export, are written and tested as XML, but only the default options have been opened in Word and PowerPoint.
+- [ ] `tools/check-office.ps1` repeats the Office checks. Its Word half has not run in its final form (Word was open when it was
+      tried): close Word, run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-office.ps1` from the Express folder
+      after `EXPORT DEMO.bat`, and tell me if any line says FAIL.
+- [ ] The optional logo on slides (spec section 10.2) is not built.
