@@ -231,7 +231,7 @@ Every export is made from the same plan, so they agree about which steps are in,
 | HTML | `<title>.html`: one self-contained page (pictures inside it as data, no outside requests, a Content-Security-Policy, headings, a contents list, a skip link, alt text, light and dark colours that pass 4.5 to 1, a print style, pictures that open larger in a dialog). |
 | Markdown | `<title>.md` and `images/step-NN.png`. A step is a heading (`## 1. Title`, one level deeper for a substep), its description as written, and `![alt](images/step-NN.png)`. A content block is a quotation. |
 | JSON | `<title>.json` and `images/step-NN.png`. See below. |
-| Images | `step-NN.png` only. JPG with a quality setting is not built yet. |
+| Images | `step-NN.png`, or `step-NN.jpg` with a quality from 1 to 100 (the dialog offers 100, 90, 70 and 50, and 90 is the default). Both come from the same lossless picture, so the marks are crisp; the JPG is baseline, full colour resolution (no chroma subsampling, so text edges stay sharp), written by Express itself. A JPG is smaller than the PNG only for photograph-like pictures: for ordinary screenshots the PNG is usually smaller as well as sharper. |
 | GIF | `<title>.gif`: one frame per step (a step with no picture is a card with its title), the same width, shorter pictures centred on a background colour, each frame 1, 2, 3, 5 or 8 seconds (3 by default), looping unless turned off, with an optional title card and progress bar. Width between 320 and 1920 (800 by default). A GIF cannot be made accessible. |
 | PDF | `<title>.pdf`, made by the WebView2 engine on Windows. See below. |
 | Word | `<title>.docx`, written by Express as Office Open XML. See below. |
@@ -338,4 +338,4 @@ A `.pptx` written by Express itself, in the same way.
 
 ## Not in this document yet
 
-The settings file is written when it is built. JPG is not built.
+The settings file is written when it is built. WebP is not built (spec S3).

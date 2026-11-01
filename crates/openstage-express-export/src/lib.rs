@@ -18,6 +18,7 @@ pub mod encoding;
 pub mod gif;
 pub mod html;
 pub mod images;
+pub mod jpeg;
 pub mod json;
 pub mod markdown;
 pub mod office;
