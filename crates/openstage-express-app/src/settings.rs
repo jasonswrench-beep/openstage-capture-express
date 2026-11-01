@@ -110,6 +110,43 @@ impl TitleLanguage {
     }
 }
 
+/// How the list of guides on Home is ordered (spec A1). A value in the settings file that this program does not know means the usual
+/// order, never a settings file that cannot be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum HomeSort {
+    /// The guide changed longest ago first.
+    Oldest,
+    /// By name, A to Z, not minding capitals.
+    NameAz,
+    /// By name, Z to A.
+    NameZa,
+    /// The guide changed last first. Last in the list, because serde takes any other value to be this one.
+    #[default]
+    #[serde(other)]
+    Newest,
+}
+
+impl HomeSort {
+    pub const ALL: [HomeSort; 4] = [HomeSort::Newest, HomeSort::Oldest, HomeSort::NameAz, HomeSort::NameZa];
+
+    /// For the button: what the list is sorted by now.
+    pub fn name(self) -> &'static str {
+        match self {
+            HomeSort::Newest => "newest first",
+            HomeSort::Oldest => "oldest first",
+            HomeSort::NameAz => "name, A to Z",
+            HomeSort::NameZa => "name, Z to A",
+        }
+    }
+
+    /// The order a press of the button goes to.
+    pub fn next(self) -> HomeSort {
+        let at = HomeSort::ALL.iter().position(|s| *s == self).unwrap_or(0);
+        HomeSort::ALL[(at + 1) % HomeSort::ALL.len()]
+    }
+}
+
 /// Which cue sounds are on (spec 8.9: all off to begin with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -139,6 +176,8 @@ impl SoundSettings {
 pub struct AppSettings {
     pub schema_version: String,
     pub appearance: Appearance,
+    /// How the guides on Home are ordered.
+    pub home_sort: HomeSort,
     /// The keys that work from any program (spec 8.7).
     pub hotkeys: HotkeySet,
     pub sounds: SoundSettings,
@@ -178,6 +217,7 @@ impl Default for AppSettings {
         AppSettings {
             schema_version: SCHEMA_VERSION.to_string(),
             appearance: Appearance::System,
+            home_sort: HomeSort::Newest,
             hotkeys: HotkeySet::default(),
             sounds: SoundSettings::default(),
             capture_mode: ModeChoice::OnClick,
@@ -487,6 +527,29 @@ mod tests {
         assert_eq!(s.hotkeys.start_or_finish, HotkeySet::default().start_or_finish, "the bad key is the usual one");
         assert_eq!(s.hotkeys.capture_now.describe(), "Alt+Shift+K", "the good key is kept");
         assert!(s.sounds.step && !s.sounds.start_and_stop && !s.sounds.problem);
+    }
+
+    #[test]
+    fn the_sort_order_is_remembered_cycles_through_four_and_a_strange_value_is_the_usual_one() {
+        assert_eq!(AppSettings::default().home_sort, HomeSort::Newest);
+        let mut seen = vec![HomeSort::Newest];
+        for _ in 0..4 {
+            seen.push(seen.last().unwrap().next());
+        }
+        assert_eq!(seen, [HomeSort::Newest, HomeSort::Oldest, HomeSort::NameAz, HomeSort::NameZa, HomeSort::Newest]);
+        let names: Vec<_> = HomeSort::ALL.iter().map(|s| s.name()).collect();
+        assert_eq!(names, ["newest first", "oldest first", "name, A to Z", "name, Z to A"]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = AppSettings { home_sort: HomeSort::NameZa, ..AppSettings::default() };
+        save(&path, &s).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\"homeSort\": \"nameZa\""));
+        assert_eq!(load(&path).0.home_sort, HomeSort::NameZa);
+        // A value from a newer program, or a typing mistake, is the usual order, and the other settings are kept.
+        std::fs::write(&path, br#"{"homeSort": "byColour", "showCursor": false}"#).unwrap();
+        let (back, note) = load(&path);
+        assert_eq!(back.home_sort, HomeSort::Newest);
+        assert!(!back.show_cursor && note.is_none(), "{note:?}");
     }
 
     #[test]

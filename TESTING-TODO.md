@@ -119,6 +119,10 @@ submit an assignment") to open from the card under "Your guides".
       to find? Try it while the guide is open in a second copy of Express: both should say it is in use. With the guides folder in
       OneDrive (it is on this PC), the move syncs like any other: check OneDrive shows the folder in `Trash` and not in both places.
       Home's step count now leaves out skipped steps and notes, as the editor does (it used to count them).
+- [ ] Sort the guides on Home (with two or more): the Sort button goes round newest first, oldest first, name A to Z and Z to A; the list
+      changes at once and the status line says which. Is the order what you expect for your own guides (capitals ignored; guides
+      changed in the same second are by name)? Close and open the program: is the order kept? Is one button that cycles clear enough, or
+      would you rather see all four choices?
 - [ ] Narrator and NVDA on Home with real guides, only when you are away and on your go: each button is named for its guide
       ("Rename Submit an assignment"), the question's heading and the status line are read, and the Trash screen reads its list.
 
