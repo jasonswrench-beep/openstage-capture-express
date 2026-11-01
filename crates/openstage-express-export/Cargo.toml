@@ -7,3 +7,15 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+openstage-express-core = { path = "../openstage-express-core" }
+openstage-capture-project.workspace = true
+openstage-capture-render.workspace = true
+png.workspace = true
+base64.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
