@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use openstage_express_core::{Guide, StepKind};
+use openstage_express_core::{Guide, StepKind, Trash};
 
 /// One line of the steps list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +84,46 @@ pub fn rows(guide: &Guide) -> Vec<Row> {
     out
 }
 
+/// One deleted step, as the Deleted steps screen lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedRow {
+    pub id: String,
+    pub title: String,
+    pub kind: StepKind,
+}
+
+impl DeletedRow {
+    /// The step's words, which are also what a screen reader says for its Restore button.
+    pub fn label(&self) -> String {
+        let title = if self.title.trim().is_empty() { "(no title)" } else { self.title.trim() };
+        match self.kind {
+            StepKind::Block => format!("Note: {title}"),
+            _ => title.to_string(),
+        }
+    }
+
+    /// What sort of step it was.
+    pub fn kind_words(&self) -> &'static str {
+        match self.kind {
+            StepKind::Image => "Step with a picture",
+            StepKind::Empty => "Step without a picture",
+            StepKind::Block => "Text only, not numbered",
+        }
+    }
+}
+
+/// The deleted steps, the one deleted last first. Steps deleted together (one Delete on several chosen steps) share a time, so they
+/// stay in the order they had in the guide.
+pub fn deleted_rows(trash: &Trash) -> Vec<DeletedRow> {
+    let mut entries: Vec<&openstage_express_core::TrashEntry> = trash.entries.iter().collect();
+    // A stable sort, latest first: steps with the same time keep the order they were deleted in.
+    entries.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    entries
+        .into_iter()
+        .map(|e| DeletedRow { id: e.step.id.clone(), title: e.step.title.clone(), kind: e.step.kind })
+        .collect()
+}
+
 /// How many steps a guide has in its exports (notes and skipped steps are not counted).
 pub fn step_count(guide: &Guide) -> usize {
     rows(guide).iter().filter(|r| r.number.is_some()).count()
@@ -101,7 +141,7 @@ pub fn steps_words(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openstage_express_core::Step;
+    use openstage_express_core::{Step, TrashEntry};
     use openstage_express_export::demo::demo;
 
     fn guide(steps: Vec<Step>) -> Guide {
@@ -181,6 +221,42 @@ mod tests {
         let mut note = step("n", "", None);
         note.kind = StepKind::Block;
         assert_eq!(rows(&guide(vec![note]))[0].label(), "Note: (no title)");
+    }
+
+    fn trashed(id: &str, title: &str, kind: StepKind, at: &str) -> TrashEntry {
+        TrashEntry {
+            step: Step::bare(id, kind, title),
+            deleted_at: at.to_string(),
+            was_parent: None,
+            was_index: 0,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn deleted_steps_are_listed_latest_first_and_steps_deleted_together_keep_their_order() {
+        let mut trash = Trash::new();
+        trash.entries = vec![
+            trashed("a", "First", StepKind::Image, "2026-11-01T10:00:00Z"),
+            trashed("b", "Together one", StepKind::Image, "2026-11-01T11:00:00Z"),
+            trashed("c", "Together two", StepKind::Image, "2026-11-01T11:00:00Z"),
+            trashed("d", "Last", StepKind::Block, "2026-11-01T12:00:00Z"),
+        ];
+        let ids: Vec<String> = deleted_rows(&trash).into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, ["d", "b", "c", "a"]);
+        assert!(deleted_rows(&Trash::new()).is_empty());
+    }
+
+    #[test]
+    fn a_deleted_step_has_a_name_a_screen_reader_can_say_and_says_what_it_was() {
+        let row = |title: &str, kind| DeletedRow { id: "x".to_string(), title: title.to_string(), kind };
+        assert_eq!(row("Click \"Save\"", StepKind::Image).label(), "Click \"Save\"");
+        assert_eq!(row("  ", StepKind::Empty).label(), "(no title)");
+        assert_eq!(row("Tip", StepKind::Block).label(), "Note: Tip");
+        assert_eq!(row("", StepKind::Block).label(), "Note: (no title)");
+        assert_eq!(row("a", StepKind::Image).kind_words(), "Step with a picture");
+        assert_eq!(row("a", StepKind::Empty).kind_words(), "Step without a picture");
+        assert_eq!(row("a", StepKind::Block).kind_words(), "Text only, not numbered");
     }
 
     #[test]

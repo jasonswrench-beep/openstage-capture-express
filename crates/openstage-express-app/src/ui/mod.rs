@@ -13,6 +13,7 @@ pub mod bar;
 pub mod capture;
 pub mod choose_area;
 pub mod choose_window;
+pub mod deleted;
 pub mod editor;
 pub mod editor_state;
 pub mod export;
@@ -56,6 +57,8 @@ pub struct DevOptions {
     pub scroll: Option<f32>,
     /// Choose the first three steps of the example guide, so a picture of the editor shows several chosen steps.
     pub choose_steps: bool,
+    /// Delete two steps of the example guide, so a picture of the editor shows the Deleted steps button.
+    pub delete_steps: bool,
 }
 
 impl DevOptions {
@@ -67,25 +70,27 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor, export, settings, about, trash, bar, choose-window or choose-area")?.as_str() {
+                    options.screen = Some(match value("home, editor, export, settings, about, trash, deleted, bar, choose-window or choose-area")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
                         "export" => Screen::Export,
                         "settings" => Screen::Settings,
                         "about" => Screen::About,
                         "trash" => Screen::Trash,
+                        "deleted" => Screen::DeletedSteps,
                         "choose-window" => Screen::ChooseWindow,
                         "choose-area" => Screen::ChooseArea,
                         "bar" => Screen::Bar,
                         other => {
                             return Err(format!(
-                                "--screen is home, editor, export, settings, about, trash, bar, choose-window or choose-area, not {other:?}."
+                                "--screen is home, editor, export, settings, about, trash, deleted, bar, choose-window or choose-area, not {other:?}."
                             ))
                         }
                     })
                 }
                 "--with-marks" => options.with_marks = true,
                 "--choose-steps" => options.choose_steps = true,
+                "--delete-steps" => options.delete_steps = true,
                 "--scroll" => {
                     let pixels: f32 = value("a number of pixels")?
                         .parse()
@@ -453,6 +458,9 @@ pub fn run(options: DevOptions) -> eframe::Result {
             }
             if with_marks {
                 app.add_demo_marks();
+            }
+            if options.delete_steps && screen != Screen::DeletedSteps {
+                app.delete_demo_steps();
             }
             if options.choose_steps {
                 app.choose_demo_steps();
