@@ -227,12 +227,21 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       through tests with a stand-in; only the colour scheme and the folders have been tried in the real window by the tests' own
       pictures.
 - [ ] About and licences: read it. Is the licence text the one you want shown, and are the credits right (Roboto, the libraries)?
-- [ ] The icon: look at the title bar and the task bar while the window is open. The icon is in the window but not yet on the `.exe`,
-      so Explorer still shows the plain program icon (putting it there needs a Windows resource tool, which would be a new
-      download; say if you want it).
+- [ ] The icon: look at the title bar and the task bar while the window is open. The icon is in the window, and `PACK EXPRESS.bat`
+      and `MAKE EXPRESS INSTALLER.bat` now also put it on the program file they ship (the program in `target\` still has none, so
+      `OPEN EXPRESS.bat` shows the plain one in Explorer). Look at the shipped program in Explorer at the large, medium and small
+      sizes, and at the Start menu entry, the desktop shortcut and the Settings, Apps entry.
 - [ ] The portable zip (`PACK EXPRESS.bat`): unzip it on another PC (not this one), double-click the program, read START-HERE.txt,
       and see what SmartScreen and any antivirus say about a program that is not signed. This PC has only unzipped it into a
       scratch folder and run `--version` and the computer check from there.
+- [ ] The installer (`MAKE EXPRESS INSTALLER.bat`, then `dist\OpenStage-Capture-Express-0.1.0-x64-setup.exe`; see
+      `docs/installer.md`): (Jason clicked through it once on 2026-11-01 and said it looked good; the rest is still open.) Run it by hand on a PC you can spare,
+      ideally another one. Look at every page: the product icon should be
+      in the tall picture on the first and last pages and small in the corner of the others, and the dark or light look should follow
+      Windows. Tick the desktop shortcut once and leave it unticked once. Open the program from the last page. Check the Start menu
+      entry, then Settings, Apps: it should show the icon, and Uninstall should leave your guides and settings alone and say so. Also
+      install over an older copy. Try it with Narrator (Inno Setup's wizard is an ordinary Windows dialog, but it has not been read
+      aloud here). SmartScreen will warn, because nothing is signed yet.
 - [ ] The exports of a captured guide have only been checked by their tests and by reading the files, not by opening each in Word,
       PowerPoint and a PDF reader as was done for the demo.
 

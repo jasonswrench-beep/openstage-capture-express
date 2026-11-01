@@ -44,3 +44,10 @@ Segoe UI, Tahoma and Arial
   is the font used when none of them can be read.
 
 The application icon (assets/icon) was made for this project and supplied by Jason S. Wrench.
+
+Inno Setup
+  Copyright (C) 1997-2026 Jordan Russell. Portions Copyright (C) 2000-2026 Martijn Laan.
+  The setup file (the installer, see docs/installer.md) is made with Inno Setup, a free build tool
+  (https://jrsoftware.org/isinfo.php), and contains its setup program. Its licence allows use for any
+  purpose, including commercial applications. It is not part of the program itself and is not in the
+  portable zip.
