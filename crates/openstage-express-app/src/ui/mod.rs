@@ -45,6 +45,8 @@ pub struct DevOptions {
     pub close_after: Option<Duration>,
     /// Use the dark or the light colours instead of Windows' setting.
     pub theme: Option<egui::Theme>,
+    /// Add one of each kind of mark to the example guide's first step, so a picture of the editor shows them.
+    pub with_marks: bool,
 }
 
 impl DevOptions {
@@ -70,6 +72,7 @@ impl DevOptions {
                         }
                     })
                 }
+                "--with-marks" => options.with_marks = true,
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value("a file name ending in .png")?)),
                 "--close-after" => {
                     let seconds: f32 = value("a number of seconds")?
@@ -319,6 +322,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 cc.egui_ctx.set_theme(forced);
             }
             let screen = options.screen.unwrap_or(Screen::Home);
+            let with_marks = options.with_marks;
             let settings_path = crate::settings::default_path();
             let (settings, settings_note) = match &settings_path {
                 // A run that takes a picture of the window must not depend on, or change, the person's settings.
@@ -365,6 +369,10 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 ),
                 None,
             );
+            let mut app = app;
+            if with_marks {
+                app.add_demo_marks();
+            }
             Ok(Box::new(ExpressApp {
                 app,
                 options,

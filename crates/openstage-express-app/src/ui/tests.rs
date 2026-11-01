@@ -218,6 +218,7 @@ impl Harness {
             .iter()
             .filter(|id| self.nodes[id].role() == Role::ListBoxOption && self.nodes[id].is_selected() == Some(true))
             .filter_map(|id| self.name(*id))
+            .filter(|words| !words.starts_with("Mark "))
             .collect()
     }
 
@@ -226,6 +227,17 @@ impl Harness {
             .iter()
             .filter(|id| self.nodes[id].role() == Role::ListBoxOption)
             .filter_map(|id| self.name(*id))
+            .filter(|words| !words.starts_with("Mark "))
+            .collect()
+    }
+
+    /// The rows of the marks list (not the steps list).
+    fn mark_rows(&self) -> Vec<String> {
+        self.order
+            .iter()
+            .filter(|id| self.nodes[id].role() == Role::ListBoxOption)
+            .filter_map(|id| self.name(*id))
+            .filter(|words| words.starts_with("Mark "))
             .collect()
     }
 }
@@ -1297,4 +1309,204 @@ fn the_window_has_an_icon_from_the_icon_pack() {
     assert_eq!((icon.width, icon.height), (256, 256));
     assert_eq!(icon.rgba.len(), 256 * 256 * 4);
     assert!(icon.rgba.chunks(4).any(|p| p[3] == 255), "it is not blank");
+}
+
+// ---- marks
+
+fn the_editor(h: &Harness) -> &super::editor_state::EditorState {
+    h.app.editor.as_ref().expect("the editor is open")
+}
+
+fn the_selected_mark(h: &Harness) -> openstage_express_core::model::Annotation {
+    the_editor(h).selected_mark().expect("a mark is chosen")
+}
+
+#[test]
+fn the_marks_section_offers_every_tool_and_lists_the_marks_the_step_has() {
+    let h = Harness::new(Screen::Editor);
+    h.find(Role::Heading, "Marks");
+    for tool in openstage_express_core::marks::Tool::ALL {
+        h.find(Role::Button, &format!("Add {}", tool.name()));
+    }
+    assert_eq!(h.mark_rows(), ["Mark 1: Click marker, at 110, 170", "Mark 2: Pointer, at 110, 170"]);
+}
+
+#[test]
+fn adding_a_mark_chooses_it_says_so_and_is_one_undo() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add rectangle");
+    assert!(h.status().starts_with("Added a rectangle: Rectangle"), "{}", h.status());
+    assert_eq!(h.mark_rows().len(), 3);
+    let row = h.mark_rows()[2].clone();
+    assert_eq!(h.node(h.find(Role::ListBoxOption, &row)).is_selected(), Some(true));
+    assert_eq!(the_selected_mark(&h).kind, openstage_express_core::model::AnnotationKind::Rect);
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.mark_rows().len(), 2, "one undo takes the whole mark away");
+    assert!(the_editor(&h).selected_mark().is_none(), "and nothing is chosen that is not there");
+}
+
+#[test]
+fn the_buttons_move_and_resize_the_chosen_mark_and_each_is_one_undo() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add rectangle");
+    let start = the_selected_mark(&h);
+    h.invoke(Role::Button, "Move right");
+    h.invoke(Role::Button, "Move down");
+    let moved = the_selected_mark(&h);
+    assert_eq!((moved.x, moved.y), (start.x + 10, start.y + 10));
+    assert!(h.status().starts_with("Moved. Rectangle"), "{}", h.status());
+    h.invoke(Role::Button, "Wider");
+    h.invoke(Role::Button, "Taller");
+    let grown = the_selected_mark(&h);
+    assert_eq!((grown.width, grown.height), (Some(start.width.unwrap() + 10), Some(start.height.unwrap() + 10)));
+    assert!(h.status().starts_with("Resized. Rectangle"), "{}", h.status());
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(the_selected_mark(&h).height, start.height, "undo takes back one change at a time");
+}
+
+#[test]
+fn colour_and_line_width_are_chosen_from_lists_and_applied() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add arrow");
+    h.invoke(Role::RadioButton, "Red");
+    h.invoke(Role::RadioButton, "8 pixels");
+    let mark = the_selected_mark(&h);
+    assert_eq!(mark.stroke.as_deref(), Some("#E5484D"));
+    assert_eq!(mark.stroke_width, Some(8));
+    assert!(h.status().contains("8 pixels wide"), "{}", h.status());
+}
+
+#[test]
+fn a_blur_has_no_colour_to_choose_and_a_text_mark_has_a_box_for_its_words() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add blur");
+    assert!(!h.has(Role::RadioButton, "Red"), "a blur has no colour");
+    h.invoke(Role::Button, "Add text");
+    h.find(Role::TextInput, "Words in the text mark");
+    h.invoke(Role::Button, "Add step number");
+    h.find(Role::Button, "Number up");
+    assert!(h.node(h.find(Role::Button, "Number down")).is_disabled(), "step numbers start at 1");
+    h.invoke(Role::Button, "Number up");
+    assert_eq!(the_selected_mark(&h).number, Some(2));
+}
+
+#[test]
+fn deleting_a_mark_by_its_button_or_by_the_delete_key_and_undo_brings_it_back() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add oval");
+    h.invoke(Role::Button, "Delete mark");
+    assert!(h.status().starts_with("Deleted: Oval"), "{}", h.status());
+    assert_eq!(h.mark_rows().len(), 2);
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.mark_rows().len(), 3);
+    // The Delete key, with the keyboard on a row of the marks list.
+    let row = h.mark_rows()[2].clone();
+    h.invoke(Role::ListBoxOption, &row);
+    h.key(Key::Delete, NO_MODS);
+    assert_eq!(h.mark_rows().len(), 2, "{:?}", h.mark_rows());
+}
+
+#[test]
+fn up_and_down_in_the_marks_list_choose_the_mark_above_or_below() {
+    let mut h = Harness::new(Screen::Editor);
+    let first = h.mark_rows()[0].clone();
+    h.invoke(Role::ListBoxOption, &first);
+    assert_eq!(the_editor(&h).selected_mark_id(), Some("a1"));
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(the_editor(&h).selected_mark_id(), Some("a2"));
+    h.key(Key::ArrowUp, NO_MODS);
+    assert_eq!(the_editor(&h).selected_mark_id(), Some("a1"));
+    assert_eq!(h.focused_words().as_deref(), Some(first.as_str()), "the keyboard goes with the choice");
+}
+
+#[test]
+fn marks_are_available_only_when_the_step_has_a_picture() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add a step");
+    h.settle();
+    h.find(Role::Label, "Marks need a picture.");
+    assert!(!h.has(Role::Button, "Add rectangle"));
+}
+
+#[test]
+fn every_control_the_marks_section_shows_has_a_name_and_a_keyboard_route() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add arrow");
+    for id in &h.order {
+        let node = h.node(*id);
+        if egui::accessibility::is_input(node.role()) {
+            assert!(h.name(*id).is_some_and(|w| !w.trim().is_empty()), "unnamed {:?}\n{}", node.role(), h.dump());
+            assert!(node.supports_action(Action::Focus) || node.is_disabled(), "{:?} {:?}", node.role(), h.name(*id));
+        }
+    }
+}
+
+#[test]
+fn dragging_a_mark_with_the_mouse_moves_it_by_what_the_pointer_moved_and_is_one_undo() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add rectangle");
+    let before = the_selected_mark(&h);
+    let image =
+        h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).expect("the picture is in the tree");
+    let b = h.node(image).bounds().expect("the picture has a place");
+    let (picture_w, _) = the_editor(&h).picture_size().unwrap();
+    let scale = (b.x1 - b.x0) as f32 / picture_w as f32;
+    let at = |x: i32, y: i32| Pos2::new(b.x0 as f32 + x as f32 * scale, b.y0 as f32 + y as f32 * scale);
+    let (cx, cy) = (before.x + before.width.unwrap() / 2, before.y + before.height.unwrap() / 2);
+    let button = |pos: Pos2, pressed: bool| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: NO_MODS,
+    };
+    h.events.push(Event::PointerMoved(at(cx, cy)));
+    h.frame();
+    h.events.push(button(at(cx, cy), true));
+    h.frame();
+    h.events.push(Event::PointerMoved(at(cx + 80, cy + 40)));
+    h.frame();
+    h.frame();
+    assert!(the_editor(&h).is_dragging());
+    let shown = the_selected_mark(&h);
+    assert!(shown.x > before.x + 60, "the mark follows the pointer while it is down: {} to {}", before.x, shown.x);
+    h.events.push(button(at(cx + 80, cy + 40), false));
+    h.frame();
+    h.settle();
+    assert!(!the_editor(&h).is_dragging());
+    let after = the_selected_mark(&h);
+    assert!(
+        (after.x - (before.x + 80)).abs() <= 3 && (after.y - (before.y + 40)).abs() <= 3,
+        "{before:?} then {after:?}"
+    );
+    assert!(h.status().starts_with("Moved. Rectangle"), "{}", h.status());
+    h.invoke(Role::Button, "Undo");
+    let undone = the_selected_mark(&h);
+    assert_eq!((undone.x, undone.y), (before.x, before.y), "the whole drag is one undo");
+}
+
+#[test]
+fn a_click_on_empty_picture_with_the_mouse_chooses_no_mark() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add rectangle");
+    let image = h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).unwrap();
+    let b = h.node(image).bounds().unwrap();
+    let corner = Pos2::new(b.x1 as f32 - 3.0, b.y1 as f32 - 3.0);
+    h.events.push(Event::PointerMoved(corner));
+    h.frame();
+    h.events.push(Event::PointerButton {
+        pos: corner,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: NO_MODS,
+    });
+    h.frame();
+    h.events.push(Event::PointerButton {
+        pos: corner,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: NO_MODS,
+    });
+    h.frame();
+    h.settle();
+    assert!(the_editor(&h).selected_mark().is_none());
 }

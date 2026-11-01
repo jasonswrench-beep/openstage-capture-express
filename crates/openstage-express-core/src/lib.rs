@@ -13,6 +13,7 @@ pub mod capture;
 pub mod error;
 pub mod focus;
 pub mod fsutil;
+pub mod marks;
 pub mod migrate;
 pub mod model;
 pub mod ops;

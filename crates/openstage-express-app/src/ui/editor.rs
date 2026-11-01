@@ -8,6 +8,9 @@
 
 use eframe::egui::{self, Key, Modifiers, RichText};
 
+use openstage_express_core::marks::{self, Tool, COLOURS, WIDTHS};
+use openstage_express_core::model::AnnotationKind;
+
 use super::editor_state::EditorState;
 use super::widgets::{self, palette, Status};
 
@@ -57,7 +60,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> 
         let picture_area =
             egui::Rect::from_min_max(area.min, egui::pos2(area.max.x - details_width - 10.0, area.max.y));
         let details_area = egui::Rect::from_min_max(egui::pos2(area.max.x - details_width, area.min.y), area.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(picture_area), |ui| picture(ui, state));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(picture_area), |ui| picture(ui, state, status));
         let border = palette(ui).border;
         ui.painter().vline(details_area.min.x - 6.0, area.y_range(), egui::Stroke::new(1.0, border));
         ui.scope_builder(egui::UiBuilder::new().max_rect(details_area), |ui| details(ui, state, status));
@@ -229,18 +232,174 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
             status.say_opt(state.set_skipped(skipped));
         }
 
-        ui.add_space(8.0);
-        ui.label(RichText::new("Drawing tools for marks come next.").size(13.5).color(p.muted));
+        ui.add_space(10.0);
+        marks_panel(ui, state, status);
     });
 }
 
-fn picture(ui: &mut egui::Ui, state: &mut EditorState) {
+/// The marks of the selected step: buttons to add each kind, the list of marks, and what can be done to the chosen one. All of it
+/// works by keyboard; dragging on the picture is a convenience on top.
+fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+    let p = palette(ui);
+    widgets::subheading(ui, "Marks");
+    let Some((_, picture_h)) = state.picture_size() else {
+        ui.label(RichText::new("Marks need a picture.").size(13.5).color(p.muted));
+        return;
+    };
+    ui.horizontal_wrapped(|ui| {
+        for tool in Tool::ALL {
+            if widgets::button(ui, &format!("Add {}", tool.name())).clicked() {
+                status.say_opt(state.add_mark(tool));
+            }
+        }
+    });
+    let rows = state.mark_rows();
+    if rows.is_empty() {
+        ui.label(RichText::new("No marks yet. Add one with a button above.").size(13.5).color(p.muted));
+        return;
+    }
+    ui.add_space(4.0);
+    let selected = state.selected_mark_id().map(str::to_string);
+    let take_keyboard = std::mem::take(&mut state.focus_mark_next);
+    let mut chosen: Option<String> = None;
+    let mut keyboard_on_selected = false;
+    for (id, words) in &rows {
+        let is_selected = selected.as_deref() == Some(id.as_str());
+        let response = widgets::list_row(ui, words, is_selected, false, 0.0, take_keyboard);
+        if response.clicked() && !is_selected {
+            chosen = Some(id.clone());
+            state.focus_mark_next = true;
+        }
+        keyboard_on_selected |= is_selected && response.has_focus();
+    }
+    if keyboard_on_selected {
+        let (up, down, delete) = ui.ctx().input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::ArrowUp),
+                i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                i.consume_key(Modifiers::NONE, Key::Delete),
+            )
+        });
+        let target = if up {
+            state.mark_neighbour(-1)
+        } else if down {
+            state.mark_neighbour(1)
+        } else {
+            None
+        };
+        if let Some(id) = target {
+            chosen = Some(id);
+            state.focus_mark_next = true;
+        }
+        if delete {
+            status.say_opt(state.delete_mark());
+        }
+    }
+    if let Some(id) = chosen {
+        state.select_mark(Some(&id));
+    }
+    let Some(mark) = state.selected_mark() else { return };
+    state.sync_mark_words();
+
+    ui.add_space(6.0);
+    ui.label(RichText::new("Move the chosen mark:").color(p.muted));
+    ui.horizontal_wrapped(|ui| {
+        for (words, dx, dy) in [("Move left", -10, 0), ("Move right", 10, 0), ("Move up", 0, -10), ("Move down", 0, 10)]
+        {
+            if widgets::button(ui, words).clicked() {
+                status.say_opt(state.nudge_mark(dx, dy));
+            }
+        }
+    });
+    if marks::can_resize(mark.kind) {
+        ui.label(RichText::new("Change its size:").color(p.muted));
+        ui.horizontal_wrapped(|ui| {
+            let round =
+                matches!(mark.kind, AnnotationKind::Number | AnnotationKind::ClickMark | AnnotationKind::Cursor);
+            let line = matches!(mark.kind, AnnotationKind::Line | AnnotationKind::Arrow);
+            let mut choices: Vec<(&str, i32, i32)> = Vec::new();
+            if round {
+                choices.extend([("Bigger", 5, 0), ("Smaller", -5, 0)]);
+            } else {
+                choices.extend([("Wider", 10, 0), ("Narrower", -10, 0)]);
+                if mark.kind != AnnotationKind::Text {
+                    choices.extend([("Taller", 0, 10), ("Shorter", 0, -10)]);
+                }
+            }
+            let _ = line;
+            for (words, dx, dy) in choices {
+                if widgets::button(ui, words).clicked() {
+                    status.say_opt(state.size_mark(dx, dy));
+                }
+            }
+        });
+    }
+    if marks::colour_field(mark.kind).is_some() {
+        ui.label(RichText::new("Colour:").color(p.muted));
+        ui.horizontal_wrapped(|ui| {
+            let have = marks::colour_name(&mark);
+            for (name, hex) in COLOURS {
+                let r = ui.add(egui::RadioButton::new(have == Some(name), name));
+                widgets::ring(ui, &r);
+                if r.clicked() {
+                    status.say_opt(state.set_mark_colour(name, hex));
+                }
+            }
+        });
+    }
+    if marks::has_width(mark.kind) {
+        ui.label(RichText::new("Line width:").color(p.muted));
+        ui.horizontal_wrapped(|ui| {
+            for width in WIDTHS {
+                let r = ui.add(egui::RadioButton::new(mark.stroke_width == Some(width), format!("{width} pixels")));
+                widgets::ring(ui, &r);
+                if r.clicked() {
+                    status.say_opt(state.set_mark_width(width));
+                }
+            }
+        });
+    }
+    if mark.kind == AnnotationKind::Text {
+        let label = ui.label("Words in the text mark");
+        let words = ui
+            .add(egui::TextEdit::singleline(&mut state.mark_words).desired_width(f32::INFINITY))
+            .labelled_by(label.id);
+        widgets::ring(ui, &words);
+        if words.lost_focus() {
+            let text = state.mark_words.clone();
+            status.say_opt(state.set_mark_text(&text));
+        }
+    }
+    if mark.kind == AnnotationKind::Number {
+        let number = mark.number.unwrap_or(1);
+        ui.label(format!("Step number {number}"));
+        ui.horizontal(|ui| {
+            if widgets::button(ui, "Number up").clicked() {
+                status.say_opt(state.set_mark_number(number + 1));
+            }
+            if widgets::button_enabled(ui, number > 1, "Number down").clicked() {
+                status.say_opt(state.set_mark_number(number - 1));
+            }
+        });
+    }
+    ui.add_space(4.0);
+    if widgets::button(ui, "Delete mark").clicked() {
+        status.say_opt(state.delete_mark());
+    }
+    let _ = picture_h;
+}
+
+/// The picture is drawn whole, with the focused crop (if the step has one) shown as a frame over it. Marks can be picked up and
+/// dragged with the mouse, and the chosen mark shows handles to drag its size. None of this is the only way to do anything: the marks
+/// list and its buttons do it all by keyboard.
+fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
     let Some(step) = state.selected_step() else {
         ui.label(RichText::new("Nothing to show.").color(p.muted));
         return;
     };
     let has_picture = step.image.is_some();
+    let focus = step.focus.clone();
     let words = state.picture_words();
     let Some(texture) = (if has_picture { state.texture(ui.ctx()) } else { None }) else {
         ui.label(RichText::new("This step has no picture.").color(p.muted));
@@ -250,7 +409,69 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState) {
     let natural = texture.size_vec2();
     let scale = (available.x / natural.x).min(available.y / natural.y).clamp(0.05, 1.0);
     let size = natural * scale;
-    ui.vertical_centered(|ui| {
-        ui.add(egui::Image::from_texture((texture.id(), size)).alt_text(words));
+    let image_rect =
+        ui.vertical_centered(|ui| ui.add(egui::Image::from_texture((texture.id(), size)).alt_text(words)).rect).inner;
+    let painter = ui.painter_at(image_rect);
+    let to_screen = |x: i32, y: i32| image_rect.min + egui::vec2(x as f32 * scale, y as f32 * scale);
+    if let Some(crop) = &focus {
+        let dim = egui::Color32::from_black_alpha(120);
+        let (tl, br) = (to_screen(crop.x, crop.y), to_screen(crop.x + crop.width, crop.y + crop.height));
+        painter.rect_filled(egui::Rect::from_min_max(image_rect.min, egui::pos2(image_rect.max.x, tl.y)), 0.0, dim);
+        painter.rect_filled(egui::Rect::from_min_max(egui::pos2(image_rect.min.x, br.y), image_rect.max), 0.0, dim);
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(image_rect.min.x, tl.y), egui::pos2(tl.x, br.y)),
+            0.0,
+            dim,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(br.x, tl.y), egui::pos2(image_rect.max.x, br.y)),
+            0.0,
+            dim,
+        );
+        painter.rect_stroke(
+            egui::Rect::from_min_max(tl, br),
+            0.0,
+            egui::Stroke::new(2.0, p.focus),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let picture_h = state.picture_size().map(|(_, h)| h).unwrap_or(1);
+    if let Some(mark) = state.selected_mark() {
+        let b = marks::bounds(&mark, picture_h);
+        let outline =
+            egui::Rect::from_min_max(to_screen(b.x, b.y), to_screen(b.x + b.width, b.y + b.height)).expand(2.0);
+        painter.rect_stroke(outline, 0.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Outside);
+        for (_, (hx, hy)) in marks::handles(&mark, picture_h) {
+            let at = to_screen(hx, hy);
+            let square = egui::Rect::from_center_size(at, egui::vec2(9.0, 9.0));
+            painter.rect_filled(square, 1.0, egui::Color32::WHITE);
+            painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Inside);
+        }
+    }
+    // The mouse: press on a mark (or a handle of the chosen mark) to pick it up, move to drag it, let go to keep it.
+    let origin_id = ui.make_persistent_id("mark-drag-origin");
+    let (pos, pressed, down, released) = ui.input(|i| {
+        (i.pointer.interact_pos(), i.pointer.primary_pressed(), i.pointer.primary_down(), i.pointer.primary_released())
     });
+    let to_picture = |at: egui::Pos2| -> (i32, i32) {
+        let v = (at - image_rect.min) / scale;
+        (v.x.round() as i32, v.y.round() as i32)
+    };
+    if let Some(pos) = pos {
+        if pressed && image_rect.contains(pos) {
+            let (x, y) = to_picture(pos);
+            if state.begin_drag(x, y) {
+                ui.ctx().data_mut(|d| d.insert_temp(origin_id, pos));
+            }
+        } else if down && state.is_dragging() {
+            if let Some(origin) = ui.ctx().data(|d| d.get_temp::<egui::Pos2>(origin_id)) {
+                let delta = (pos - origin) / scale;
+                state.drag_by(delta.x.round() as i32, delta.y.round() as i32);
+            }
+        }
+    }
+    if released && state.is_dragging() {
+        status.say_opt(state.end_drag());
+        state.focus_mark_next = true;
+    }
 }

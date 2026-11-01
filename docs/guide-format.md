@@ -158,6 +158,8 @@ pixels on every computer.
 an alpha part (`#RRGGBBAA`) is mixed with what is under it by that much; a colour that cannot be read is treated as missing.
 A mark that is partly or wholly off the picture is cut off or does nothing; it is never an error.
 
+In the editor, marks are added with a default size (round the click if the step has one), moved and resized in whole picture pixels, and kept on the picture; the editor shows the whole picture with the focused crop as a frame, because marks are drawn before the crop.
+
 ## The focused view
 
 `focus` is a stored rectangle (picture pixels). When a step is captured with the guide's `focusedView` on, the program works out the

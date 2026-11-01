@@ -11,7 +11,9 @@ use eframe::egui;
 use openstage_capture_render::BlockText;
 use openstage_express_core::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
 use openstage_express_core::fsutil::utc_now_iso;
-use openstage_express_core::render::render_step;
+use openstage_express_core::marks::{self, Handle, Tool};
+use openstage_express_core::model::{Annotation, AnnotationKind};
+use openstage_express_core::render::render_marked;
 use openstage_express_core::{Document, GuideFolder, Position, Session, Step, StepDraft};
 use openstage_express_export::demo::Demo;
 use openstage_express_export::picture::{DiskPictures, PictureSource};
@@ -42,6 +44,31 @@ pub struct EditorState {
     pub focus_title_next: bool,
     /// Set when Up or Down (or a click) chose a step: the screen moves the keyboard to that row.
     pub focus_row_next: bool,
+    /// The mark being worked on, by its id within the selected step.
+    selected_mark: Option<String>,
+    /// Set when Up, Down or a click chose a mark in the marks list: the screen moves the keyboard to that row.
+    pub focus_mark_next: bool,
+    /// The words being typed for the selected text mark, and the mark they are for.
+    pub mark_words: String,
+    mark_words_for: Option<String>,
+    /// A mark being dragged with the mouse: shown moved or resized, and only kept (as one change) when the mouse is let go.
+    drag: Option<Drag>,
+}
+
+/// What a drag on the picture is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragKind {
+    Move,
+    Resize(Handle),
+}
+
+#[derive(Debug, Clone)]
+struct Drag {
+    kind: DragKind,
+    /// The mark as it was when the drag began.
+    original: Annotation,
+    /// The mark as it is now.
+    current: Annotation,
 }
 
 /// The words in the status line after something happens (a screen reader says them).
@@ -69,6 +96,11 @@ impl EditorState {
             texture: None,
             focus_title_next: false,
             focus_row_next: false,
+            selected_mark: None,
+            focus_mark_next: false,
+            mark_words: String::new(),
+            mark_words_for: None,
+            drag: None,
         };
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
         if let Some(id) = first {
@@ -94,6 +126,11 @@ impl EditorState {
             texture: None,
             focus_title_next: false,
             focus_row_next: false,
+            selected_mark: None,
+            focus_mark_next: false,
+            mark_words: String::new(),
+            mark_words_for: None,
+            drag: None,
         };
         state.saved_stamp = Some(state.stamp());
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
@@ -168,6 +205,10 @@ impl EditorState {
     pub fn select(&mut self, id: &str) {
         self.commit_pending();
         if self.session.doc().guide.step(id).is_some() {
+            if self.selected.as_deref() != Some(id) {
+                self.selected_mark = None;
+                self.drag = None;
+            }
             self.selected = Some(id.to_string());
         }
         self.reload_buffer();
@@ -210,6 +251,14 @@ impl EditorState {
     }
 
     fn keep_selection_valid(&mut self) {
+        self.drag = None;
+        let still_there = self
+            .selected_mark
+            .as_deref()
+            .is_some_and(|m| self.selected_step().is_some_and(|s| s.annotations.iter().any(|a| a.id == m)));
+        if !still_there {
+            self.selected_mark = None;
+        }
         let valid = self.selected.as_deref().is_some_and(|id| self.session.doc().guide.step(id).is_some());
         if !valid {
             self.selected = self.session.doc().guide.steps.first().map(|s| s.id.clone());
@@ -355,24 +404,266 @@ impl EditorState {
         }
     }
 
-    /// The selected step's picture with its marks, as a texture the window can draw. Made again when the step, its marks or
-    /// its focused view changes.
+    // ---- marks
+
+    /// The size of the selected step's picture in pixels.
+    pub fn picture_size(&self) -> Option<(u32, u32)> {
+        self.selected_step()?.image.as_ref().map(|i| (i.width, i.height))
+    }
+
+    /// The selected step's marks, as the editor shows them (a mark being dragged is shown where it is now).
+    pub fn marks(&self) -> Vec<Annotation> {
+        let Some(step) = self.selected_step() else { return Vec::new() };
+        step.annotations
+            .iter()
+            .map(|m| match &self.drag {
+                Some(d) if d.current.id == m.id => d.current.clone(),
+                _ => m.clone(),
+            })
+            .collect()
+    }
+
+    /// One line for each mark of the selected step, with its id: what the marks list shows and says.
+    pub fn mark_rows(&self) -> Vec<(String, String)> {
+        let h = self.picture_size().map(|(_, h)| h).unwrap_or(1080);
+        self.marks()
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.id.clone(), format!("Mark {}: {}", i + 1, marks::describe(m, h))))
+            .collect()
+    }
+
+    pub fn selected_mark_id(&self) -> Option<&str> {
+        self.selected_mark.as_deref()
+    }
+
+    /// The selected mark, as it is now (while dragging, where it is being dragged to).
+    pub fn selected_mark(&self) -> Option<Annotation> {
+        let id = self.selected_mark.as_deref()?;
+        self.marks().into_iter().find(|m| m.id == id)
+    }
+
+    /// Make the box for typing a text mark's words show the selected mark's words, when the selected mark has changed.
+    pub fn sync_mark_words(&mut self) {
+        let now = self.selected_mark.clone();
+        if self.mark_words_for != now {
+            self.mark_words = self.selected_mark().and_then(|m| m.text).unwrap_or_default();
+            self.mark_words_for = now;
+        }
+    }
+
+    /// The mark above or below the selected one in the marks list (`delta` of -1 or 1).
+    pub fn mark_neighbour(&self, delta: i32) -> Option<String> {
+        let rows = self.mark_rows();
+        let at = rows.iter().position(|(id, _)| Some(id.as_str()) == self.selected_mark.as_deref())? as i32;
+        let target = at + delta;
+        (0..rows.len() as i32).contains(&target).then(|| rows[target as usize].0.clone())
+    }
+
+    pub fn select_mark(&mut self, id: Option<&str>) {
+        self.drag = None;
+        self.selected_mark = id
+            .filter(|id| self.selected_step().is_some_and(|s| s.annotations.iter().any(|a| a.id == *id)))
+            .map(str::to_string);
+    }
+
+    /// The words for the selected mark, for the status line.
+    fn mark_words(&self) -> String {
+        let h = self.picture_size().map(|(_, h)| h).unwrap_or(1080);
+        self.selected_mark().map(|m| marks::describe(&m, h)).unwrap_or_default()
+    }
+
+    /// Change the selected mark with change as one undoable step. Returns false if there is no mark or the change did nothing.
+    fn change_mark(&mut self, change: impl FnOnce(&mut Annotation, u32, u32)) -> bool {
+        self.commit_pending();
+        let (Some(step_id), Some((w, h))) = (self.selected.clone(), self.picture_size()) else { return false };
+        let Some(mut mark) = self.selected_mark_in_document() else { return false };
+        let before = mark.clone();
+        change(&mut mark, w, h);
+        if mark == before {
+            return false;
+        }
+        let now = utc_now_iso();
+        self.session.apply(|d| d.replace_annotation(&step_id, mark, &now)).is_ok()
+    }
+
+    /// The selected mark as the guide has it (not as a drag is showing it).
+    fn selected_mark_in_document(&self) -> Option<Annotation> {
+        let id = self.selected_mark.as_deref()?;
+        self.selected_step()?.annotations.iter().find(|a| a.id == id).cloned()
+    }
+
+    /// Add a mark to the selected step's picture, round the click if there is one, and select it.
+    pub fn add_mark(&mut self, tool: Tool) -> Said {
+        self.commit_pending();
+        let step_id = self.selected.clone()?;
+        let Some((w, h)) = self.picture_size() else { return Some("This step has no picture to mark.".to_string()) };
+        let step = self.selected_step()?;
+        let around = step.click.as_ref().map(|c| (c.x, c.y));
+        let numbers = step.annotations.iter().filter(|a| a.kind == marks::Tool::Number.kind()).count() as u32;
+        let mark = marks::default_mark(tool, w, h, around, numbers);
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.add_annotation(&step_id, mark, &now)) {
+            Ok(id) => {
+                self.selected_mark = Some(id);
+                Some(format!("Added a {}: {}. Move it with the buttons or drag it.", tool.name(), self.mark_words()))
+            }
+            Err(_) => Some("The mark could not be added.".to_string()),
+        }
+    }
+
+    /// Move the selected mark by dx, dy picture pixels.
+    pub fn nudge_mark(&mut self, dx: i32, dy: i32) -> Said {
+        self.selected_mark.as_ref()?;
+        let moved = self.change_mark(|m, w, h| marks::nudge(m, dx, dy, w, h));
+        Some(if moved {
+            format!("Moved. {}.", self.mark_words())
+        } else {
+            "It cannot move any further that way.".to_string()
+        })
+    }
+
+    /// Make the selected mark wider or narrower (dx) or taller or shorter (dy), by its bottom right handle (a line's end).
+    pub fn size_mark(&mut self, dx: i32, dy: i32) -> Said {
+        let kind = self.selected_mark()?.kind;
+        if !marks::can_resize(kind) {
+            return Some("That mark has no size to change.".to_string());
+        }
+        let handle = if matches!(kind, AnnotationKind::Line | AnnotationKind::Arrow) {
+            Handle::End
+        } else {
+            Handle::BottomRight
+        };
+        let changed = self.change_mark(|m, w, h| marks::resize(m, handle, dx, dy, w, h));
+        Some(if changed {
+            format!("Resized. {}.", self.mark_words())
+        } else {
+            "It cannot change any further that way.".to_string()
+        })
+    }
+
+    pub fn set_mark_colour(&mut self, name: &str, hex: &str) -> Said {
+        self.selected_mark.as_ref()?;
+        self.change_mark(|m, _, _| marks::set_colour(m, hex));
+        Some(format!("The mark is now {name}."))
+    }
+
+    pub fn set_mark_width(&mut self, width: i32) -> Said {
+        self.selected_mark.as_ref()?;
+        self.change_mark(|m, _, _| m.stroke_width = Some(width));
+        Some(format!("The line is now {width} pixels wide."))
+    }
+
+    pub fn set_mark_text(&mut self, text: &str) -> Said {
+        self.selected_mark.as_ref()?;
+        let words = text.to_string();
+        self.change_mark(|m, _, _| m.text = Some(words));
+        Some(format!("The words are now {text:?}."))
+    }
+
+    pub fn set_mark_number(&mut self, number: u32) -> Said {
+        self.selected_mark.as_ref()?;
+        self.change_mark(|m, _, _| m.number = Some(number.max(1)));
+        Some(format!("The step number is now {}.", number.max(1)))
+    }
+
+    /// Delete the selected mark. Undo brings it back.
+    pub fn delete_mark(&mut self) -> Said {
+        self.commit_pending();
+        let (step_id, mark_id) = (self.selected.clone()?, self.selected_mark.clone()?);
+        let words = self.mark_words();
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.remove_annotation(&step_id, &mark_id, &now)) {
+            Ok(()) => {
+                self.selected_mark = None;
+                self.drag = None;
+                Some(format!("Deleted: {words}. Undo brings it back."))
+            }
+            Err(_) => Some("The mark could not be deleted.".to_string()),
+        }
+    }
+
+    // ---- dragging a mark with the mouse (picture pixels)
+
+    /// A press at a point of the picture: pick the mark under it (or a handle of the selected mark) and begin a drag. Returns whether
+    /// anything was picked. Nothing changes in the guide until [EditorState::end_drag].
+    pub fn begin_drag(&mut self, x: i32, y: i32) -> bool {
+        let Some((_, h)) = self.picture_size() else { return false };
+        self.drag = None;
+        if let Some(mark) = self.selected_mark_in_document() {
+            if let Some(handle) = marks::handle_at(&mark, x, y, h) {
+                self.drag = Some(Drag { kind: DragKind::Resize(handle), original: mark.clone(), current: mark });
+                return true;
+            }
+        }
+        let marks_now = self.selected_step().map(|s| s.annotations.clone()).unwrap_or_default();
+        match marks::top_mark_at(&marks_now, x, y, h) {
+            Some(index) => {
+                let mark = marks_now[index].clone();
+                self.selected_mark = Some(mark.id.clone());
+                self.drag = Some(Drag { kind: DragKind::Move, original: mark.clone(), current: mark });
+                true
+            }
+            None => {
+                self.selected_mark = None;
+                false
+            }
+        }
+    }
+
+    /// The pointer has moved dx, dy picture pixels since the press.
+    pub fn drag_by(&mut self, dx: i32, dy: i32) {
+        let Some((w, h)) = self.picture_size() else { return };
+        let Some(drag) = self.drag.as_mut() else { return };
+        let mut mark = drag.original.clone();
+        match drag.kind {
+            DragKind::Move => marks::nudge(&mut mark, dx, dy, w, h),
+            DragKind::Resize(handle) => marks::resize(&mut mark, handle, dx, dy, w, h),
+        }
+        drag.current = mark;
+    }
+
+    /// The mouse was let go: keep what was dragged as one change. Returns what to say if the mark moved or changed size.
+    pub fn end_drag(&mut self) -> Said {
+        let drag = self.drag.take()?;
+        if drag.current == drag.original {
+            return None;
+        }
+        self.commit_pending();
+        let step_id = self.selected.clone()?;
+        let now = utc_now_iso();
+        let kind = drag.kind;
+        self.session.apply(|d| d.replace_annotation(&step_id, drag.current, &now)).ok()?;
+        let words = self.mark_words();
+        Some(match kind {
+            DragKind::Move => format!("Moved. {words}."),
+            DragKind::Resize(_) => format!("Resized. {words}."),
+        })
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// The selected step's picture with its marks, as a texture the window can draw. It is the whole picture, not the focused
+    /// crop (the crop is drawn over it as a frame), so that a mark can be worked on anywhere. Made again when the step or its
+    /// marks change, or while a mark is dragged.
     pub fn texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
-        let step = self.selected_step()?.clone();
+        let mut step = self.selected_step()?.clone();
+        if let Some(drag) = &self.drag {
+            for m in step.annotations.iter_mut().filter(|m| m.id == drag.current.id) {
+                *m = drag.current.clone();
+            }
+        }
         let image = step.image.as_ref()?;
-        let key = format!(
-            "{}|{:?}|{}",
-            step.id,
-            step.focus.as_ref().map(|f| (f.x, f.y, f.width, f.height)),
-            step.annotations.len()
-        );
+        let key = format!("{}|{:?}", step.id, step.annotations);
         if let Some((have, texture)) = &self.texture {
             if *have == key {
                 return Some(texture.clone());
             }
         }
         let picture = self.pictures.picture(&image.file)?;
-        let rendered = render_step(&picture, &step, &BlockText);
+        let rendered = render_marked(&picture, &step, &BlockText);
         let canvas = rendered.canvas;
         let rgba: Vec<u8> = canvas.bgra.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], 255]).collect();
         let size = [canvas.width as usize, canvas.height as usize];
@@ -564,5 +855,126 @@ mod tests {
         let last = e.rows().last().unwrap().id.clone();
         e.select(&last);
         assert_eq!(e.neighbour(1), None);
+    }
+
+    // ---- marks and dragging
+
+    fn with_a_rectangle() -> (EditorState, Annotation) {
+        let mut e = editor();
+        e.add_mark(Tool::Rectangle);
+        let mark = e.selected_mark().expect("the new mark is chosen");
+        (e, mark)
+    }
+
+    fn middle_of(m: &Annotation) -> (i32, i32) {
+        (m.x + m.width.unwrap() / 2, m.y + m.height.unwrap() / 2)
+    }
+
+    #[test]
+    fn the_editor_shows_the_whole_picture_with_the_crop_drawn_over_it_not_the_cropped_picture() {
+        let ctx = egui::Context::default();
+        let mut e = editor();
+        assert!(e.is_focused(), "the example's first step has a focused crop");
+        let (w, h) = e.picture_size().unwrap();
+        let texture = e.texture(&ctx).unwrap();
+        assert_eq!([w as usize, h as usize], texture.size());
+    }
+
+    #[test]
+    fn a_drag_shows_the_mark_moved_but_changes_the_guide_only_when_the_mouse_is_let_go_and_then_once() {
+        let (mut e, start) = with_a_rectangle();
+        let depth = e.session.undo_depth();
+        let (cx, cy) = middle_of(&start);
+        assert!(e.begin_drag(cx, cy), "the press is on the mark");
+        e.drag_by(30, 20);
+        e.drag_by(60, 40);
+        let shown = e.selected_mark().unwrap();
+        assert_eq!((shown.x, shown.y), (start.x + 60, start.y + 40), "shown where it is now");
+        let in_guide = e.selected_step().unwrap().annotations.last().unwrap().clone();
+        assert_eq!((in_guide.x, in_guide.y), (start.x, start.y), "the guide itself has not changed yet");
+        assert_eq!(e.session.undo_depth(), depth);
+        let said = e.end_drag().expect("it moved, so something is said");
+        assert!(said.starts_with("Moved. Rectangle"), "{said}");
+        assert_eq!(e.session.undo_depth(), depth + 1, "one change however far it was dragged");
+        let kept = e.selected_step().unwrap().annotations.last().unwrap().clone();
+        assert_eq!((kept.x, kept.y), (start.x + 60, start.y + 40));
+        e.undo();
+        let back = e.selected_step().unwrap().annotations.last().unwrap().clone();
+        assert_eq!(
+            (back.id.as_str(), back.x, back.y),
+            (kept.id.as_str(), start.x, start.y),
+            "one undo takes the whole drag back, and the mark stays"
+        );
+    }
+
+    #[test]
+    fn dragging_a_handle_resizes_and_a_drag_that_goes_nowhere_changes_nothing() {
+        let (mut e, start) = with_a_rectangle();
+        let depth = e.session.undo_depth();
+        let corner = (start.x + start.width.unwrap(), start.y + start.height.unwrap());
+        assert!(e.begin_drag(corner.0, corner.1));
+        e.drag_by(25, 15);
+        let said = e.end_drag().unwrap();
+        assert!(said.starts_with("Resized."), "{said}");
+        let grown = e.selected_mark().unwrap();
+        assert_eq!((grown.width, grown.height), (Some(start.width.unwrap() + 25), Some(start.height.unwrap() + 15)));
+        assert_eq!(e.session.undo_depth(), depth + 1);
+        // Pressing and letting go on the same spot is a click, not a change.
+        let (cx, cy) = middle_of(&grown);
+        assert!(e.begin_drag(cx, cy));
+        assert_eq!(e.end_drag(), None);
+        assert_eq!(e.session.undo_depth(), depth + 1, "nothing was added to undo");
+    }
+
+    #[test]
+    fn pressing_on_empty_picture_chooses_no_mark_and_pressing_on_a_mark_chooses_it() {
+        let (mut e, start) = with_a_rectangle();
+        assert!(!e.begin_drag(2, 2));
+        assert!(e.selected_mark().is_none());
+        let (cx, cy) = middle_of(&start);
+        assert!(e.begin_drag(cx, cy));
+        assert_eq!(e.selected_mark().map(|m| m.id), Some(start.id));
+    }
+
+    #[test]
+    fn choosing_another_step_forgets_the_chosen_mark_and_a_text_mark_keeps_its_words() {
+        let (mut e, _) = with_a_rectangle();
+        let first = e.selected_id().unwrap().to_string();
+        let next = e.neighbour(1).unwrap();
+        e.select(&next);
+        assert!(e.selected_mark().is_none());
+        e.select(&first);
+        assert!(e.selected_mark().is_none(), "and it is not chosen again by itself");
+        e.add_mark(Tool::Text);
+        assert_eq!(e.set_mark_text("Press here").as_deref(), Some("The words are now \"Press here\"."));
+        assert_eq!(e.selected_mark().unwrap().text.as_deref(), Some("Press here"));
+        e.sync_mark_words();
+        assert_eq!(e.mark_words, "Press here");
+    }
+
+    #[test]
+    fn marks_are_kept_on_the_picture_whatever_is_asked() {
+        let (mut e, _) = with_a_rectangle();
+        let (w, h) = e.picture_size().unwrap();
+        for _ in 0..200 {
+            e.nudge_mark(-5000, -5000);
+        }
+        let m = e.selected_mark().unwrap();
+        assert_eq!((m.x, m.y), (0, 0));
+        e.nudge_mark(100_000, 100_000);
+        let m = e.selected_mark().unwrap();
+        assert!(m.x + m.width.unwrap() <= w as i32 && m.y + m.height.unwrap() <= h as i32);
+    }
+
+    #[test]
+    fn each_new_step_number_is_the_next_one() {
+        let mut e = editor();
+        e.add_mark(Tool::Number);
+        assert_eq!(e.selected_mark().unwrap().number, Some(1));
+        e.add_mark(Tool::Number);
+        assert_eq!(e.selected_mark().unwrap().number, Some(2));
+        e.add_mark(Tool::Rectangle);
+        e.add_mark(Tool::Number);
+        assert_eq!(e.selected_mark().unwrap().number, Some(3), "other kinds of mark do not count");
     }
 }
