@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use eframe::egui;
 use openstage_capture_render::BlockText;
-use openstage_express_core::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
+use openstage_express_core::focus::{auto_focus, pan, zoom, DEFAULT_ZOOM_PERCENT};
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_core::marks::{self, Handle, Tool};
-use openstage_express_core::model::{Annotation, AnnotationKind};
+use openstage_express_core::model::{Annotation, AnnotationKind, Rect};
 use openstage_express_core::render::render_marked;
 use openstage_express_core::{Document, GuideFolder, Position, Session, Step, StepDraft};
 use openstage_express_export::demo::Demo;
@@ -64,6 +64,15 @@ pub struct EditorState {
     draw_tool: Option<Tool>,
     /// A new mark being drawn with the mouse: shown as it will be, and only added (as one change) when the mouse is let go.
     drawing: Option<Drawing>,
+    /// The focused crop being dragged with the mouse: shown moved, and only kept (as one change) when the mouse is let go.
+    crop_drag: Option<CropDrag>,
+}
+
+/// A crop being dragged: where it was when the press began and where it is now (picture pixels).
+#[derive(Debug, Clone)]
+struct CropDrag {
+    original: Rect,
+    current: Rect,
 }
 
 /// A shape being drawn: the tool, where the press was and where the pointer is now (picture pixels).
@@ -124,6 +133,7 @@ impl EditorState {
             anchor: None,
             draw_tool: None,
             drawing: None,
+            crop_drag: None,
         };
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
         if let Some(id) = first {
@@ -158,6 +168,7 @@ impl EditorState {
             anchor: None,
             draw_tool: None,
             drawing: None,
+            crop_drag: None,
         };
         state.saved_stamp = Some(state.stamp());
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
@@ -245,6 +256,7 @@ impl EditorState {
                 self.selected_mark = None;
                 self.drag = None;
                 self.drawing = None;
+                self.crop_drag = None;
             }
             self.selected = Some(id.to_string());
         }
@@ -530,6 +542,7 @@ impl EditorState {
     fn keep_selection_valid(&mut self) {
         self.drag = None;
         self.drawing = None;
+        self.crop_drag = None;
         self.also.clear();
         let still_there = self
             .selected_mark
@@ -737,6 +750,127 @@ impl EditorState {
         } else {
             "Focused view is off for this step.".to_string()
         })
+    }
+
+    // ---- moving and zooming the focused crop
+
+    /// The selected step's crop as the picture shows it: one being dragged with the mouse is shown where it is now.
+    pub fn crop(&self) -> Option<Rect> {
+        match &self.crop_drag {
+            Some(drag) => Some(drag.current.clone()),
+            None => self.selected_step()?.focus.clone(),
+        }
+    }
+
+    /// The crop and the picture's size, for the selected step, if it has a focused view.
+    fn crop_and_picture(&self) -> Option<(Rect, u32, u32)> {
+        let step = self.selected_step()?;
+        let image = step.image.as_ref()?;
+        Some((step.focus.clone()?, image.width, image.height))
+    }
+
+    /// The crop in words, for the details panel and for a screen reader.
+    pub fn crop_words(&self) -> Option<String> {
+        let (_, w, h) = self.crop_and_picture()?;
+        let crop = self.crop()?;
+        let across = (i64::from(crop.width) * 100 + i64::from(w) / 2) / i64::from(w.max(1));
+        Some(format!(
+            "The crop shows {across} percent of the picture across: {} by {} of {w} by {h} pixels, {} from the left and {} from the top.",
+            crop.width, crop.height, crop.x, crop.y
+        ))
+    }
+
+    /// Keep a new crop for the selected step, as one change.
+    fn keep_crop(&mut self, crop: Rect) -> bool {
+        let Some(id) = self.selected.clone() else { return false };
+        let now = utc_now_iso();
+        self.session.apply(|d| d.set_focus(&id, Some(crop), &now)).is_ok()
+    }
+
+    /// Move the crop a tenth of its own size left or right (`across` of -1 or 1) and up or down (`down` of -1 or 1), stopping at the
+    /// edges of the picture. Each move is one change.
+    pub fn move_crop(&mut self, across: i32, down: i32) -> Said {
+        self.commit_pending();
+        let (crop, w, h) = self.crop_and_picture()?;
+        let moved = pan(&crop, across * (crop.width / 10).max(1), down * (crop.height / 10).max(1), w, h);
+        let (way, edge) = match (across, down) {
+            (-1, _) => ("left", "left"),
+            (1, _) => ("right", "right"),
+            (_, -1) => ("up", "top"),
+            _ => ("down", "bottom"),
+        };
+        if moved == crop {
+            return Some(format!("The crop is already at the {edge} edge of the picture."));
+        }
+        if !self.keep_crop(moved) {
+            return Some("The crop could not be moved.".to_string());
+        }
+        Some(format!("Moved the crop {way}. {}", self.crop_words().unwrap_or_default()))
+    }
+
+    /// Make the crop look closer (a quarter more) or further away (a fifth less), keeping its centre and its shape.
+    pub fn zoom_crop(&mut self, closer: bool) -> Said {
+        self.commit_pending();
+        let (crop, w, h) = self.crop_and_picture()?;
+        let zoomed = zoom(&crop, if closer { 125 } else { 80 }, w, h);
+        if zoomed == crop {
+            return Some(if closer {
+                "The crop is already as close as it goes: eight times closer than the whole picture.".to_string()
+            } else {
+                "The crop already shows the whole picture.".to_string()
+            });
+        }
+        if !self.keep_crop(zoomed) {
+            return Some("The crop could not be changed.".to_string());
+        }
+        Some(format!("{} {}", if closer { "Zoomed in." } else { "Zoomed out." }, self.crop_words().unwrap_or_default()))
+    }
+
+    /// Go back to the usual crop around the click.
+    pub fn reset_crop(&mut self) -> Said {
+        self.commit_pending();
+        let step = self.selected_step()?;
+        let (image, click) = (step.image.as_ref()?, step.click.as_ref()?);
+        let usual = auto_focus(image.width, image.height, Some((click.x, click.y)), DEFAULT_ZOOM_PERCENT)?;
+        if step.focus.as_ref() == Some(&usual) {
+            return Some("The crop is already the usual one around the click.".to_string());
+        }
+        if !self.keep_crop(usual) {
+            return Some("The crop could not be changed.".to_string());
+        }
+        Some(format!("The crop is back to the usual one around the click. {}", self.crop_words().unwrap_or_default()))
+    }
+
+    /// A press on the picture to move the crop with the mouse. Returns whether the step has a crop to move. Nothing changes in the
+    /// guide until [EditorState::end_crop_drag].
+    pub fn begin_crop_drag(&mut self) -> bool {
+        let Some((crop, _, _)) = self.crop_and_picture() else { return false };
+        self.crop_drag = Some(CropDrag { original: crop.clone(), current: crop });
+        true
+    }
+
+    /// The pointer has moved dx, dy picture pixels since the press: the crop follows it, stopping at the edges of the picture.
+    pub fn crop_drag_by(&mut self, dx: i32, dy: i32) {
+        let Some((_, w, h)) = self.crop_and_picture() else { return };
+        let Some(drag) = self.crop_drag.as_mut() else { return };
+        drag.current = pan(&drag.original, dx, dy, w, h);
+    }
+
+    /// The mouse was let go: keep where the crop was dragged to as one change. Returns what to say if it moved.
+    pub fn end_crop_drag(&mut self) -> Said {
+        let drag = self.crop_drag.take()?;
+        if drag.current == drag.original {
+            return None;
+        }
+        self.commit_pending();
+        if !self.keep_crop(drag.current) {
+            return Some("The crop could not be moved.".to_string());
+        }
+        Some(format!("Moved the crop. {}", self.crop_words().unwrap_or_default()))
+    }
+
+    pub fn is_moving_crop(&self) -> bool {
+        self.crop_drag.is_some()
     }
 
     /// The words that describe the selected step's picture: the author's own, or the step's title.
@@ -1307,6 +1441,37 @@ mod tests {
         assert_eq!(e.chosen_count(), 2, "the choice is kept");
         assert_eq!(e.chosen_ids(), [ids[0].clone(), ids[1].clone()]);
         assert!(e.can_undo());
+    }
+
+    #[test]
+    fn a_step_without_a_crop_has_nothing_to_move_or_zoom() {
+        let mut e = editor();
+        let note = e.rows().into_iter().find(|r| r.kind == openstage_express_core::StepKind::Block).unwrap().id;
+        e.select(&note);
+        assert_eq!(e.crop_words(), None);
+        assert_eq!((e.move_crop(1, 0), e.zoom_crop(true), e.reset_crop()), (None, None, None));
+        assert!(!e.begin_crop_drag() && !e.is_moving_crop());
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn a_crop_being_dragged_is_dropped_when_another_step_is_chosen_and_stays_inside_the_picture() {
+        let mut e = editor();
+        let first = e.selected_id().unwrap().to_string();
+        let was = e.selected_step().unwrap().focus.clone().unwrap();
+        assert!(e.begin_crop_drag());
+        e.crop_drag_by(100_000, 100_000);
+        let (w, h) = e.picture_size().unwrap();
+        let shown = e.crop().unwrap();
+        assert!(
+            shown.x >= 0 && shown.y >= 0 && shown.x + shown.width <= w as i32 && shown.y + shown.height <= h as i32
+        );
+        assert_eq!(e.selected_step().unwrap().focus.clone().unwrap(), was, "nothing is kept yet");
+        e.select("step-2");
+        assert!(!e.is_moving_crop(), "choosing another step drops the drag");
+        e.select(&first);
+        assert_eq!(e.selected_step().unwrap().focus.clone().unwrap(), was);
+        assert!(!e.can_undo());
     }
 
     #[test]

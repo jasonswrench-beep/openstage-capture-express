@@ -373,6 +373,9 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         if !can_focus {
             ui.label(RichText::new("Needs a picture with a click in it.").size(13.5).color(p.muted));
         }
+        if state.is_focused() {
+            crop_panel(ui, state, status);
+        }
 
         let mut skipped = state.selected_step().is_some_and(|s| s.skipped);
         let skip_box = ui.add(egui::Checkbox::new(&mut skipped, "Skip in export"));
@@ -395,6 +398,40 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         ui.add_space(10.0);
         marks_panel(ui, state, status);
     });
+}
+
+/// Where the focused crop is, in words, and buttons to move and zoom it. Like the buttons that move a step they are always pressable,
+/// so the keyboard is never left on a button that has just switched itself off: at an edge the status line says so. Dragging the
+/// picture does the same with the mouse, and is only a convenience on top.
+fn crop_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+    let p = palette(ui);
+    ui.label(RichText::new(state.crop_words().unwrap_or_default()).size(13.5).color(p.muted));
+    ui.horizontal_wrapped(|ui| {
+        for (words, across, down) in
+            [("Move crop left", -1, 0), ("Move crop right", 1, 0), ("Move crop up", 0, -1), ("Move crop down", 0, 1)]
+        {
+            if widgets::button(ui, words).clicked() {
+                status.say_opt(state.move_crop(across, down));
+            }
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        if widgets::button(ui, "Zoom crop in").clicked() {
+            status.say_opt(state.zoom_crop(true));
+        }
+        if widgets::button(ui, "Zoom crop out").clicked() {
+            status.say_opt(state.zoom_crop(false));
+        }
+        if widgets::button(ui, "Reset crop").clicked() {
+            status.say_opt(state.reset_crop());
+        }
+    });
+    ui.label(
+        RichText::new("Or drag the picture to move the crop (hold Space to drag over a mark).")
+            .size(13.5)
+            .color(p.muted),
+    );
+    ui.add_space(4.0);
 }
 
 /// The marks of the selected step: buttons to add each kind, the list of marks, and what can be done to the chosen one. All of it
@@ -589,7 +626,8 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         return;
     };
     let has_picture = step.image.is_some();
-    let focus = step.focus.clone();
+    // The crop as it is now: one being dragged with the mouse is shown where it is.
+    let focus = state.crop();
     let words = state.picture_words();
     let Some(texture) = (if has_picture { state.texture(ui.ctx()) } else { None }) else {
         ui.label(RichText::new("This step has no picture.").color(p.muted));
@@ -678,18 +716,30 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     if let Some(pos) = pos {
         if pressed && image_rect.contains(pos) {
             let (x, y) = to_picture(pos);
-            if state.begin_drag(x, y) {
+            // A mark under the pointer is picked up first. Where there is none (or with Space held, which moves the crop even over
+            // a mark) the press begins moving the focused crop, if the step has one.
+            let space = ui.input(|i| i.key_down(Key::Space));
+            if (!space && state.begin_drag(x, y)) || state.begin_crop_drag() {
                 ui.ctx().data_mut(|d| d.insert_temp(origin_id, pos));
             }
-        } else if down && state.is_dragging() {
+        } else if down && (state.is_dragging() || state.is_moving_crop()) {
             if let Some(origin) = ui.ctx().data(|d| d.get_temp::<egui::Pos2>(origin_id)) {
                 let delta = (pos - origin) / scale;
-                state.drag_by(delta.x.round() as i32, delta.y.round() as i32);
+                let (dx, dy) = (delta.x.round() as i32, delta.y.round() as i32);
+                if state.is_dragging() {
+                    state.drag_by(dx, dy);
+                } else {
+                    state.crop_drag_by(dx, dy);
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
             }
         }
     }
     if released && state.is_dragging() {
         status.say_opt(state.end_drag());
         state.focus_mark_next = true;
+    }
+    if released && state.is_moving_crop() {
+        status.say_opt(state.end_crop_drag());
     }
 }

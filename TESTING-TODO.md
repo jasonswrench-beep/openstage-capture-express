@@ -133,7 +133,14 @@ submit an assignment") to open from the card under "Your guides".
       that Undo is lost for the steps deleted before as well as the deleted ones? Narrator and NVDA: the question's heading, both
       buttons, and the status line after emptying should be read. Not tried: a picture another program has open (the words are
       tested with a locked file, on this PC only).
-- [ ] Not built in the editor yet: panning or zooming the focused crop by hand, and cutting the picture.
+- [ ] Move and zoom the focused crop by hand (on a step with a click): turn Focused view on, then try Move crop left, right, up and
+      down, Zoom crop in and out, and Reset crop; the frame over the picture should follow, and the words above the buttons say where
+      it is. Drag the picture with the mouse to move the crop (the frame should follow the pointer and stay inside the picture); drag
+      a mark to move the mark, and hold Space to move the crop over a mark. Export the guide and check that the pictures follow the
+      crop you set. Is a tenth of the crop the right size for one press, and would you like a mouse wheel or keys for zooming? One
+      Undo should take back each press and each drag. Narrator and NVDA: the words above the buttons, the seven buttons and the
+      status line ("Moved the crop right. The crop shows ...") should be read.
+- [ ] Not built in the editor yet: the focused view for a whole guide at once (it is set on each step), and cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
       Settings, Folders to it): Rename opens a box with the name, Enter saves, Escape cancels; Delete asks first with Keep it ready,
       then the guide leaves the list and its folder is in `Trash` beside the guides; Trash lists it and Restore brings it back and it
