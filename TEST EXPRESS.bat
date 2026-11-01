@@ -26,6 +26,8 @@ cargo --version
 ver
 echo.
 echo Running the tests. Please wait...
+rem Lets a test say it was SKIPPED (for example no WebView2 runtime) in the log.
+set RUST_TEST_NOCAPTURE=1
 ver > test-log.txt
 cargo --version >> test-log.txt
 call "%~dp0cargo-run.bat" test-log.txt test --workspace
@@ -36,6 +38,16 @@ echo Test summary (each line is one group of tests):
 findstr /B /C:"test result" test-log.txt
 echo.
 
+set "SKIPS=0"
+findstr /C:"SKIPPED" test-log.txt >nul 2>nul
+if errorlevel 1 goto no_skips
+set "SKIPS=1"
+echo Some tests were SKIPPED. That is not the same as passing: this
+echo computer does not have something they need. Which, and why:
+findstr /C:"SKIPPED" test-log.txt
+echo.
+
+:no_skips
 if not "%TESTS_RESULT%"=="0" goto tests_failed
 
 set "PY="
@@ -75,6 +87,7 @@ echo ------------------------------------------------------------
 echo.
 echo The test summary above says how many tests there are. If it says
 echo 0 passed, there is no program logic to test yet.
+if "%SKIPS%"=="1" echo Some tests were skipped. See the list above before relying on this.
 goto done
 
 :rules_failed

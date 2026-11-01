@@ -1,9 +1,27 @@
 [package]
 name = "openstage-express-windows"
-description = "The Windows-only parts: hooks, UI Automation, screenshots, hotkeys, clipboard and fonts."
+description = "The Windows-only parts: the PDF engine (WebView2) now; hooks, UI Automation, screenshots, hotkeys, clipboard and fonts later."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [dependencies]
+openstage-express-export = { path = "../openstage-express-export" }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+base64.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+openstage-express-core = { path = "../openstage-express-core" }
+openstage-capture-render.workspace = true
+tempfile.workspace = true

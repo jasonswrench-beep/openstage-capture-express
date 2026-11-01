@@ -41,6 +41,7 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       run. It may ask for a GitHub sign-in if the repository is private.
 - [ ] The automatic focused view is 150 percent closer, centred on the click. Does that feel right on your programs? (The
       percentage is a constant, `DEFAULT_ZOOM_PERCENT` in `focus.rs`; a step-guide program's manual does not give its own number.)
+
 ## Milestone M4 (exports)
 
 - [ ] Open the web page from `EXPORT DEMO.bat` (the `html` folder) and read it the way a reader would. Does the order, the numbering
@@ -55,19 +56,26 @@ milestones are built; tick an item (and say on which PC and when) once it has be
 - [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
       seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
 - [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
-- [ ] PDF, Word, PowerPoint and JPG are not built. See the report for what is needed (a decision about how to make PDFs).
-## Milestone M4 (exports)
+- [ ] Word, PowerPoint and JPG are not built yet.
 
-- [ ] Open the web page from `EXPORT DEMO.bat` (the `html` folder) and read it the way a reader would. Does the order, the numbering
-      ("2.1.") and the wording feel right? Does the page look clean?
-- [ ] Look at the web page in the dark scheme (set Windows to dark mode, then open it). The dark colours pass the 4.5 to 1 test in the
-      code, but a headless browser would not show them, so they have not been seen.
-- [ ] Use the web page with a screen reader (Narrator and NVDA): the skip link, the contents list, the headings, the picture alt
-      text, and opening and closing a picture (Escape, and focus coming back). It has only been checked for structure.
-- [ ] Zoom the web page to 400 percent and make the window narrow (320 pixels). Does it reflow without side scrolling?
-- [ ] Print the web page (or print it to PDF). Does each step stay together and the pictures stay whole?
-- [ ] Open the Markdown file in a Markdown viewer you use (the `markdown` folder), and the JSON in anything that reads it.
-- [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
-      seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
-- [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
-- [ ] PDF, Word, PowerPoint and JPG are not built. See the report for what is needed (a decision about how to make PDFs).
+## PDF export (WebView2)
+
+- [ ] Open the PDF from `EXPORT DEMO.bat` (the `pdf` folder) in a desktop PDF reader and in Edge. It has been looked at only as pictures drawn
+      by Windows' own PDF renderer and read back with a separate program (pypdf), on this PC. Check the type, that the contents
+      entries are links that jump to their step, that the pictures are sharp, and that "Page 1 of 4" sits at the bottom right.
+- [ ] Run an accessibility checker you use on the PDF (a desktop PDF program's Accessibility Check, or PAC). The PDF is tagged (language, headings,
+      lists, links, alt text, bookmarks) but no checker has been run. Expect the page numbers to be reported as untagged content: the
+      engine draws them in the margin and does not tag them (the export warns about this).
+- [ ] Read the PDF with a screen reader (NVDA or Narrator in a desktop PDF reader or Edge): headings, the contents links, and the picture
+      descriptions. Only when you are away from the computer: NVDA logs everything it speaks.
+- [ ] Try PDF export on a PC with no WebView2 runtime (a Windows 10 PC without Edge or Microsoft 365). Expect `EXPORT DEMO.bat` to say
+      "pdf: skipped" and still make everything else. The "not installed" path has only been exercised with a stand-in engine.
+- [ ] The paper sizes A3, A5 and Legal, Letter portrait, other margins, the cover page and the header and footer lines are written and
+      their page rules are tested, but only A4 portrait, Letter landscape, the cover and one page per step have been printed with the
+      real engine. They have no way to be chosen until the window exists (milestone M5).
+- [ ] After a Windows or WebView2 update, run `TEST EXPRESS.bat` again. The tests print every layout with the real engine and check
+      the bookmark titles; a runtime update that brings back the doubled titles (see `docs/guide-format.md`) would fail them.
+- [ ] Has only been tried on a guide of six steps. Try one of a hundred or more for time and memory; the export gives up after seven
+      minutes.
+- [ ] Roboto (Apache-2.0, version 2.137) was copied from the fonts installed on your PC into `crates/openstage-express-export/fonts`
+      and is recorded in `NOTICE`. Say whether you are happy to ship it, or whether it should come from Google Fonts instead.

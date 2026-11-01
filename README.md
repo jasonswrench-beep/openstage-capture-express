@@ -10,24 +10,35 @@ small program with its own window.
 ## Where this stands (honest status)
 
 **Milestones M0 to M4 are done: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
-focused view, and exports to a web page, Markdown, JSON, a folder of pictures and an animated GIF. There is still no window and no
-capture. PDF, Word and PowerPoint (which Jason put in the first version) and JPG are not built.** The program starts, and can make
-every export of a made-up guide (`EXPORT DEMO.bat`).
+focused view, and exports to a web page, Markdown, JSON, a folder of pictures, an animated GIF and (since 2026-11-01) a PDF made
+by the WebView2 engine that Windows ships. There is still no window and no capture. Word and PowerPoint (which Jason put in the
+first version) and JPG are not built.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
 
 Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat` and `EXPORT DEMO.bat` ran on 2026-10-31 and 2026-11-01 on Jason's Windows 11 x64 PC
   (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than
-  double-clicked. The last full run of the tests: 253 passed (174 in the core, 77 in the exports, 2 in the app), and the rule
-  checks said PASS. The tests use real files: guide folders were created, saved, locked, crashed and reopened in temporary folders.
+  double-clicked. The last full run of the tests: 293 passed (174 in the core, 105 in the exports, 11 in the Windows engine, 3 in
+  the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved, locked, crashed and
+  reopened in temporary folders.
 - The demo's output was checked with programs that are not ours: Windows' own image decoder read the GIF (800 by 450, seven
   frames, three seconds each, looping forever) and the PNGs, and a headless Microsoft Edge drew the web page, which was looked at
   (light colours; headings, contents list, pictures with marks, the blurred name, the list and the link all showed correctly).
+- The PDF export ran with the real WebView2 runtime (version 156). Eleven tests in `openstage-express-windows` start the engine and
+  print the demo guide: a tagged PDF with the language, headings, lists, links, every picture's alt text and bookmarks; A4 portrait
+  and Letter landscape come out at those paper sizes; six layouts (cover, a page for every step, no contents list, Letter
+  landscape) each have the right bookmark titles and the right number of pages; a heading in Japanese gets one bookmark; no
+  working folder is left behind. The file was also read back with a separate program (pypdf) and its pages were drawn by Windows'
+  own PDF renderer and looked at (Roboto text, links, pictures with their marks, "Page 1 of 4" at the bottom right).
 
 Written and type-checked, not yet run on Windows:
 
-- The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered).
+- The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered), and
+  the part that lists skipped tests (no skip has happened on this PC).
 - `GET OPENSTAGE CODE.bat` downloading (its "not found" and "stop" paths were tried).
+- PDF export on a computer with no WebView2 runtime: the "not installed" message and the demo's "pdf: skipped" line are tested only
+  with a stand-in engine. The paper sizes A3, A5 and Legal, other margins and the header and footer lines are written and their page
+  rules tested, but not printed with the real engine.
 
 Tested on any computer (pure logic; run so far only on this Windows PC, nothing in them is Windows specific):
 
@@ -39,14 +50,22 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 - The exports: a golden Markdown file, JSON structure, HTML structure (one heading, no skipped heading levels, alt text, no outside
   requests, the page's security rule naming its one script, every piece of the author's text escaped, colours that pass 4.5 to 1), a
   GIF encoder checked against a separate decoder, and files never replacing each other.
-- 25 deliberate breakages of the code were each caught by a test (one slipped through the first time and got a better test).
+- The PDF's print page (paper, margins, cover, contents, page numbers, header and footer, languages, escaping of the author's
+  words in the page and in its style rules, no script, no outside request, Roboto inside the page) and the check of the finished
+  PDF (tags, language, bookmarks, alt text, "not a PDF"), with a stand-in for the engine.
+- 25 deliberate breakages of the code were each caught by a test (one slipped through the first time and got a better test). Five
+  more were tried on the PDF export on 2026-11-01: four were caught by the portable tests and the one that switches tagging off was
+  caught by the real-engine tests. Several attempts to bring back the doubled bookmark titles (see `docs/guide-format.md`) did not
+  bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
+  checking function has (against the real doubled titles).
 
-Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, PDF,
-Word, PowerPoint, JPG, and the portable zip.
+Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, Word,
+PowerPoint, JPG, and the portable zip.
 
-Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The dark colour scheme of the web page has not been seen
-rendered. The icon files are copied in but not used by any program yet (milestone M7). `TESTING-TODO.md` lists what only a person
-can check.
+PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
+tagged (the export warns about that). Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The dark colour
+scheme of the web page has not been seen rendered. The icon files are copied in but not used by any program yet (milestone M7).
+`TESTING-TODO.md` lists what only a person can check.
 
 ## What to do on Windows (no typing needed)
 
@@ -96,8 +115,9 @@ does not sync, and extract each new copy into a new, empty folder.
 ```
 crates/
   openstage-express-core/       the guide model, edit operations, undo, saving, smart titles, step builder, drawing, focused view
-  openstage-express-export/     HTML, Markdown, JSON, pictures and GIF (PDF, Word, PowerPoint not built); a made-up demo guide
-  openstage-express-windows/    hooks, UI Automation, screenshots, hotkeys (Windows only; empty so far)
+  openstage-express-export/     HTML, Markdown, JSON, pictures, GIF and the PDF's print page (Word, PowerPoint not built); a made-up
+                                demo guide; the Roboto font files for the PDF (fonts/)
+  openstage-express-windows/    Windows only: the PDF engine (WebView2) so far; hooks, UI Automation, screenshots, hotkeys later
   openstage-express-app/        the program openstage-capture-express.exe (no window yet; runs the export demo)
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code
 tools/check_rules.py            licence, header, writing-style and script checks

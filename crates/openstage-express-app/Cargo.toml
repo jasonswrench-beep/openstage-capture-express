@@ -15,5 +15,8 @@ openstage-express-core = { path = "../openstage-express-core" }
 openstage-express-export = { path = "../openstage-express-export" }
 openstage-capture-render.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+openstage-express-windows = { path = "../openstage-express-windows" }
+
 [dev-dependencies]
 tempfile.workspace = true
