@@ -8,3 +8,6 @@ clicks-test-log.txt
 export-demo-log.txt
 open-log.txt
 export-demo-output/
+check-build-log.txt
+clicks-build-log.txt
+clicks-test-output/

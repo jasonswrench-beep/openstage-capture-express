@@ -9,24 +9,43 @@ small program with its own window.
 
 ## Where this stands (honest status)
 
-**Milestones M0 to M5 are built: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
-focused view, exports to a web page, Markdown, JSON, a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the
-WebView2 engine that Windows ships, a Word file and a PowerPoint file that Express writes itself, and (since 2026-11-01) a window.
-There is still no capture.** The window has two screens: Home, and an editor where the steps of an example guide can be chosen,
-renamed, moved, skipped, deleted and restored, with undo and redo. The program also still makes every export of a made-up guide
-(`EXPORT DEMO.bat`). The window has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
+**Milestones M0 to M6 are built (M6 in its first cut: the whole display only, no window or area picker yet): the guide model,
+editing, undo, saving, smart titles, the step builder, drawing of marks, the focused view, exports to a web page, Markdown, JSON,
+a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the WebView2 engine that Windows ships, a Word file and a
+PowerPoint file that Express writes itself, a window, and (since 2026-11-01) real capture.** Home lists the guides in the guides
+folder (`Documents\OpenStage Express\Guides`). **Start capturing** turns the window into a small capture bar that stays on top
+while you work in other programs; each click and each field you type in becomes a step, with its picture, written to disk as it is
+made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
+and redo, and every change is saved. The program also still makes every export of a made-up guide (`EXPORT DEMO.bat`). The window
+has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
 
 Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 423 passed (174 in the core, 181 in the exports, 11 in the
-  Windows engine, 57 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 494 passed (198 in the core, 182 in the exports, 33 in the
+  Windows crate, 81 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
+- Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
+  test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
+  `SendInput`, clicked and typed in it while the real hooks, UI Automation and Windows Graphics Capture ran. 23 of its 25 checks
+  passed: a button and a check box were titled from their names (`Click "Save"`, `Click "Check me"`); the click was within two
+  pixels of the pointer; text typed in the Email field was read back from the field (`Type "ann@example.org"`); a password field
+  made no step with text and the password was in no file of the guide; the capture-now hotkey was heard while another program had
+  the keyboard; a click on one of Express's own windows made no step; and a magenta window of Express's own showed in a picture
+  until it was marked as excluded from capture and was then absent from the next one, so the capture bar and the editor stay out
+  of pictures. The guide it wrote opened again with every step and no problems; each step took about 30 ms to write. Two checks
+  failed. The drop-down list's step (`Select "Country"`) came out late, because Windows does not answer questions about a control
+  while its list is open. And the Type step's picture showed the text a few letters short, because it was taken at the Enter. Both
+  are fixed (the test now closes the list first; a Type step's picture is taken at least 120 ms after the last key), and a second
+  run after the fixes is still to be done (see below).
+- The program behind `CHECK EXPRESS COMPUTER.bat` (`check-computer`) passed on this PC: Windows 11 build 26200, two displays (the
+  second above the main one, at a negative place), a picture of the screen in 572 ms, UI Automation answering, the hooks and the
+  three hotkeys available, 1002 GB free, WebView2 156.
 - The window (M5) opened from `OPEN EXPRESS.bat` as a release build and closed cleanly. Before that it was drawn in both colour
   schemes by the real program and the pictures were looked at. Its tree of controls was read back through Windows UI Automation
   (the interface screen readers use): each button, the steps list and its options, the headings and the status line have the
-  right role and name, and pressing a button that way works. 57 tests drive the same window without opening it: Tab order,
+  right role and name, and pressing a button that way works. The app's tests drive the same window without opening it: Tab order,
   one stop for the steps list, Up and Down, every shortcut, undo and redo, the live status line, reading order, and colour
   contrast of both schemes (text at least 4.5 to 1, outlines and the focus ring at least 3 to 1).
 - The demo's output was checked with programs that are not ours: Windows' own image decoder read the GIF (800 by 450, seven
@@ -91,8 +110,9 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M6 to M8 and everything else in the spec: real capture, drawing and cropping in the editor, the Export dialog, settings,
-the self-tests that need Windows, WebP, the optional logo on slides, and the portable zip.
+Not built: M7 and M8 and everything else in the spec: capturing one window or a drawn area, drawing and cropping in the editor, the
+Export dialog, settings (the capture mode, language, hotkeys and guides folder cannot be changed yet), first-run, WebP, the optional logo
+on slides, and the portable zip.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
@@ -115,7 +135,12 @@ If the OpenStage code is not next to this folder, the scripts say so; double-cli
    window. Press Tab to move between controls and Enter to press one. The example guide ("How to submit an assignment") is a
    card under "Your guides"; opening it shows the editor. "Start capturing" says that capturing is not built yet.
 
-More scripts arrive with their milestones: `CHECK EXPRESS COMPUTER.bat` and `TEST EXPRESS CLICKS.bat` (M6).
+5. Double-click **`CHECK EXPRESS COMPUTER.bat`**. It looks at the Windows version, the displays, whether pictures of the screen arrive,
+   whether the names of clicked things can be found, whether the hotkeys are free and whether there is room for guides. It clicks
+   and types nothing.
+6. Double-click **`TEST EXPRESS CLICKS.bat`**. It opens a test window, then clicks and types in it by itself for about thirty seconds
+   (it waits until you have left the mouse and keyboard alone) while Express captures, and checks the steps. It takes real pictures
+   of your screen, so close anything private first.
 
 ## Decisions
 
@@ -154,9 +179,11 @@ crates/
   openstage-express-core/       the guide model, edit operations, undo, saving, smart titles, step builder, drawing, focused view
   openstage-express-export/     HTML, Markdown, JSON, pictures, GIF, the PDF's print page, Word and PowerPoint (with a small ZIP
                                 writer); a made-up demo guide; the Roboto font files for the PDF (fonts/)
-  openstage-express-windows/    Windows only: the PDF engine (WebView2) so far; hooks, UI Automation, screenshots, hotkeys later
-  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home and the editor, in src/ui), and
-                                the command-line export demo
+  openstage-express-windows/    Windows only: the PDF engine (WebView2); the mouse and keyboard hooks, UI Automation, pictures of the
+                                screen, hotkeys and the capture run that ties them together; the test window and synthetic input
+  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home, the capture bar and the editor, in src/ui),
+                                the capture bar and the saving of captured steps, the computer check, the click test,
+                                and the command-line export demo
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code
 tools/check_rules.py            licence, header, writing-style and script checks
 assets/icon/                    the icon pack (SVG, PNG sizes, ICO)

@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The Home screen (spec section 4.2): the title, the Start button, a search box and the list of guides. Until capturing is
-//! built the list holds one example guide, made up for trying the editor, and the screen says so.
+//! The Home screen (spec section 4.2): the title, the Start button, a search box and the list of guides. The list holds the guides
+//! found in the guides folder, newest first; when there are none it holds one example guide, made up for trying the editor, and
+//! the screen says so.
+
+use std::path::PathBuf;
 
 use eframe::egui::{self, RichText};
 use openstage_express_export::demo::demo;
+
+use crate::library::Entry;
 
 use super::rows::{step_count, steps_words};
 use super::widgets::{self, palette};
@@ -15,6 +20,8 @@ pub struct GuideCard {
     pub steps: usize,
     /// A guide made up for trying the program, not one a person made.
     pub example: bool,
+    /// Where the guide's folder is (the example has none).
+    pub path: Option<PathBuf>,
 }
 
 impl GuideCard {
@@ -36,8 +43,38 @@ impl HomeState {
         let guide = demo().document.guide;
         HomeState {
             search: String::new(),
-            guides: vec![GuideCard { title: guide.title.clone(), steps: step_count(&guide), example: true }],
+            guides: vec![GuideCard {
+                title: guide.title.clone(),
+                steps: step_count(&guide),
+                example: true,
+                path: None,
+            }],
         }
+    }
+
+    /// Home over the guides found in the guides folder, or over the example guide if there are none. Whatever was typed in the
+    /// search box is kept.
+    pub fn with_guides(&mut self, entries: &[Entry]) {
+        if entries.is_empty() {
+            let search = std::mem::take(&mut self.search);
+            *self = HomeState::example();
+            self.search = search;
+        } else {
+            self.guides = entries
+                .iter()
+                .map(|e| GuideCard {
+                    title: e.title.clone(),
+                    steps: e.steps,
+                    example: false,
+                    path: Some(e.path.clone()),
+                })
+                .collect();
+        }
+    }
+
+    /// Whether the list is the example guide.
+    pub fn shows_example(&self) -> bool {
+        self.guides.iter().any(|g| g.example)
     }
 
     /// The guides the search lets through (all of them when it is empty), as places in `guides`.
@@ -95,12 +132,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
             }
         }
         ui.add_space(14.0);
-        ui.label(
-            RichText::new(
-                "This guide is an example made up for trying the editor. Capturing your own guides is the next thing to be built.",
-            )
-            .color(p.muted),
-        );
+        if state.shows_example() {
+            ui.label(
+                RichText::new(
+                    "This guide is an example made up for trying the editor. Click Start capturing, then do the task you want to explain.",
+                )
+                .color(p.muted),
+            );
+        }
     });
     action
 }
@@ -117,13 +156,13 @@ mod tests {
         assert_eq!(home.guides[0].steps, 5);
         assert!(home.guides[0].example);
         assert_eq!(home.guides[0].label(), "How to submit an assignment, 5 steps, example guide");
-        assert_eq!(GuideCard { title: "One".into(), steps: 1, example: false }.label(), "One, 1 step");
+        assert_eq!(GuideCard { title: "One".into(), steps: 1, example: false, path: None }.label(), "One, 1 step");
     }
 
     #[test]
     fn the_search_lets_through_guides_that_have_all_the_words_in_any_case() {
         let mut home = HomeState::example();
-        home.guides.push(GuideCard { title: "Set up two-step sign-in".into(), steps: 7, example: false });
+        home.guides.push(GuideCard { title: "Set up two-step sign-in".into(), steps: 7, example: false, path: None });
         assert_eq!(home.visible(), [0, 1]);
         home.search = "  SUBMIT ".into();
         assert_eq!(home.visible(), [0]);

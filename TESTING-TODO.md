@@ -95,6 +95,45 @@ submit an assignment") to open from the card under "Your guides".
 - [ ] The editor does not yet let you draw marks, blur a name, crop, zoom or add notes; there is no tool row. Those come after capture.
       Home's "Start capturing" says it is not built yet.
 
+## Milestone M6 (capture)
+
+Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`, then try a real capture with `OPEN EXPRESS.bat`.
+
+- [ ] Do a real capture by hand: Start capturing, press Start, do a task of your own in two or three programs (a browser, Word, File
+      Explorer), press Finish. Do the titles read well? Do the pictures show what you saw, with the menu or tooltip still open?
+      Is the marker where you clicked? This is the main thing only a person can judge; the self-test uses a small test window.
+- [ ] The first run of `TEST EXPRESS CLICKS.bat` as a double-click (it has only run through a shell). It takes about thirty seconds,
+      moves the pointer and sends keys; it waits until you are still. Look at the folder `clicks-test-output`: do the pictures show
+      the test window, the typed text, and no magenta rectangle (Express's own stand-in window)?
+- [ ] Try the hotkeys while another program has the focus: Ctrl+Shift+F7 starts and finishes, F8 pauses and resumes, F9 captures
+      now. They were tested by sending the keys from the test, not by a person at a keyboard. If another program holds one, the
+      status line says which; check that message makes sense.
+- [ ] The capture bar: is it where you expect (top right of the screen), does it stay on top, is it in the way, does Tab reach its
+      buttons? The window changes size and place when the bar opens and closes; look for flicker, and that the editor window
+      comes back where it was.
+- [ ] Narrator and NVDA with the capture bar and the step announcements ("Step 4 captured: Click Save."). Only when you are away
+      from the computer (NVDA logs everything it speaks) and only on your go. The status line is a polite live region, tested
+      through the accessibility tree, but nothing has spoken it.
+- [ ] Two displays: capture with the main display while working on the second one. This PC has two (the second sits above the
+      main one, at a negative place); the self-test clicks on the main display only. Clicks outside the captured display still end
+      a typing step but make no step. Is that what you want, or should capturing follow the display you are working on?
+- [ ] Windows with a different display scaling (125, 150 or 200 percent): are the marker and cursor the right size, and is the click
+      in the right place? The marks scale with the display (tested with a made-up scaling); the click test ran at 100 percent.
+- [ ] A program running as administrator: Windows does not tell an ordinary program about clicks in an administrator's windows (spec
+      K6), so no step is made. Try a click in Task Manager or a program started as administrator and see what happens.
+- [ ] Typing with an input method (Japanese, Chinese, Korean) and into a web page's fields: the text is read from the field when
+      typing finishes, which has only been tried with a plain Windows edit field. Some programs give no text; the step then says
+      `Type in "Name"`.
+- [ ] A drop-down list or menu that is open when you click: Windows' accessibility information does not answer until the list is
+      closed, so the step appears a moment late (its picture and place are right). Does a delay of a second or two bother you?
+- [ ] Antivirus and SmartScreen: the hooks that watch the mouse and keyboard can make an antivirus warn on a program that is not
+      signed (spec K3). Nothing has warned here; try on another PC with an antivirus.
+- [ ] Not built yet in capture: capturing one window or a drawn area, the screenshot delay and capture-mode choices (they are in the
+      engine and tested, but no setting reaches them), sound cues, cancelling after starting (Finish keeps the steps), HDR and
+      protected content.
+- [ ] Open a guide in the folder `Documents\OpenStage Express\Guides` after a capture: is that the place you want guides kept? Is
+      "Guide 2026-11-01 09.38" a good first title? The editor cannot rename a guide yet (steps only), so every guide keeps it.
+
 ## PDF export (WebView2)
 
 - [ ] Open the PDF from `EXPORT DEMO.bat` (the `pdf` folder) in a desktop PDF reader and in Edge. It has been looked at only as pictures drawn

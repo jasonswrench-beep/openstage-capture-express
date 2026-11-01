@@ -10,7 +10,12 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, accesskit, Event, Key, Modifiers, Pos2, RawInput, Rect, Vec2};
 
-use super::app::{App, Screen};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use super::app::{App, Screen, WindowMode};
+use super::bar::{BarAction, BarPhase, BarView};
+use super::capture::{CaptureControl, Finished, HotkeyAction, Outcome, Starter};
 use super::theme;
 
 use accesskit::{Action, ActionRequest, Live, Node, NodeId, Role, TreeId};
@@ -245,7 +250,7 @@ fn home_is_a_heading_a_button_a_search_box_and_the_guide_all_with_names() {
 
 #[test]
 fn every_control_on_every_screen_has_a_name_and_can_be_reached_by_the_keyboard() {
-    for screen in [Screen::Home, Screen::Editor] {
+    for screen in [Screen::Home, Screen::Editor, Screen::Bar] {
         for dark in [true, false] {
             let h = Harness::sized(screen, egui::vec2(1280.0, 720.0), 1.0, dark);
             let mut inputs = 0;
@@ -263,7 +268,7 @@ fn every_control_on_every_screen_has_a_name_and_can_be_reached_by_the_keyboard()
                     );
                 }
             }
-            assert!(inputs >= 3, "{screen:?}: only {inputs} controls");
+            assert!(inputs >= 2, "{screen:?}: only {inputs} controls");
         }
     }
 }
@@ -279,11 +284,17 @@ fn invoking_the_guide_opens_the_editor_and_says_so() {
 }
 
 #[test]
-fn start_capturing_says_plainly_that_it_is_not_built_yet() {
+fn start_capturing_opens_the_capture_bar_ready_to_start() {
     let mut h = Harness::new(Screen::Home);
+    assert_eq!(h.app.window_mode(), WindowMode::Normal);
     h.invoke(Role::Button, "Start capturing");
-    assert_eq!(h.app.screen, Screen::Home);
-    assert!(h.status().starts_with("Capturing is not built yet."), "{}", h.status());
+    assert_eq!(h.app.screen, Screen::Bar);
+    assert_eq!(h.app.window_mode(), WindowMode::Bar, "the window becomes the strip");
+    h.find(Role::Heading, "Ready to capture");
+    h.find(Role::Button, "Start");
+    h.find(Role::Button, "Cancel");
+    assert!(h.status().starts_with("The capture bar is open."), "{}", h.status());
+    assert_eq!(h.focused_words().as_deref(), Some("Start"), "the keyboard is on Start, so Enter starts");
 }
 
 #[test]
@@ -474,9 +485,11 @@ fn the_status_line_is_a_polite_live_region_and_a_repeated_message_is_heard_again
     let mut h = Harness::new(Screen::Home);
     let status = h.status_node();
     assert_eq!(h.node(status).live(), Some(Live::Polite));
-    h.invoke(Role::Button, "Start capturing");
+    h.app.status.say("Saved.");
+    h.settle();
     let first = h.node(h.status_node()).label().unwrap().to_string();
-    h.invoke(Role::Button, "Start capturing");
+    h.app.status.say("Saved.");
+    h.settle();
     let second = h.node(h.status_node()).label().unwrap().to_string();
     assert_ne!(first, second, "the same words said twice must still change the node, or the second is not announced");
     assert_eq!(first.trim_end(), second.trim_end());
@@ -530,6 +543,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                         (Role::TextInput, "Search"),
                         (Role::Button, "How to submit an assignment, 5 steps, example guide"),
                     ],
+                    Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Editor => &[
                         (Role::Button, "Back to guides"),
                         (Role::Button, "Undo"),
@@ -653,4 +667,261 @@ fn the_steps_list_is_one_stop_for_the_tab_key_however_long_it_is() {
         stops.iter().position(|w| w.starts_with("1. ")).map(|p| p + 1),
         "straight from the list to the next control: {stops:?}"
     );
+}
+
+// ---- the capture bar, and capturing through a stand-in that takes no pictures
+
+/// What the stand-in capture has been asked, and what it will say next. Shared so the test can steer it.
+#[derive(Default)]
+struct FakeState {
+    phase: Option<BarPhase>,
+    steps: usize,
+    acts: Vec<BarAction>,
+    said: Vec<String>,
+    outcome: Option<Outcome>,
+}
+
+struct FakeCapture(Rc<RefCell<FakeState>>);
+
+impl CaptureControl for FakeCapture {
+    fn view(&self) -> BarView {
+        let s = self.0.borrow();
+        BarView {
+            phase: s.phase.unwrap_or(BarPhase::Capturing),
+            steps: s.steps,
+            last: None,
+            what: "the whole screen".to_string(),
+            hotkeys: String::new(),
+        }
+    }
+
+    fn act(&mut self, action: BarAction) {
+        let mut s = self.0.borrow_mut();
+        s.acts.push(action);
+        match action {
+            BarAction::Pause => s.phase = Some(BarPhase::Paused),
+            BarAction::Resume => s.phase = Some(BarPhase::Capturing),
+            BarAction::Finish => s.phase = Some(BarPhase::Saving),
+            _ => {}
+        }
+    }
+
+    fn poll(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.0.borrow_mut().said)
+    }
+
+    fn finished(&mut self) -> Option<Outcome> {
+        self.0.borrow_mut().outcome.take()
+    }
+}
+
+fn fake_starter(state: &Rc<RefCell<FakeState>>) -> Starter {
+    let state = Rc::clone(state);
+    Box::new(move |_| Ok(Box::new(FakeCapture(Rc::clone(&state))) as Box<dyn CaptureControl>))
+}
+
+impl Harness {
+    /// Give the window a guides folder and a stand-in for capturing.
+    fn with_capture(&mut self, library: std::path::PathBuf, starter: Starter) {
+        let app = std::mem::replace(&mut self.app, App::new(Screen::Home));
+        self.app = app.with_capture(library, starter, "the whole screen", Box::new(|_| false));
+        self.settle();
+    }
+}
+
+fn started_harness() -> (Harness, Rc<RefCell<FakeState>>) {
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(std::path::PathBuf::new(), fake_starter(&state));
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    (h, state)
+}
+
+#[test]
+fn cancel_on_the_ready_bar_goes_back_to_home_and_captures_nothing() {
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(std::path::PathBuf::new(), fake_starter(&state));
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Cancel");
+    assert_eq!(h.app.screen, Screen::Home);
+    assert!(!h.app.is_capturing());
+    assert_eq!(h.status(), "Cancelled. Nothing was captured.");
+}
+
+#[test]
+fn start_begins_capturing_and_the_bar_shows_pause_capture_now_and_finish() {
+    let (h, _state) = started_harness();
+    assert!(h.app.is_capturing());
+    h.find(Role::Heading, "Capturing, step 1");
+    h.find(Role::Button, "Pause");
+    h.find(Role::Button, "Capture now");
+    h.find(Role::Button, "Finish");
+    assert!(!h.has(Role::Button, "Start"), "Start is gone once capturing");
+    assert!(h.status().starts_with("Capturing."), "{}", h.status());
+    assert_eq!(h.focused_words().as_deref(), Some("Pause"), "the keyboard moves to the first button of the new state");
+}
+
+#[test]
+fn the_bar_buttons_reach_the_capture() {
+    let (mut h, state) = started_harness();
+    h.invoke(Role::Button, "Pause");
+    h.find(Role::Heading, "Paused, 0 steps");
+    h.find(Role::Button, "Resume");
+    assert_eq!(h.focused_words().as_deref(), Some("Resume"));
+    h.invoke(Role::Button, "Resume");
+    h.invoke(Role::Button, "Capture now");
+    h.invoke(Role::Button, "Finish");
+    assert_eq!(state.borrow().acts, [BarAction::Pause, BarAction::Resume, BarAction::CaptureNow, BarAction::Finish]);
+    h.find(Role::Heading, "Saving your guide, 0 steps");
+}
+
+#[test]
+fn each_step_the_capture_makes_is_announced_in_the_status_line() {
+    let (mut h, state) = started_harness();
+    state.borrow_mut().said = vec!["Step 1 captured: Click \"Save\".".to_string()];
+    h.settle();
+    assert_eq!(h.status(), "Step 1 captured: Click \"Save\".");
+    state.borrow_mut().said =
+        vec!["Step 2 captured: Type \"Ann\".".to_string(), "Step 3 captured: Click \"OK\".".to_string()];
+    h.settle();
+    assert_eq!(h.status(), "Step 2 captured: Type \"Ann\". Step 3 captured: Click \"OK\".", "all of them, none lost");
+}
+
+#[test]
+fn the_hotkeys_start_pause_resume_and_finish() {
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(std::path::PathBuf::new(), fake_starter(&state));
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::CaptureNow);
+    assert!(
+        state.borrow().acts.is_empty() && !h.app.is_capturing(),
+        "pause and capture-now do nothing before a capture"
+    );
+    h.app.hotkey(HotkeyAction::StartOrFinish);
+    h.settle();
+    assert!(h.app.is_capturing());
+    assert_eq!(h.app.screen, Screen::Bar);
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::PauseOrResume);
+    h.app.hotkey(HotkeyAction::CaptureNow);
+    h.app.hotkey(HotkeyAction::StartOrFinish);
+    assert_eq!(state.borrow().acts, [BarAction::Pause, BarAction::Resume, BarAction::CaptureNow, BarAction::Finish]);
+}
+
+#[test]
+fn a_start_hotkey_in_the_editor_does_not_throw_the_guide_away() {
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    let mut h = Harness::new(Screen::Editor);
+    h.with_capture(std::path::PathBuf::new(), fake_starter(&state));
+    h.app.hotkey(HotkeyAction::StartOrFinish);
+    h.settle();
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert!(!h.app.is_capturing());
+    assert!(h.status().starts_with("Go back to your guides first"), "{}", h.status());
+}
+
+#[test]
+fn capture_that_cannot_start_says_why_and_stays_on_the_bar() {
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(
+        std::path::PathBuf::new(),
+        Box::new(|_| Err("Windows would not let the program watch the mouse.".to_string())),
+    );
+    h.invoke(Role::Button, "Start capturing");
+    h.invoke(Role::Button, "Start");
+    assert_eq!(h.app.screen, Screen::Bar);
+    assert!(!h.app.is_capturing());
+    assert_eq!(h.status(), "Capturing could not start. Windows would not let the program watch the mouse.");
+    h.find(Role::Button, "Start");
+}
+
+fn one_captured_step() -> Finished {
+    use openstage_express_core::builder::{Draft, DraftKind, ShotId};
+    use openstage_express_core::capture::{Captured, MarkOptions, Picture};
+    use openstage_express_core::model::{Button, Click, Control};
+    let captured = Captured {
+        draft: Draft {
+            kind: DraftKind::Click,
+            title: "Click \"Save\"".to_string(),
+            shot: ShotId(1),
+            click: Some(Click { x: 8, y: 4, button: Button::Left, extra: Default::default() }),
+            control: Some(Control { name: "Save".into(), role: "button".into(), extra: Default::default() }),
+            typed: None,
+            at: 10,
+        },
+        picture: Picture::new(16, 9, vec![200; 16 * 9 * 4]).unwrap(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut writer =
+        crate::guide_writer::GuideWriter::create(dir.path(), "Captured guide", "en", MarkOptions::default()).unwrap();
+    writer.add(&captured).unwrap();
+    let (folder, doc) = writer.into_parts();
+    // The folder must outlive the test body: leak the directory handle (the operating system's temp cleanup removes it).
+    std::mem::forget(dir);
+    Finished { folder, doc }
+}
+
+#[test]
+fn finishing_opens_the_editor_over_the_new_guide() {
+    let (mut h, state) = started_harness();
+    state.borrow_mut().outcome = Some(Outcome::Guide(Box::new(one_captured_step())));
+    h.settle();
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert!(!h.app.is_capturing());
+    assert_eq!(h.window_mode(), WindowMode::Normal, "the window is the whole program again");
+    assert_eq!(h.status(), "Finished. 1 step captured. Your guide is open for editing.");
+    h.find(Role::Heading, "Captured guide");
+    assert_eq!(h.rows(), ["1. Click \"Save\""]);
+}
+
+#[test]
+fn finishing_with_nothing_captured_makes_no_guide() {
+    let (mut h, state) = started_harness();
+    state.borrow_mut().outcome = Some(Outcome::Nothing);
+    h.settle();
+    assert_eq!(h.app.screen, Screen::Home);
+    assert_eq!(h.status(), "Finished. No steps were captured, so no guide was made.");
+}
+
+#[test]
+fn a_capture_that_fails_goes_home_and_says_why() {
+    let (mut h, state) = started_harness();
+    state.borrow_mut().outcome = Some(Outcome::Failed("The disk is full.".to_string()));
+    h.settle();
+    assert_eq!(h.app.screen, Screen::Home);
+    assert_eq!(h.status(), "Capturing stopped. The disk is full.");
+}
+
+#[test]
+fn a_real_guide_in_the_folder_is_listed_opened_and_every_change_is_saved() {
+    let finished = one_captured_step();
+    let folder_path = finished.folder.path().to_path_buf();
+    let library = folder_path.parent().unwrap().to_path_buf();
+    drop(finished); // lets go of the guide's lock, as closing it would
+    let mut h = Harness::new(Screen::Home);
+    h.with_capture(library, super::capture::cannot_capture());
+    h.find(Role::Button, "Captured guide, 1 step");
+    assert!(
+        !h.has(Role::Button, "How to submit an assignment, 5 steps, example guide"),
+        "the example gives way to real guides"
+    );
+    h.invoke(Role::Button, "Captured guide, 1 step");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert_eq!(h.rows(), ["1. Click \"Save\""]);
+    h.invoke(Role::CheckBox, "Skip in export");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+    assert!(h.app.editor.is_none(), "the guide's folder is let go of when the person leaves it");
+    let saved = std::fs::read_to_string(folder_path.join("guide.json")).unwrap();
+    assert!(saved.contains("\"skipped\": true"), "the change reached the disk: {saved}");
+    assert!(!folder_path.join("guide.lock").exists(), "and the lock is gone");
+}
+
+impl Harness {
+    fn window_mode(&self) -> WindowMode {
+        self.app.window_mode()
+    }
 }

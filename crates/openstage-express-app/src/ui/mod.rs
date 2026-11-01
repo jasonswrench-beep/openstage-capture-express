@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The window (milestone M5): Home and the Editor, over an example guide, drawn with egui and described to screen readers
+//! The window (milestones M5 and M6): Home, the capture bar and the Editor, drawn with egui and described to screen readers
 //! through AccessKit.
 //!
-//! The screens (`home`, `editor`) and their state (`editor_state`, `rows`) draw into a `Ui` they are given and know nothing of
-//! the operating system, so the tests run whole screens without opening a window and read back what a screen reader would be
-//! told. This file is the only place that opens a real window.
+//! The screens (`home`, `bar`, `editor`) and their state (`editor_state`, `rows`) draw into a `Ui` they are given and know nothing
+//! of the operating system, so the tests run whole screens without opening a window and read back what a screen reader would be
+//! told. This file is the only place that opens a real window, switches it between the whole program and the strip of the
+//! capture bar, listens for the hotkeys, and keeps Express's own windows out of its screenshots.
 
 pub mod app;
+pub mod bar;
+pub mod capture;
 pub mod editor;
 pub mod editor_state;
 pub mod fonts;
@@ -19,11 +22,14 @@ pub mod widgets;
 mod tests;
 
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-pub use app::{App, Screen};
+pub use app::{App, Screen, WindowMode};
+
+use capture::HotkeyAction;
 
 /// Switches for looking at the window without a person at it (used by the checks, and documented in `--help`).
 #[derive(Debug, Clone, Default)]
@@ -39,7 +45,7 @@ pub struct DevOptions {
 }
 
 impl DevOptions {
-    /// Read `--screen home|editor`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
+    /// Read `--screen home|editor|bar`, `--screenshot <file.png>`, `--close-after <seconds>` and `--theme dark|light`.
     pub fn parse(args: &[String]) -> Result<DevOptions, String> {
         let mut options = DevOptions::default();
         let mut it = args.iter();
@@ -47,10 +53,11 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home or editor")?.as_str() {
+                    options.screen = Some(match value("home, editor or bar")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
-                        other => return Err(format!("--screen is home or editor, not {other:?}.")),
+                        "bar" => Screen::Bar,
+                        other => return Err(format!("--screen is home, editor or bar, not {other:?}.")),
                     })
                 }
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value("a file name ending in .png")?)),
@@ -77,18 +84,45 @@ impl DevOptions {
     }
 }
 
+/// What the hotkey listener tells the window.
+enum HotkeyEvent {
+    Pressed(HotkeyAction),
+    /// Hotkeys that could not be set, each in words (never sent empty).
+    Problems(Vec<String>),
+}
+
+/// The window's size as the whole program, and as the strip of the capture bar.
+const NORMAL_SIZE: [f32; 2] = [1280.0, 760.0];
+const NORMAL_MIN: [f32; 2] = [900.0, 560.0];
+const BAR_SIZE: [f32; 2] = [620.0, 250.0];
+const BAR_MIN: [f32; 2] = [360.0, 150.0];
+
 struct ExpressApp {
     app: App,
     options: DevOptions,
     started: Instant,
     frames: u32,
     screenshot_requested: bool,
+    hotkeys: Option<Receiver<HotkeyEvent>>,
+    applied_mode: WindowMode,
+    /// Where the whole-program window was before it became the bar, so that it goes back there.
+    normal_position: Option<egui::Pos2>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    last_protected: Instant,
 }
 
 impl eframe::App for ExpressApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.take_hotkeys();
         self.app.draw(ui);
+        self.apply_window_mode(ui.ctx());
+        self.protect_own_windows();
         self.dev_tick(ui.ctx());
+        if self.app.is_capturing() {
+            // The window may be in the background while someone works in another program: keep looking for what the capture
+            // has to say.
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
+        }
     }
 
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
@@ -97,6 +131,60 @@ impl eframe::App for ExpressApp {
 }
 
 impl ExpressApp {
+    fn take_hotkeys(&mut self) {
+        let Some(events) = &self.hotkeys else { return };
+        let events: Vec<HotkeyEvent> = events.try_iter().collect();
+        for event in events {
+            match event {
+                HotkeyEvent::Pressed(action) => self.app.hotkey(action),
+                HotkeyEvent::Problems(problems) => {
+                    #[cfg(windows)]
+                    self.app.set_hotkey_words(&crate::capture_win::hotkey_sentence(&problems));
+                    self.app.status.say(problems.join(" "));
+                }
+            }
+        }
+    }
+
+    /// Make the window the whole program or the strip of the capture bar, when that changes.
+    fn apply_window_mode(&mut self, ctx: &egui::Context) {
+        let mode = self.app.window_mode();
+        if mode == self.applied_mode {
+            return;
+        }
+        self.applied_mode = mode;
+        match mode {
+            WindowMode::Bar => {
+                self.normal_position = ctx.input(|i| i.viewport().outer_rect).map(|r| r.min);
+                ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(BAR_MIN[0], BAR_MIN[1])));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(BAR_SIZE[0], BAR_SIZE[1])));
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+                if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
+                    let left = (monitor.x - BAR_SIZE[0] - 24.0).max(0.0);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(left, 24.0)));
+                }
+            }
+            WindowMode::Normal => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+                ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(NORMAL_MIN[0], NORMAL_MIN[1])));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(NORMAL_SIZE[0], NORMAL_SIZE[1])));
+                if let Some(at) = self.normal_position {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(at));
+                }
+            }
+        }
+    }
+
+    /// Mark every window of this program as left out of pictures of the screen (spec 8.5). Windows made later are caught within
+    /// half a second.
+    fn protect_own_windows(&mut self) {
+        #[cfg(windows)]
+        if self.last_protected.elapsed() >= Duration::from_millis(500) {
+            self.last_protected = Instant::now();
+            openstage_express_windows::affinity::exclude_own_windows();
+        }
+    }
+
     /// The few things the `--screenshot` and `--close-after` switches need done between frames.
     fn dev_tick(&mut self, ctx: &egui::Context) {
         self.frames += 1;
@@ -134,13 +222,42 @@ fn save_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Stri
     writer.write_image_data(&bytes).map_err(|e| e.to_string())
 }
 
+/// Listen for the hotkeys on a thread of their own and tell the window, waking it when one is pressed. Not used by the runs that
+/// only take a picture of the window, so that they do not take the hotkeys from a real copy of the program.
+#[cfg(windows)]
+fn listen_for_hotkeys(ctx: egui::Context) -> Receiver<HotkeyEvent> {
+    use openstage_express_windows::hotkeys::Hotkeys;
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let hotkeys = Hotkeys::start(&crate::capture_win::default_hotkeys());
+        if !hotkeys.problems.is_empty() {
+            let _ = tx.send(HotkeyEvent::Problems(hotkeys.problems.clone()));
+            ctx.request_repaint();
+        }
+        loop {
+            match hotkeys.next(Duration::from_secs(1)) {
+                Ok(action) => {
+                    if tx.send(HotkeyEvent::Pressed(crate::capture_win::hotkey_action(action))).is_err() {
+                        break;
+                    }
+                    ctx.request_repaint();
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+    rx
+}
+
 /// Open the window and run until it is closed.
 pub fn run(options: DevOptions) -> eframe::Result {
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("OpenStage Capture Express")
-            .with_inner_size([1280.0, 760.0])
-            .with_min_inner_size([900.0, 560.0]),
+            .with_inner_size(NORMAL_SIZE)
+            .with_min_inner_size(NORMAL_MIN),
         ..Default::default()
     };
     eframe::run_native(
@@ -158,12 +275,41 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 cc.egui_ctx.set_theme(forced);
             }
             let screen = options.screen.unwrap_or(Screen::Home);
+            let library = crate::library::default_folder();
+            #[cfg(windows)]
+            let (app, hotkeys) = {
+                let dev_run = options.screenshot.is_some() || options.close_after.is_some();
+                let hotkeys = (!dev_run).then(|| listen_for_hotkeys(cc.egui_ctx.clone()));
+                let words = crate::capture_win::hotkey_sentence(&[]);
+                let mut app = App::new(screen).with_capture(
+                    library,
+                    crate::capture_win::starter(words.clone()),
+                    &crate::capture_win::ready_words(),
+                    Box::new(openstage_express_windows::system::process_is_running),
+                );
+                app.set_hotkey_words(&words);
+                (app, hotkeys)
+            };
+            #[cfg(not(windows))]
+            let (app, hotkeys) = (
+                App::new(screen).with_capture(
+                    library,
+                    capture::cannot_capture(),
+                    "the whole screen",
+                    Box::new(|_| false),
+                ),
+                None,
+            );
             Ok(Box::new(ExpressApp {
-                app: App::new(screen),
+                app,
                 options,
                 started: Instant::now(),
                 frames: 0,
                 screenshot_requested: false,
+                hotkeys,
+                applied_mode: WindowMode::Normal,
+                normal_position: None,
+                last_protected: Instant::now(),
             }))
         }),
     )
