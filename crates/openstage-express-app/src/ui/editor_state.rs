@@ -23,6 +23,8 @@ use super::rows::{rows, Row};
 /// What has been typed for the selected step.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Buffer {
+    /// The guide's own title, as typed.
+    pub guide_title: String,
     /// The step these words are for.
     pub for_step: Option<String>,
     pub title: String,
@@ -215,19 +217,32 @@ impl EditorState {
     }
 
     fn reload_buffer(&mut self) {
+        let guide_title = self.session.doc().guide.title.clone();
         self.buffer = match self.selected_step() {
             Some(step) => Buffer {
+                guide_title: guide_title.clone(),
                 for_step: Some(step.id.clone()),
                 title: step.title.clone(),
                 description: step.description.clone(),
                 picture_description: step.image_description.clone(),
             },
-            None => Buffer::default(),
+            None => Buffer { guide_title, ..Buffer::default() },
         };
     }
 
     /// Keep what has been typed, as one undoable change for each box that differs from the guide.
     pub fn commit_pending(&mut self) {
+        // The guide's own title. A title with nothing in it is not kept: the old one comes back into the box.
+        let wanted = self.buffer.guide_title.trim().to_string();
+        if wanted.is_empty() {
+            self.buffer.guide_title = self.session.doc().guide.title.clone();
+        } else if wanted != self.session.doc().guide.title {
+            let now = utc_now_iso();
+            let _ = self.session.apply(|d| {
+                d.set_guide_title(&wanted, &now);
+                Ok(())
+            });
+        }
         let Some(id) = self.buffer.for_step.clone() else { return };
         let Some(step) = self.session.doc().guide.step(&id) else { return };
         let (title, description, picture_description) = (
@@ -351,6 +366,23 @@ impl EditorState {
                 Some("Added an empty step. Type its title.".to_string())
             }
             Err(_) => Some("A step could not be added.".to_string()),
+        }
+    }
+
+    /// Duplicate the selected step (a copy of it, with its picture and marks, goes straight after it).
+    pub fn duplicate_selected(&mut self) -> Said {
+        self.commit_pending();
+        let id = self.selected.clone()?;
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.duplicate_step(&id, &now)) {
+            Ok(copy) => {
+                self.selected = Some(copy);
+                self.selected_mark = None;
+                self.reload_buffer();
+                let row = self.describe_selected();
+                Some(format!("Duplicated. The copy is {row}."))
+            }
+            Err(_) => Some("That step could not be duplicated.".to_string()),
         }
     }
 
@@ -787,7 +819,44 @@ mod tests {
         assert!(e.rows().is_empty());
         assert_eq!(e.selected_id(), None);
         assert_eq!(e.delete_selected(), None);
-        assert_eq!(e.buffer, Buffer::default());
+        let guide_title = e.doc().guide.title.clone();
+        assert_eq!(
+            e.buffer,
+            Buffer { guide_title, ..Buffer::default() },
+            "no step's words, but the guide's title is still there"
+        );
+    }
+
+    #[test]
+    fn the_guide_can_be_renamed_as_one_undo_and_an_empty_title_is_not_kept() {
+        let mut e = editor();
+        let depth = e.session.undo_depth();
+        e.buffer.guide_title = "  Submitting an assignment  ".to_string();
+        e.commit_pending();
+        assert_eq!(e.doc().guide.title, "Submitting an assignment");
+        assert_eq!(e.session.undo_depth(), depth + 1);
+        e.buffer.guide_title = "   ".to_string();
+        e.commit_pending();
+        assert_eq!(e.doc().guide.title, "Submitting an assignment", "a title with nothing in it is refused");
+        assert_eq!(e.buffer.guide_title, "Submitting an assignment", "and the old one comes back into the box");
+        e.undo();
+        assert_eq!(e.doc().guide.title, "How to submit an assignment");
+        assert_eq!(e.buffer.guide_title, "How to submit an assignment");
+    }
+
+    #[test]
+    fn a_duplicated_step_is_a_copy_straight_after_it_and_is_chosen() {
+        let mut e = editor();
+        let first = e.selected_id().unwrap().to_string();
+        let count = e.doc().guide.steps.len();
+        let said = e.duplicate_selected().unwrap();
+        assert!(said.starts_with("Duplicated. The copy is"), "{said}");
+        assert_eq!(e.doc().guide.steps.len(), count + 1);
+        assert_ne!(e.selected_id(), Some(first.as_str()));
+        assert_eq!(e.selected_step().unwrap().title, e.doc().guide.step(&first).unwrap().title);
+        assert_eq!(e.neighbour(-1).as_deref(), Some(first.as_str()), "straight after the original");
+        e.undo();
+        assert_eq!(e.doc().guide.steps.len(), count);
     }
 
     #[test]

@@ -157,14 +157,32 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         state.select(&id);
     }
     ui.add_space(4.0);
-    if widgets::button(ui, "Add a step").clicked() {
-        status.say_opt(state.add_step());
-    }
+    ui.horizontal(|ui| {
+        if widgets::button(ui, "Add a step").clicked() {
+            status.say_opt(state.add_step());
+        }
+        if widgets::button_enabled(ui, state.selected_step().is_some(), "Duplicate step").clicked() {
+            status.say_opt(state.duplicate_selected());
+        }
+    });
 }
 
 fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
-    widgets::subheading(ui, "Step details");
     let p = palette(ui);
+    let label = ui.label("Guide title");
+    let guide_title = ui
+        .add(egui::TextEdit::singleline(&mut state.buffer.guide_title).desired_width(f32::INFINITY))
+        .labelled_by(label.id);
+    widgets::ring(ui, &guide_title);
+    if guide_title.lost_focus() {
+        let before = state.doc().guide.title.clone();
+        state.commit_pending();
+        if state.doc().guide.title != before {
+            status.say(format!("The guide is now called {}.", state.doc().guide.title));
+        }
+    }
+    ui.add_space(6.0);
+    widgets::subheading(ui, "Step details");
     if state.selected_step().is_none() {
         ui.label(RichText::new("No step is chosen. Add a step, or choose one from the list.").color(p.muted));
         return;
