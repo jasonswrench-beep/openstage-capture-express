@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/openstage-express-core",
+    "crates/openstage-express-export",
+    "crates/openstage-express-windows",
+    "crates/openstage-express-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["OpenStage Capture Express contributors"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

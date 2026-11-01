@@ -1,0 +1,9 @@
+target/
+__pycache__/
+build-log.txt
+test-log.txt
+rules-log.txt
+check-log.txt
+clicks-test-log.txt
+export-demo-log.txt
+export-demo-output/

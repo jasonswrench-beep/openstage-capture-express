@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1024" height="1024" viewBox="0 0 1024 1024" version="1.1" role="img" aria-labelledby="title description">
+  <title id="title">Open Capture Express — OpenStage Suite icon</title>
+  <desc id="description">A bright indigo open viewfinder with a rounded lowercase e at its center for Express. Matches the OpenStage Suite navy rounded tile and stroke style. Editable vector artwork with transparent outer corners.</desc>
+  <defs>
+    <linearGradient id="navy" x1="0" y1="0" x2="768" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#102037"/>
+      <stop offset="1" stop-color="#0B172A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="180" y1="160" x2="844" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9CA5FF"/>
+      <stop offset="1" stop-color="#7D87F2"/>
+    </linearGradient>
+  </defs>
+  <g id="Tile" inkscape:label="Navy tile">
+    <rect id="navy-tile" x="0" y="0" width="1024" height="1024" rx="164" fill="url(#navy)"/>
+  </g>
+  <g id="Symbol" inkscape:label="Open Capture Express symbol" fill="none" stroke="url(#accent)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+      <path id="viewfinder-top-left" d="M366 260 H246 Q208 260 208 298 V406"/>
+      <path id="viewfinder-top-right" d="M618 260 H720 Q760 260 760 300 V406"/>
+      <path id="viewfinder-bottom-left" d="M208 646 V752 Q208 794 250 794 H366"/>
+      <path id="viewfinder-bottom-right" d="M618 794 H720 Q760 794 760 754 V646"/>
+      <path id="extended-corner" d="M742 160 H864 V296"/>
+      <path id="express-letter-e" d="M372 526 H600 C600 460 554 412 490 412 C418 412 370 464 370 536 C370 608 420 662 492 662 C534 662 568 648 590 624" fill="none" stroke="url(#accent)" stroke-width="60" stroke-linejoin="round"/>
+  </g>
+</svg>
