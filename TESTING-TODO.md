@@ -140,6 +140,15 @@ submit an assignment") to open from the card under "Your guides".
       crop you set. Is a tenth of the crop the right size for one press, and would you like a mouse wheel or keys for zooming? One
       Undo should take back each press and each drag. Narrator and NVDA: the words above the buttons, the seven buttons and the
       status line ("Moved the crop right. The crop shows ...") should be read.
+- [ ] Save a copy as one file (on a guide you can spare, with a blur on one step and one step skipped): on the Export screen leave
+      "Include the original pictures" off and press "Save a copy as one file". Open the new `...osguide.zip` in Explorer: it should hold
+      `guide.json`, `README.txt` and `images`, and no `trash`. Then on Home press "Open a copy", paste the file's place (with the
+      quotation marks Explorer's "Copy as path" adds) and open it: you get a new guide with the marks drawn into the pictures, no
+      marks to edit, the skipped step missing and the blur unable to be undone. Do it again with the original pictures ticked: the
+      blur should be removable, and the skipped step there. Try Browse (Windows' own file dialog, never run by anyone yet). Try the
+      copy on another PC, and try a zip that is not a copy (it should say so, in words, and make nothing). Narrator and NVDA: the
+      Export section, the Open a copy screen and its messages should be read. Does the default (marks drawn in, skipped steps left
+      out) match what you would want to send someone?
 - [ ] Not built in the editor yet: the focused view for a whole guide at once (it is set on each step), and cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
       Settings, Folders to it): Rename opens a box with the name, Enter saves, Escape cancels; Delete asks first with Keep it ready,

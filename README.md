@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 766 passed (264 in the core, 182 in the exports, 44 in the
-  Windows crate, 276 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 800 passed (269 in the core, 200 in the exports, 44 in the
+  Windows crate, 287 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -121,6 +121,26 @@ Written and type-checked, not yet run on Windows:
   the same second hid it; a test that does not depend on the clock now catches it). Fifteen more deliberate faults in the emptying
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
   only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
+
+- A copy of a guide as one file, and opening one (spec A8 and P5, written and tested 2026-11-01; Jason said 'Yes, build it'). On the
+  Export screen a new section, "A copy as one file", has a tick "Include the original pictures" (off) and a button "Save a copy as one
+  file". It writes `Title.osguide.zip` into a `copy` folder inside the run's new folder (nothing already there is replaced), says where
+  and how big, and shows the folder. Off, the copy is made to share: each picture has its marks drawn into it (blur included, so it
+  cannot be undone) and the original pictures are not in the file; steps you skipped are left out. On, it is the guide exactly as it
+  is with the original pictures, so a blur can be taken away by whoever opens it, and the screen says so. Deleted steps and their
+  pictures are never in a copy (a test on a real folder checks the zip holds no `trash` and not the deleted picture). On Home, "Open a
+  copy" (after Trash) opens a screen with a box for the file's place (quotation marks and spaces round a pasted path are removed),
+  a Browse button (Windows' own file dialog: written and type-checked, not run) and "Open the copy", which makes a new guide of your
+  own in the guides folder (new id, never over a folder that is there) and opens it in the editor; the file is only read. The reader
+  treats the file as untrusted (`docs/guide-format.md`): unsafe names, bombs, damage, encryption, ZIP64 and oversize files are refused
+  in words, a cut-short or changed file is noticed by its sizes and check numbers, and a test cuts a copy at every length and changes
+  its bytes without any panic. A guide folder zipped by hand opens too. New core pieces: `read_guide` and
+  `GuideFolder::create_with_pictures` (which removes its own half-made folder if anything fails), a production ZIP reader in
+  `zip.rs`, and `share.rs`. Twenty deliberate faults were each caught by a test, except that taking away the check for a leading
+  slash in a file name changes nothing, because a leading slash also gives an empty part, which is refused anyway (two checks for the
+  same danger on purpose). Both new screens were drawn by the real program in both colour schemes. Nobody has used it by hand,
+  Browse has never been run, and Narrator and NVDA have not read the new screens. One thing to know: text marks and step-number digits are drawn as blocks of letters by the program as it stands (it uses a
+  test renderer for the editor and every export), so they are blocks in a copy too; see the next item.
 
 - Moving and zooming the focused crop by hand (spec E5, written and tested 2026-11-01; Jason said 'Yes, build it'). When a step's
   Focused view is on, the details show where its crop is in words ("The crop shows 67 percent of the picture across: 853 by 480 of
@@ -247,7 +267,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, a "Save a copy as one file",
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display,
 the focused view for a whole guide at once (it is per step), options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window

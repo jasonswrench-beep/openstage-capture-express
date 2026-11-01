@@ -178,6 +178,8 @@ fn sort_cards(cards: &mut [GuideCard], sort: HomeSort) {
 pub enum Action {
     None,
     Open(usize),
+    /// Open a guide that was saved as one file.
+    OpenCopy,
     StartCapturing,
     Settings,
     About,
@@ -227,6 +229,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
             }
             if widgets::button(ui, "Trash").clicked() {
                 action = Action::Trash;
+            }
+            if widgets::button(ui, "Open a copy").clicked() {
+                action = Action::OpenCopy;
             }
         });
         ui.add_space(14.0);

@@ -11,6 +11,7 @@ use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
 use openstage_express_core::hotkey::{self, HotkeySet, KeyCombo};
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
+use openstage_express_export::share::CopyOptions;
 
 use super::about;
 use super::bar::{self, BarAction, BarView};
@@ -24,6 +25,7 @@ use super::editor::{self, Leave};
 use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
+use super::open_copy::{self, OpenCopyAction, OpenCopyState};
 use super::rows::{step_count, steps_words};
 use super::settings::{self as settings_screen, HotkeyEdit, SettingsAction, SettingsInfo};
 use super::trash::{self, TrashAction, TrashState};
@@ -36,6 +38,9 @@ use openstage_express_core::area::AreaRect;
 
 /// Asks the person for a folder (Windows' own dialog), starting at the one given; None when they cancel.
 pub type FolderChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
+
+/// Asks the person for a file (Windows' own dialog), starting in the folder given; None when they cancel.
+pub type FileChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
 
 /// The height of the line at the foot of the window.
 const STATUS_HEIGHT: f32 = 34.0;
@@ -54,6 +59,8 @@ pub enum Screen {
     Trash,
     /// The steps deleted from the open guide, which can be put back.
     DeletedSteps,
+    /// A guide saved as one file (a copy), to be opened as a new guide.
+    OpenCopy,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
     /// The list of open windows, to choose the one to capture (still on top, taller than the bar).
@@ -104,6 +111,8 @@ pub struct App {
     /// Something to say about the settings file (damaged, newer), shown on the Settings screen.
     settings_note: Option<String>,
     export_job: Option<Receiver<Result<Report, String>>>,
+    /// A copy as one file being made on its own thread.
+    copy_job: Option<Receiver<Result<export_run::CopyReport, String>>>,
     /// What to capture, as chosen so far.
     pub target: Target,
     desktop: Box<dyn Desktop>,
@@ -111,6 +120,10 @@ pub struct App {
     area_screen: Option<AreaScreen>,
     /// Asks the person for a folder (Windows' own dialog), starting at the one given.
     chooser: FolderChooser,
+    /// Asks the person for a copy saved as one file (Windows' own dialog).
+    file_chooser: FileChooser,
+    /// The Open a copy screen: the path typed or chosen, and what the last try said.
+    open_copy: OpenCopyState,
     /// Shows a folder to the person (opens it in Explorer).
     opener: Box<dyn Fn(&Path)>,
 }
@@ -141,11 +154,14 @@ impl App {
             settings_path: None,
             settings_note: None,
             export_job: None,
+            copy_job: None,
             target: Target::default(),
             desktop: Box::new(NoDesktop),
             window_list: WindowList::default(),
             area_screen: None,
             chooser: Box::new(|_| None),
+            file_chooser: Box::new(|_| None),
+            open_copy: OpenCopyState::new(),
             opener: Box::new(|_| {}),
         };
         match screen {
@@ -163,6 +179,7 @@ impl App {
                 app.delete_demo_steps();
                 app.screen = Screen::DeletedSteps;
             }
+            Screen::OpenCopy => app.screen = Screen::OpenCopy,
             Screen::Home => {}
         }
         app
@@ -196,6 +213,18 @@ impl App {
         self.export = ExportState::new(exports, can_pdf);
         self.chooser = chooser;
         self.opener = opener;
+        self
+    }
+
+    /// What is in the Open a copy screen's box (for the tests).
+    #[cfg(test)]
+    pub fn open_copy_path(&self) -> &str {
+        &self.open_copy.path
+    }
+
+    /// Give the program a way to ask for a copy saved as one file.
+    pub fn with_file_chooser(mut self, chooser: FileChooser) -> App {
+        self.file_chooser = chooser;
         self
     }
 
@@ -352,7 +381,7 @@ impl App {
 
     /// Whether an export is being made on its thread.
     pub fn is_exporting(&self) -> bool {
-        self.export_job.is_some()
+        self.export_job.is_some() || self.copy_job.is_some()
     }
 
     fn open_example(&mut self) {
@@ -438,6 +467,7 @@ impl App {
                 | Screen::Settings
                 | Screen::About
                 | Screen::Trash
+                | Screen::OpenCopy
                 | Screen::DeletedSteps => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
@@ -537,8 +567,58 @@ impl App {
         }
     }
 
+    /// Take what the copy as one file has said, if it has finished.
+    fn poll_copy(&mut self) {
+        let Some(job) = &self.copy_job else { return };
+        let answer = match job.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("Making the copy stopped without an answer.".to_string()),
+        };
+        self.copy_job = None;
+        self.export.working = false;
+        match answer {
+            Ok(report) => {
+                let sentence = report.sentence();
+                if self.export.open_after {
+                    (self.opener)(&report.folder);
+                }
+                self.export.said = Some(sentence.clone());
+                self.status.say(sentence);
+            }
+            Err(why) => {
+                let words = format!("The copy was not made. {why}");
+                self.export.said = Some(words.clone());
+                self.status.say(words);
+            }
+        }
+    }
+
+    /// Start saving the open guide as one file, in a new folder beside the exports.
+    fn start_copy(&mut self) {
+        if self.export_job.is_some() || self.copy_job.is_some() {
+            return;
+        }
+        let Some(editor) = self.editor.as_mut() else { return };
+        editor.commit_pending();
+        let guide = editor.doc().guide.clone();
+        let folder = self
+            .export
+            .folder
+            .join(sanitise_folder_name(&guide.title))
+            .join(export_run::run_folder_name(&utc_now_iso()))
+            .join("copy");
+        let options = CopyOptions { include_originals: self.export.copy_originals };
+        let job = export_run::CopyJob { guide, pictures: editor.pictures(), options, folder };
+        self.copy_job = Some(export_run::spawn_copy(job));
+        self.export.working = true;
+        self.export.said = None;
+        self.status.say("Saving a copy as one file. Please wait.");
+    }
+
     /// Take what the export has said, if it has finished.
     fn poll_export(&mut self) {
+        self.poll_copy();
         let Some(job) = &self.export_job else { return };
         let answer = match job.try_recv() {
             Ok(answer) => answer,
@@ -565,7 +645,7 @@ impl App {
     }
 
     fn start_export(&mut self) {
-        if self.export_job.is_some() {
+        if self.export_job.is_some() || self.copy_job.is_some() {
             return;
         }
         if self.export.selection.is_empty() {
@@ -678,6 +758,11 @@ impl App {
                     format!("The Trash has {n} guide{}. Restore brings one back.", if n == 1 { "" } else { "s" })
                 });
             }
+            Action::OpenCopy => {
+                self.open_copy = OpenCopyState::new();
+                self.screen = Screen::OpenCopy;
+                self.status.say("Open a copy. Type or paste the place of the file, or choose it with Browse.");
+            }
             Action::Open(index) => match self.home.guides.get(index).and_then(|g| g.path.clone()) {
                 Some(path) => self.open_guide(&path),
                 None => self.open_example(),
@@ -713,6 +798,32 @@ impl App {
                 self.home.set_sort(next);
                 self.save_settings();
                 self.status.say(format!("Sorted by {}.", next.name()));
+            }
+        }
+    }
+
+    /// Make a new guide of the person's own from the copy they named, and open it.
+    fn open_a_copy(&mut self) {
+        let path = PathBuf::from(self.open_copy.clean_path());
+        match library::open_copy(&path, &self.library) {
+            Ok(opened) => {
+                self.refresh_home();
+                self.open_guide(&opened.guide);
+                let mut words = format!(
+                    "Opened a copy of {} as a new guide of your own, with {}. The file was not changed.",
+                    opened.title,
+                    steps_words(opened.steps)
+                );
+                if !opened.warnings.is_empty() {
+                    words.push_str(&format!(" To know: {}", opened.warnings.join(" ")));
+                }
+                // The guide's own opening said something; this is the more useful thing to hear.
+                self.status.say(words);
+                self.open_copy = OpenCopyState::new();
+            }
+            Err(why) => {
+                self.open_copy.said = Some(why.clone());
+                self.status.say(why);
             }
         }
     }
@@ -782,6 +893,28 @@ impl App {
                     self.status.say("Showing the Trash folder in Explorer.");
                 }
                 TrashAction::Restore(index) => self.restore_from_trash(index),
+            },
+            Screen::OpenCopy => match open_copy::show(ui, &mut self.open_copy) {
+                OpenCopyAction::None => {}
+                OpenCopyAction::Back => {
+                    self.screen = Screen::Home;
+                    self.status.say("Back at your guides.");
+                }
+                OpenCopyAction::Browse => {
+                    // Start where copies are saved, or in the folder of the file already named.
+                    let named = PathBuf::from(self.open_copy.clean_path());
+                    let start = named
+                        .parent()
+                        .filter(|p| p.is_dir())
+                        .map(Path::to_path_buf)
+                        .unwrap_or(self.export.folder.clone());
+                    if let Some(chosen) = (self.file_chooser)(&start) {
+                        self.open_copy.path = chosen.display().to_string();
+                        self.open_copy.said = None;
+                        self.status.say(format!("Chosen: {}. Press Open the copy.", chosen.display()));
+                    }
+                }
+                OpenCopyAction::Open => self.open_a_copy(),
             },
             Screen::DeletedSteps => {
                 let Some(editor) = self.editor.as_mut() else {
@@ -974,6 +1107,7 @@ impl App {
                         }
                     }
                     ExportAction::Export => self.start_export(),
+                    ExportAction::SaveCopy => self.start_copy(),
                 }
                 self.sync_export_settings();
             }

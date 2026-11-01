@@ -87,6 +87,18 @@ fn read_json(path: &Path, what: &str) -> Result<Value, StoreError> {
         .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: format!("it is not valid JSON ({e})") })
 }
 
+/// Read a guide from the bytes of a `guide.json`, whether it came from a guide folder or from inside a copy shared as one file:
+/// bring it up to date and make sure it is a guide. Returns the guide and the format version it had if it was brought up to date.
+/// A guide made by a newer Express is refused. `what` names the file in the messages.
+pub fn read_guide(bytes: &[u8], what: &str) -> Result<(Guide, Option<String>), StoreError> {
+    let mut value: Value = serde_json::from_slice(bytes)
+        .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: format!("it is not valid JSON ({e})") })?;
+    let migrated_from = bring_up_to_date(&mut value, SCHEMA_VERSION, MIGRATIONS, what)?;
+    let guide: Guide = serde_json::from_value(value)
+        .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: e.to_string() })?;
+    Ok((guide, migrated_from))
+}
+
 fn to_json_bytes<T: serde::Serialize>(value: &T) -> Vec<u8> {
     let mut bytes = serde_json::to_vec_pretty(value).expect("guide data always serialises");
     bytes.push(b'\n');
@@ -115,6 +127,66 @@ impl GuideFolder {
         Ok(folder)
     }
 
+    /// Make a new guide folder inside `parent` (named from the guide's title, never the name of a folder that is already there) from
+    /// a guide and its picture files, each a name like `images/step-0001.png` and the bytes of a PNG. The guide is written last, so a
+    /// folder with a guide in it always has its pictures. If anything goes wrong the new folder is removed again (only that one, which
+    /// this call made) and the error is returned. The folder comes back open, with the lock taken.
+    pub fn create_with_pictures(
+        parent: &Path,
+        doc: &Document,
+        pictures: &[(String, Vec<u8>)],
+    ) -> Result<GuideFolder, StoreError> {
+        let mut seen = BTreeSet::new();
+        for (logical, bytes) in pictures {
+            let Some(name) = picture_name(logical) else {
+                return Err(StoreError::Damaged {
+                    what: logical.clone(),
+                    detail: "it is not a name a picture may have".to_string(),
+                });
+            };
+            if !seen.insert(name) {
+                return Err(StoreError::Damaged {
+                    what: logical.clone(),
+                    detail: "it is in the list twice".to_string(),
+                });
+            }
+            if bytes.len() < PNG_MAGIC.len() || bytes[..PNG_MAGIC.len()] != PNG_MAGIC {
+                return Err(StoreError::NotAPng);
+            }
+        }
+        let root = unique_guide_folder(parent, &doc.guide.title);
+        fs::create_dir_all(&root).map_err(io_error(format!("The folder {} could not be made", root.display())))?;
+        match Self::fill_new_folder(&root, doc, pictures) {
+            Ok(folder) => Ok(folder),
+            Err(error) => {
+                // Only the folder just made is removed, so no half-made guide is left in the list.
+                let _ = fs::remove_dir_all(&root);
+                Err(error)
+            }
+        }
+    }
+
+    fn fill_new_folder(root: &Path, doc: &Document, pictures: &[(String, Vec<u8>)]) -> Result<GuideFolder, StoreError> {
+        for dir in [root.join(IMAGES_DIR), root.join(TRASH_DIR)] {
+            fs::create_dir_all(&dir).map_err(io_error(format!("The folder {} could not be made", dir.display())))?;
+        }
+        for (logical, bytes) in pictures {
+            let name = picture_name(logical).expect("the names were checked");
+            write_atomic(&root.join(IMAGES_DIR).join(name), bytes)
+                .map_err(io_error(format!("The picture {name} could not be saved")))?;
+        }
+        let mut folder = GuideFolder {
+            root: root.to_path_buf(),
+            owns_lock: false,
+            read_only: false,
+            backup_before_first_save: None,
+        };
+        folder.write_lock()?;
+        folder.owns_lock = true;
+        folder.save(doc)?;
+        Ok(folder)
+    }
+
     /// Open a guide folder. `is_running` says whether a process id belongs to a running copy of Express (the Windows
     /// part supplies the real answer; tests supply a fake). A guide that another copy has open opens read-only.
     pub fn open(root: &Path, is_running: &dyn Fn(u32) -> bool) -> Result<Opened, StoreError> {
@@ -122,10 +194,8 @@ impl GuideFolder {
         if !guide_path.is_file() {
             return Err(StoreError::NotAGuide(root.display().to_string()));
         }
-        let mut value = read_json(&guide_path, GUIDE_FILE)?;
-        let migrated_from = bring_up_to_date(&mut value, SCHEMA_VERSION, MIGRATIONS, GUIDE_FILE)?;
-        let guide: Guide = serde_json::from_value(value)
-            .map_err(|e| StoreError::Damaged { what: GUIDE_FILE.to_string(), detail: e.to_string() })?;
+        let bytes = fs::read(&guide_path).map_err(io_error(format!("{GUIDE_FILE} could not be read")))?;
+        let (guide, migrated_from) = read_guide(&bytes, GUIDE_FILE)?;
         let problems = guide.problems();
 
         let trash_path = root.join(TRASH_DIR).join(TRASH_FILE);
@@ -597,6 +667,100 @@ mod tests {
         assert!(!session.can_undo());
         let saved: Value = serde_json::from_slice(&fs::read(folder.path().join("trash/trash.json")).unwrap()).unwrap();
         assert_eq!(saved["entries"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn a_guide_and_its_pictures_make_a_new_folder_that_opens_the_same_and_never_takes_another_folders_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (original, d) = guide_with_pictures(dir.path());
+        let pictures: Vec<(String, Vec<u8>)> = ["images/step-0001.png", "images/step-0002.png"]
+            .iter()
+            .map(|logical| (logical.to_string(), fs::read(original.path().join(logical)).unwrap()))
+            .collect();
+        let target = tempfile::tempdir().unwrap();
+        let first = GuideFolder::create_with_pictures(target.path(), &d, &pictures).unwrap();
+        let second = GuideFolder::create_with_pictures(target.path(), &d, &pictures).unwrap();
+        assert!(first.path().ends_with("Test guide.osguide"), "{:?}", first.path());
+        assert!(second.path().ends_with("Test guide (2).osguide"), "a folder already there is never taken over");
+        for (logical, bytes) in &pictures {
+            assert_eq!(&fs::read(first.path().join(logical)).unwrap(), bytes);
+        }
+        let path = first.path().to_path_buf();
+        drop(first);
+        let opened = GuideFolder::open(&path, &never_running).unwrap();
+        assert_eq!(opened.doc, d);
+        assert!(opened.problems.is_empty(), "{:?}", opened.problems);
+    }
+
+    #[test]
+    fn a_bad_picture_name_or_a_picture_that_is_not_a_png_makes_no_folder_at_all() {
+        let target = tempfile::tempdir().unwrap();
+        let d = doc();
+        let good = png();
+        for name in
+            ["images/../evil.png", "evil.png", "images/a/b.png", "images/.hidden", "/images/x.png", "images\\x.png"]
+        {
+            let result = GuideFolder::create_with_pictures(target.path(), &d, &[(name.to_string(), good.clone())]);
+            assert!(matches!(result, Err(StoreError::Damaged { .. })), "{name}: {result:?}");
+        }
+        let not_png =
+            GuideFolder::create_with_pictures(target.path(), &d, &[("images/x.png".into(), b"GIF89a".to_vec())]);
+        assert!(matches!(not_png, Err(StoreError::NotAPng)));
+        let twice = GuideFolder::create_with_pictures(
+            target.path(),
+            &d,
+            &[("images/x.png".into(), good.clone()), ("images/x.png".into(), good)],
+        );
+        assert!(matches!(twice, Err(StoreError::Damaged { .. })));
+        assert_eq!(fs::read_dir(target.path()).unwrap().count(), 0, "nothing was made");
+    }
+
+    #[test]
+    fn a_file_that_has_the_guides_folder_name_is_left_alone_and_the_next_free_name_is_used() {
+        let target = tempfile::tempdir().unwrap();
+        let mut d = doc();
+        d.guide.title = "Blocked".to_string();
+        fs::write(target.path().join("Blocked.osguide"), b"a file, not a folder").unwrap();
+        let made = GuideFolder::create_with_pictures(target.path(), &d, &[]).unwrap();
+        assert!(made.path().ends_with("Blocked (2).osguide"));
+        assert_eq!(fs::read(target.path().join("Blocked.osguide")).unwrap(), b"a file, not a folder");
+    }
+
+    #[test]
+    fn a_picture_that_cannot_be_written_removes_the_folder_that_was_being_made_and_nothing_else() {
+        let target = tempfile::tempdir().unwrap();
+        fs::create_dir(target.path().join("Another guide.osguide")).unwrap();
+        fs::write(target.path().join("Another guide.osguide").join("guide.json"), b"{}").unwrap();
+        // A name that passes the checks but is too long for any file system, so writing it fails after the folder was made.
+        let too_long = format!("images/{}.png", "a".repeat(300));
+        let result = GuideFolder::create_with_pictures(target.path(), &doc(), &[(too_long, png())]);
+        assert!(matches!(result, Err(StoreError::Io { .. })), "{result:?}");
+        let left: Vec<String> = fs::read_dir(target.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(left, ["Another guide.osguide"], "the half-made folder is gone and the other guide is untouched");
+        assert!(target.path().join("Another guide.osguide/guide.json").is_file());
+    }
+
+    #[test]
+    fn a_guide_is_read_from_bytes_the_same_way_whether_from_a_folder_or_a_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let (folder, d) = guide_with_pictures(dir.path());
+        let bytes = fs::read(folder.path().join("guide.json")).unwrap();
+        let (guide, migrated) = read_guide(&bytes, "guide.json").unwrap();
+        assert_eq!(guide, d.guide);
+        assert_eq!(migrated, None);
+        assert!(matches!(read_guide(b"not json", "guide.json"), Err(StoreError::Damaged { .. })));
+        assert!(matches!(
+            read_guide(b"{}", "guide.json"),
+            Err(StoreError::Damaged { .. } | StoreError::NoMigrationPath(_))
+        ));
+        let mut value: Value = serde_json::from_slice(&bytes).unwrap();
+        value["schemaVersion"] = Value::String("99.0.0".to_string());
+        let newer = serde_json::to_vec(&value).unwrap();
+        assert!(matches!(read_guide(&newer, "guide.json"), Err(StoreError::TooNew)), "a newer guide is refused");
     }
 
     /// A guide whose first two steps are deleted, saved, with the session that did it.

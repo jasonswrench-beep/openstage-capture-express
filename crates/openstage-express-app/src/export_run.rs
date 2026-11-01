@@ -19,7 +19,8 @@ use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
 use openstage_express_export::picture::PictureSource;
 use openstage_express_export::plan::{plan as make_plan, ExportOptions, Plan};
 use openstage_express_export::pptx::{export_pptx, PptxOptions};
-use openstage_express_export::Export;
+use openstage_express_export::share::{make_copy, CopyOptions};
+use openstage_express_export::{Export, OutFile};
 
 /// One kind of export the person can choose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -273,6 +274,95 @@ pub fn spawn(job: Job) -> Receiver<Result<Report, String>> {
         // Nothing was started, so say so through the same channel.
         let (tx, rx2) = mpsc::channel();
         let _ = tx.send(Err(format!("The program could not start the export: {why}")));
+        return rx2;
+    }
+    rx
+}
+
+/// What making a one-file copy of a guide needs, owned, so that it can be made on a thread of its own.
+pub struct CopyJob {
+    pub guide: Guide,
+    pub pictures: Arc<dyn PictureSource + Send + Sync>,
+    pub options: CopyOptions,
+    /// The new folder the file goes into.
+    pub folder: PathBuf,
+}
+
+/// What a copy made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyReport {
+    /// The file that was made.
+    pub file: PathBuf,
+    /// The folder it is in.
+    pub folder: PathBuf,
+    pub size: usize,
+    pub steps: usize,
+    pub pictures: usize,
+    pub left_out: usize,
+    pub with_originals: bool,
+    pub warnings: Vec<String>,
+}
+
+impl CopyReport {
+    /// A few sentences for the status line.
+    pub fn sentence(&self) -> String {
+        let mut words = format!(
+            "Saved a copy as one file: {} ({:.1} MB), with {} and {}.",
+            self.file.display(),
+            self.size as f64 / 1_048_576.0,
+            crate::ui::rows::steps_words(self.steps),
+            if self.pictures == 1 { "1 picture".to_string() } else { format!("{} pictures", self.pictures) },
+        );
+        if self.with_originals {
+            words.push_str(" The original pictures are in it, so a blur can be taken away by whoever opens it.");
+        } else {
+            words.push_str(" The marks are drawn into the pictures and the originals are not in it.");
+            if self.left_out > 0 {
+                let n = self.left_out;
+                words.push_str(&format!(" {n} skipped step{} left out.", if n == 1 { " was" } else { "s were" }));
+            }
+        }
+        if !self.warnings.is_empty() {
+            let n = self.warnings.len();
+            words.push_str(&format!(" {n} warning{}: {}", if n == 1 { "" } else { "s" }, self.warnings.join(" ")));
+        }
+        words
+    }
+}
+
+/// Make a one-file copy of a guide in `folder` (made if needed). The file is never put over one that is already there.
+pub fn make_one_file_copy(
+    guide: &Guide,
+    pictures: &dyn PictureSource,
+    text: &dyn TextRenderer,
+    options: &CopyOptions,
+    folder: &Path,
+) -> Result<CopyReport, String> {
+    let made = make_copy(guide, pictures, text, options).map_err(|e| e.to_string())?;
+    let export =
+        Export { files: vec![OutFile { path: made.file_name.clone(), bytes: made.zip.clone() }], warnings: Vec::new() };
+    let written = export.write_to(folder).map_err(|e| e.to_string())?;
+    Ok(CopyReport {
+        file: written.into_iter().next().unwrap_or_else(|| folder.join(&made.file_name)),
+        folder: folder.to_path_buf(),
+        size: made.zip.len(),
+        steps: made.steps,
+        pictures: made.pictures,
+        left_out: made.left_out,
+        with_originals: options.include_originals,
+        warnings: made.warnings,
+    })
+}
+
+/// Make the copy on a thread of its own. The answer arrives on the returned channel.
+pub fn spawn_copy(job: CopyJob) -> Receiver<Result<CopyReport, String>> {
+    let (tx, rx) = mpsc::channel();
+    let started = std::thread::Builder::new().name("express-copy".into()).spawn(move || {
+        let _ = tx.send(make_one_file_copy(&job.guide, &*job.pictures, &BlockText, &job.options, &job.folder));
+    });
+    if let Err(why) = started {
+        let (tx, rx2) = mpsc::channel();
+        let _ = tx.send(Err(format!("The program could not start making the copy: {why}")));
         return rx2;
     }
     rx

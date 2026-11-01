@@ -15,6 +15,13 @@ pub const MAX_SIDE: u32 = 16_384;
 pub trait PictureSource {
     /// The original picture named `images/step-0001.png` (as a step names it), if there is one and it can be read.
     fn picture(&self, logical: &str) -> Option<Picture>;
+
+    /// The picture exactly as it is stored: the bytes of its PNG file, if the source keeps it that way. A source that holds only
+    /// pixels writes them out again as a PNG, which looks the same.
+    fn png_bytes(&self, logical: &str) -> Option<Vec<u8>> {
+        let picture = self.picture(logical)?;
+        Some(encode_png(&Canvas { width: picture.width, height: picture.height, bgra: picture.bgra }))
+    }
 }
 
 /// Pictures from an open guide folder (looking in `images` and then `trash`).
@@ -26,6 +33,10 @@ impl PictureSource for FolderPictures<'_> {
     fn picture(&self, logical: &str) -> Option<Picture> {
         let path = self.folder.picture_path(logical)?;
         decode_png(&std::fs::read(path).ok()?).ok()
+    }
+
+    fn png_bytes(&self, logical: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.folder.picture_path(logical)?).ok()
     }
 }
 
@@ -44,6 +55,15 @@ impl PictureSource for DiskPictures {
         let name = logical.strip_prefix("images/")?;
         let path = ["images", "trash"].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())?;
         decode_png(&std::fs::read(path).ok()?).ok()
+    }
+
+    fn png_bytes(&self, logical: &str) -> Option<Vec<u8>> {
+        if !openstage_express_core::model::is_safe_picture_path(logical) {
+            return None;
+        }
+        let name = logical.strip_prefix("images/")?;
+        let path = ["images", "trash"].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())?;
+        std::fs::read(path).ok()
     }
 }
 
