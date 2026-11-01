@@ -2154,3 +2154,262 @@ fn the_sound_check_boxes_are_in_settings_and_the_hear_buttons_play_even_when_a_s
     let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
     assert!(back.sounds.step && !back.sounds.start_and_stop && !back.sounds.problem);
 }
+
+// ---- drawing a new mark by dragging on the picture
+
+use openstage_express_core::marks::Tool;
+use openstage_express_core::model::AnnotationKind;
+
+const SHAPES_HEADING: &str = "Draw a shape with the mouse";
+
+impl Harness {
+    /// Every node that is named `words` and can be pressed.
+    fn pressable_named(&self, words: &str) -> Vec<NodeId> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.name(*id).is_some_and(|w| w.trim_end() == words) && self.nodes[id].supports_action(Action::Click)
+            })
+            .collect()
+    }
+
+    /// Press the one control named `words`, whatever its role (a heading that folds open, for example).
+    fn invoke_named(&mut self, words: &str) {
+        let found = self.pressable_named(words);
+        assert_eq!(found.len(), 1, "expected one pressable {words:?}, found {}.\n{}", found.len(), self.dump());
+        self.events.push(Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: found[0],
+            data: None,
+        }));
+        self.settle();
+    }
+}
+
+/// Where a point of the picture is on the screen, for the mouse.
+fn picture_mapper(h: &Harness) -> impl Fn(i32, i32) -> Pos2 {
+    let image =
+        h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).expect("the picture is in the tree");
+    let b = h.node(image).bounds().expect("the picture has a place");
+    let (picture_w, _) = the_editor(h).picture_size().unwrap();
+    let scale = (b.x1 - b.x0) as f32 / picture_w as f32;
+    move |x, y| Pos2::new(b.x0 as f32 + x as f32 * scale, b.y0 as f32 + y as f32 * scale)
+}
+
+fn primary(pos: Pos2, pressed: bool) -> Event {
+    Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: NO_MODS }
+}
+
+/// Press at `from` and move to `to`, leaving the button down.
+fn press_and_move(h: &mut Harness, from: Pos2, to: Pos2) {
+    h.events.push(Event::PointerMoved(from));
+    h.frame();
+    h.events.push(primary(from, true));
+    h.frame();
+    h.events.push(Event::PointerMoved(to));
+    h.frame();
+    h.frame();
+}
+
+fn let_go(h: &mut Harness, at: Pos2) {
+    h.events.push(primary(at, false));
+    h.frame();
+    h.settle();
+}
+
+/// A window on the editor with the folded choices opened and `tool` chosen.
+fn drawing_harness(tool_choice: &str) -> Harness {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke_named(SHAPES_HEADING);
+    h.invoke(Role::RadioButton, tool_choice);
+    h
+}
+
+#[test]
+fn the_shapes_to_draw_are_folded_behind_one_heading_and_unfold_to_ten_choices() {
+    let mut h = Harness::new(Screen::Editor);
+    assert!(
+        !h.has(Role::RadioButton, "Draw a rectangle"),
+        "folded away to begin with, so the keyboard passes one stop"
+    );
+    h.invoke_named(SHAPES_HEADING);
+    let none = h.find(Role::RadioButton, "Do not draw (pick and move marks)");
+    assert_eq!(h.node(none).toggled(), Some(accesskit::Toggled::True), "no shape is chosen to begin with");
+    for name in [
+        "Draw a rectangle",
+        "Draw an oval",
+        "Draw a line",
+        "Draw an arrow",
+        "Draw a text",
+        "Draw a step number",
+        "Draw a highlight",
+        "Draw a blur",
+        "Draw a spotlight",
+    ] {
+        let id = h.find(Role::RadioButton, name);
+        assert_eq!(h.node(id).toggled(), Some(accesskit::Toggled::False), "{name}");
+    }
+}
+
+#[test]
+fn a_step_without_a_picture_offers_no_drawing() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add a step");
+    h.find(Role::Label, "Marks need a picture.");
+    assert!(h.pressable_named(SHAPES_HEADING).is_empty());
+}
+
+#[test]
+fn choosing_a_shape_says_how_to_use_it_and_choosing_none_turns_it_off() {
+    let mut h = drawing_harness("Draw an oval");
+    assert_eq!(the_editor(&h).drawing_tool(), Some(Tool::Oval));
+    assert_eq!(h.status(), "Drag on the picture to draw an oval. Press Escape to stop.");
+    let oval = h.find(Role::RadioButton, "Draw an oval");
+    assert_eq!(h.node(oval).toggled(), Some(accesskit::Toggled::True));
+    h.invoke(Role::RadioButton, "Draw an arrow");
+    assert_eq!(the_editor(&h).drawing_tool(), Some(Tool::Arrow), "choosing another replaces it");
+    h.invoke(Role::RadioButton, "Do not draw (pick and move marks)");
+    assert_eq!(the_editor(&h).drawing_tool(), None);
+    assert_eq!(h.status(), "Drawing with the mouse is off.");
+}
+
+#[test]
+fn dragging_with_a_shape_chosen_draws_it_is_shown_while_dragging_and_is_one_change_and_one_undo() {
+    let mut h = drawing_harness("Draw an oval");
+    let before = h.mark_rows().len();
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(200, 150), at(500, 400));
+    assert!(the_editor(&h).is_drawing());
+    let preview = the_editor(&h).mark_being_drawn().expect("the shape is shown as it will be");
+    assert_eq!(preview.kind, AnnotationKind::Oval);
+    assert_eq!(h.mark_rows().len(), before, "it is not in the guide until the mouse is let go");
+    let_go(&mut h, at(500, 400));
+    assert!(!the_editor(&h).is_drawing());
+    assert_eq!(h.mark_rows().len(), before + 1);
+    let mark = the_selected_mark(&h);
+    assert_eq!(mark.kind, AnnotationKind::Oval);
+    let near = |a: i32, b: i32| (a - b).abs() <= 3;
+    assert!(
+        near(mark.x, 200) && near(mark.y, 150) && near(mark.width.unwrap(), 300) && near(mark.height.unwrap(), 250),
+        "{mark:?}"
+    );
+    assert!(h.status().starts_with("Drew an oval: Oval, "), "{}", h.status());
+    assert_eq!(the_editor(&h).drawing_tool(), None, "a shape is chosen for one drawing");
+    let none = h.find(Role::RadioButton, "Do not draw (pick and move marks)");
+    assert_eq!(h.node(none).toggled(), Some(accesskit::Toggled::True));
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.mark_rows().len(), before, "the whole drawing is one undo");
+}
+
+#[test]
+fn a_press_without_a_drag_places_the_usual_shape_where_it_was_pressed() {
+    let mut h = drawing_harness("Draw a rectangle");
+    let before = h.mark_rows().len();
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(800, 500), at(800, 500));
+    let_go(&mut h, at(800, 500));
+    assert_eq!(h.mark_rows().len(), before + 1);
+    let mark = the_selected_mark(&h);
+    let (cx, cy) = (mark.x + mark.width.unwrap() / 2, mark.y + mark.height.unwrap() / 2);
+    assert!((cx - 800).abs() <= 3 && (cy - 500).abs() <= 3, "centred where it was pressed: {mark:?}");
+    assert!(h.status().starts_with("Placed a rectangle: Rectangle"), "{}", h.status());
+}
+
+#[test]
+fn escape_stops_a_drawing_in_progress_and_then_turns_the_shape_off() {
+    let mut h = drawing_harness("Draw a line");
+    let before = h.mark_rows().len();
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(100, 100), at(600, 300));
+    assert!(the_editor(&h).is_drawing());
+    h.key(Key::Escape, NO_MODS);
+    assert!(!the_editor(&h).is_drawing());
+    assert_eq!(the_editor(&h).drawing_tool(), Some(Tool::Line), "the shape is still chosen for another try");
+    assert_eq!(h.status(), "Cancelled. Nothing was drawn.");
+    let_go(&mut h, at(600, 300));
+    assert_eq!(h.mark_rows().len(), before, "letting go after Escape adds nothing");
+    h.key(Key::Escape, NO_MODS);
+    assert_eq!(the_editor(&h).drawing_tool(), None);
+    assert_eq!(h.status(), "Drawing with the mouse is off.");
+}
+
+#[test]
+fn with_no_shape_chosen_a_drag_on_empty_picture_draws_nothing() {
+    let mut h = Harness::new(Screen::Editor);
+    let before = h.mark_rows().len();
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(1700, 1000), at(1500, 900));
+    assert!(!the_editor(&h).is_drawing());
+    let_go(&mut h, at(1500, 900));
+    assert_eq!(h.mark_rows().len(), before);
+}
+
+#[test]
+fn a_dragged_step_number_takes_the_next_number_and_a_drag_outside_the_picture_stays_on_it() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add step number");
+    h.invoke(Role::Button, "Add step number");
+    h.invoke_named(SHAPES_HEADING);
+    h.invoke(Role::RadioButton, "Draw a step number");
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(300, 300), at(360, 350));
+    let_go(&mut h, at(360, 350));
+    let mark = the_selected_mark(&h);
+    assert_eq!(mark.kind, AnnotationKind::Number);
+    assert_eq!(mark.number, Some(3), "after the two there already were");
+    assert!(mark.size.is_some_and(|s| (57..=63).contains(&s)), "{mark:?}");
+    assert!(h.status().starts_with("Drew a step number: Step number 3"), "{}", h.status());
+}
+
+#[test]
+fn a_drawing_in_progress_is_dropped_when_another_step_is_chosen_or_a_change_is_undone() {
+    let mut e = super::editor_state::EditorState::new(openstage_express_export::demo::demo());
+    e.choose_drawing_tool(Some(Tool::Rectangle));
+    assert!(e.begin_draw(50, 50));
+    e.draw_to(400, 300);
+    assert!(e.is_drawing() && e.mark_being_drawn().is_some());
+    let marks_before = e.marks().len();
+    e.select("step-2");
+    assert!(!e.is_drawing(), "another step was chosen");
+    assert!(e.mark_being_drawn().is_none());
+    assert_eq!(e.drawing_tool(), Some(Tool::Rectangle), "the shape stays chosen");
+    assert!(e.begin_draw(10, 10));
+    e.undo();
+    assert!(!e.is_drawing(), "an undo cannot happen under a drawing");
+    e.select("step-1");
+    assert_eq!(e.marks().len(), marks_before, "nothing was added by any of it");
+    assert!(e.end_draw().is_none(), "nothing is being drawn");
+}
+
+#[test]
+fn drawing_needs_a_chosen_shape_and_a_picture() {
+    let mut e = super::editor_state::EditorState::new(openstage_express_export::demo::demo());
+    assert!(!e.begin_draw(10, 10), "no shape is chosen");
+    assert!(e.cancel_draw().is_none(), "and so there is nothing to stop");
+    assert!(e.choose_drawing_tool(None).is_none(), "choosing none when none is chosen says nothing");
+    e.choose_drawing_tool(Some(Tool::Blur));
+    assert!(e.choose_drawing_tool(Some(Tool::Blur)).is_none(), "nor does choosing the same shape again");
+    assert!(e.begin_draw(10, 10));
+    assert_eq!(e.cancel_draw().as_deref(), Some("Cancelled. Nothing was drawn."));
+}
+
+#[test]
+fn a_shape_being_drawn_is_in_the_picture_until_it_is_cancelled() {
+    let mut e = super::editor_state::EditorState::new(openstage_express_export::demo::demo());
+    let ctx = egui::Context::default();
+    let plain = e.texture(&ctx).expect("the step has a picture");
+    assert_eq!(e.texture(&ctx).unwrap().id(), plain.id(), "the picture is kept while nothing changes");
+    e.choose_drawing_tool(Some(Tool::Rectangle));
+    assert!(e.begin_draw(50, 50));
+    e.draw_to(400, 300);
+    let during = e.texture(&ctx).unwrap();
+    assert_ne!(during.id(), plain.id(), "the shape is drawn into the picture while it is being drawn");
+    e.draw_to(500, 350);
+    assert_ne!(e.texture(&ctx).unwrap().id(), during.id(), "and follows the pointer");
+    assert!(e.cancel_draw().is_some());
+    let after = e.texture(&ctx).unwrap();
+    assert_ne!(after.id(), during.id(), "the picture is made again without the shape once it is cancelled");
+    assert_eq!(e.marks().len(), openstage_express_export::demo::demo().document.guide.steps[0].annotations.len());
+}

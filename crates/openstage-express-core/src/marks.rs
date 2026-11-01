@@ -50,6 +50,13 @@ impl Tool {
         }
     }
 
+    /// The name with its article, for a sentence: `a rectangle`, `an oval`, `an arrow`.
+    pub fn with_article(self) -> String {
+        let name = self.name();
+        let article = if name.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+        format!("{article} {name}")
+    }
+
     pub fn kind(self) -> AnnotationKind {
         match self {
             Tool::Rectangle => AnnotationKind::Rect,
@@ -150,6 +157,61 @@ pub fn default_mark(tool: Tool, picture_w: u32, picture_h: u32, around: Option<(
         Tool::Number => {
             mark.number = Some(taken + 1);
             mark.size = Some((h / 22).max(28));
+        }
+    }
+    keep_on_picture(&mut mark, picture_w, picture_h);
+    mark
+}
+
+/// How far a press has to be dragged, in picture pixels (in either direction), before it counts as drawing a shape. Less than that is
+/// a click, which places the tool's usual mark where the press was.
+pub const MIN_DRAG: i32 = 6;
+
+/// The mark a drag from `from` to `to` (points of the picture) draws with `tool`. A box fills the dragged rectangle, a line or an arrow
+/// runs from where the press was to where it was let go, text is put at the top left of the dragged rectangle (its width follows the
+/// drag when the drag is wide enough), and a step number is a circle across the longer side of the drag. A drag too short to mean
+/// anything is a click: the tool's usual mark, centred on the press. Both points are kept on the picture.
+pub fn drawn_mark(
+    tool: Tool,
+    from: (i32, i32),
+    to: (i32, i32),
+    picture_w: u32,
+    picture_h: u32,
+    taken: u32,
+) -> Annotation {
+    let (w, h) = (picture_w as i32, picture_h as i32);
+    let on_picture = |(x, y): (i32, i32)| (x.clamp(0, (w - 1).max(0)), y.clamp(0, (h - 1).max(0)));
+    let (from, to) = (on_picture(from), on_picture(to));
+    let (dx, dy) = ((to.0 - from.0).abs(), (to.1 - from.1).abs());
+    if dx < MIN_DRAG && dy < MIN_DRAG {
+        return default_mark(tool, picture_w, picture_h, Some(from), taken);
+    }
+    let (left, top) = (from.0.min(to.0), from.1.min(to.1));
+    let mut mark = Annotation::at("", tool.kind(), left, top);
+    match tool {
+        Tool::Rectangle | Tool::Oval | Tool::Highlight | Tool::Blur | Tool::Spotlight => {
+            mark.width = Some(dx);
+            mark.height = Some(dy);
+        }
+        Tool::Line | Tool::Arrow => {
+            mark.x = from.0;
+            mark.y = from.1;
+            mark.x2 = Some(to.0);
+            mark.y2 = Some(to.1);
+        }
+        Tool::Text => {
+            mark.text = Some("Text".to_string());
+            if dx >= MIN_SIDE * 4 {
+                mark.width = Some(dx);
+            }
+        }
+        Tool::Number => {
+            mark.number = Some(taken + 1);
+            let size = dx.max(dy).clamp(MIN_SIDE, w.min(h).max(MIN_SIDE));
+            mark.size = Some(size);
+            // Centred on the middle of the drag, and moved in if the circle would hang off the picture.
+            mark.x = (left + dx / 2).clamp(size / 2, (w - size / 2).max(size / 2));
+            mark.y = (top + dy / 2).clamp(size / 2, (h - size / 2).max(size / 2));
         }
     }
     keep_on_picture(&mut mark, picture_w, picture_h);
@@ -457,6 +519,102 @@ mod tests {
     fn step_numbers_count_on_from_those_already_there() {
         assert_eq!(default_mark(Tool::Number, W, H, None, 0).number, Some(1));
         assert_eq!(default_mark(Tool::Number, W, H, None, 2).number, Some(3));
+    }
+
+    #[test]
+    fn a_tool_is_named_with_the_right_article() {
+        let said: Vec<String> = Tool::ALL.iter().map(|t| t.with_article()).collect();
+        assert_eq!(
+            said,
+            [
+                "a rectangle",
+                "an oval",
+                "a line",
+                "an arrow",
+                "a text",
+                "a step number",
+                "a highlight",
+                "a blur",
+                "a spotlight"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dragged_box_fills_the_rectangle_whichever_way_it_was_dragged() {
+        for tool in [Tool::Rectangle, Tool::Oval, Tool::Highlight, Tool::Blur, Tool::Spotlight] {
+            let down = drawn_mark(tool, (300, 200), (500, 350), W, H, 0);
+            let up = drawn_mark(tool, (500, 350), (300, 200), W, H, 0);
+            let across = drawn_mark(tool, (500, 200), (300, 350), W, H, 0);
+            for mark in [&down, &up, &across] {
+                assert_eq!(mark.kind, tool.kind());
+                assert_eq!((mark.x, mark.y, mark.width, mark.height), (300, 200, Some(200), Some(150)), "{tool:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_dragged_line_or_arrow_runs_from_the_press_to_the_release() {
+        for tool in [Tool::Line, Tool::Arrow] {
+            let mark = drawn_mark(tool, (100, 100), (400, 50), W, H, 0);
+            assert_eq!((mark.x, mark.y, mark.x2, mark.y2), (100, 100, Some(400), Some(50)), "{tool:?}");
+            let back = drawn_mark(tool, (400, 50), (100, 100), W, H, 0);
+            assert_eq!((back.x, back.y, back.x2, back.y2), (400, 50, Some(100), Some(100)), "the direction is kept");
+        }
+    }
+
+    #[test]
+    fn a_press_without_a_drag_places_the_usual_mark_where_it_was() {
+        for tool in Tool::ALL {
+            let click = drawn_mark(tool, (900, 500), (900, 500), W, H, 2);
+            assert_eq!(click, default_mark(tool, W, H, Some((900, 500)), 2), "{tool:?}");
+            let wobble = drawn_mark(tool, (900, 500), (903, 497), W, H, 2);
+            assert_eq!(wobble, click, "{tool:?}: a few pixels of wobble is still a click");
+        }
+        // A drag in only one direction is a drag.
+        let thin = drawn_mark(Tool::Rectangle, (300, 200), (330, 201), W, H, 0);
+        assert_eq!((thin.width, thin.height), (Some(30), Some(MIN_SIDE)), "the short side keeps a minimum");
+    }
+
+    #[test]
+    fn a_drag_that_leaves_the_picture_is_brought_back_onto_it() {
+        let mark = drawn_mark(Tool::Rectangle, (-50, -50), (5000, 5000), W, H, 0);
+        assert_eq!((mark.x, mark.y), (0, 0));
+        assert_eq!((mark.width, mark.height), (Some(W as i32 - 1), Some(H as i32 - 1)));
+        let line = drawn_mark(Tool::Line, (-20, 10), (3000, 900), W, H, 0);
+        assert_eq!((line.x, line.x2), (0, Some(W as i32 - 1)));
+    }
+
+    #[test]
+    fn text_follows_the_width_of_a_wide_drag_and_ignores_a_narrow_one() {
+        let wide = drawn_mark(Tool::Text, (600, 300), (800, 340), W, H, 0);
+        assert_eq!((wide.x, wide.y, wide.width), (600, 300, Some(200)));
+        assert_eq!(wide.text.as_deref(), Some("Text"));
+        let narrow = drawn_mark(Tool::Text, (600, 300), (610, 360), W, H, 0);
+        assert_eq!((narrow.x, narrow.y, narrow.width), (600, 300, None), "too narrow to be a width");
+    }
+
+    #[test]
+    fn a_step_number_is_a_circle_across_the_longer_side_of_the_drag() {
+        let mark = drawn_mark(Tool::Number, (500, 400), (560, 450), W, H, 2);
+        assert_eq!(mark.number, Some(3));
+        assert_eq!(mark.size, Some(60));
+        assert_eq!((mark.x, mark.y), (530, 425), "centred on the middle of the drag");
+        let b = bounds(&mark, H);
+        assert_eq!((b.x, b.y, b.width, b.height), (500, 395, 60, 60));
+    }
+
+    #[test]
+    fn every_tool_drawn_by_dragging_makes_a_mark_the_format_accepts() {
+        for tool in Tool::ALL {
+            for (from, to) in [((100, 100), (400, 300)), ((1800, 1000), (200, 50)), ((5, 5), (30, 9))] {
+                let mark = drawn_mark(tool, from, to, W, H, 0);
+                assert_eq!(mark.kind, tool.kind());
+                assert!(mark.problems().is_empty(), "{tool:?} {from:?} {to:?}: {:?}", mark.problems());
+                let b = bounds(&mark, H);
+                assert!(b.x >= 0 && b.y >= 0 && b.x < W as i32 && b.y < H as i32, "{tool:?} is on the picture: {b:?}");
+            }
+        }
     }
 
     #[test]

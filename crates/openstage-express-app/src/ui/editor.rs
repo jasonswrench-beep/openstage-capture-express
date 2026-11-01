@@ -271,6 +271,36 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) 
             }
         }
     });
+    // Drawing with the mouse is a convenience on top of the buttons, so its ten choices are folded away behind one heading: a person
+    // using the keyboard passes one stop, not ten.
+    let draw_header = egui::CollapsingHeader::new(RichText::new("Draw a shape with the mouse").size(15.0))
+        .default_open(state.drawing_tool().is_some())
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("Choose a shape, then drag on the picture. A click places a usual-sized one.")
+                    .size(13.5)
+                    .color(p.muted),
+            );
+            ui.horizontal_wrapped(|ui| {
+                let off =
+                    ui.add(egui::RadioButton::new(state.drawing_tool().is_none(), "Do not draw (pick and move marks)"));
+                widgets::ring(ui, &off);
+                if off.clicked() {
+                    status.say_opt(state.choose_drawing_tool(None));
+                }
+                for tool in Tool::ALL {
+                    let r = ui.add(egui::RadioButton::new(
+                        state.drawing_tool() == Some(tool),
+                        format!("Draw {}", tool.with_article()),
+                    ));
+                    widgets::ring(ui, &r);
+                    if r.clicked() {
+                        status.say_opt(state.choose_drawing_tool(Some(tool)));
+                    }
+                }
+            });
+        });
+    widgets::ring(ui, &draw_header.header_response);
     let rows = state.mark_rows();
     if rows.is_empty() {
         ui.label(RichText::new("No marks yet. Add one with a button above.").size(13.5).color(p.muted));
@@ -475,6 +505,30 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         let v = (at - image_rect.min) / scale;
         (v.x.round() as i32, v.y.round() as i32)
     };
+    // With a drawing tool chosen the mouse draws instead: press where the shape starts, drag to where it ends, let go to keep it.
+    // Escape stops a drawing in progress, or turns the tool off.
+    if state.drawing_tool().is_some() {
+        if ui.rect_contains_pointer(image_rect) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if ui.ctx().input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            status.say_opt(state.cancel_draw());
+        }
+        if let Some(pos) = pos {
+            if pressed && image_rect.contains(pos) {
+                let (x, y) = to_picture(pos);
+                state.begin_draw(x, y);
+            } else if down && state.is_drawing() {
+                let (x, y) = to_picture(pos);
+                state.draw_to(x, y);
+            }
+        }
+        if released && state.is_drawing() {
+            status.say_opt(state.end_draw());
+            state.focus_mark_next = true;
+        }
+        return;
+    }
     if let Some(pos) = pos {
         if pressed && image_rect.contains(pos) {
             let (x, y) = to_picture(pos);

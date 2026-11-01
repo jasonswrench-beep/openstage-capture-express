@@ -97,9 +97,15 @@ submit an assignment") to open from the card under "Your guides".
       and by mouse (press on a mark and drag it, drag a square handle to change its size). The window shows the whole picture with the
       focused crop as a frame; is that clear? Blur especially: blur a name on a real screenshot, export a PNG, and check it cannot be read
       (it is a coarse mosaic, not a black box; use a solid rectangle to hide something that must stay secret).
-- [ ] Not built in the editor yet: dragging to draw a new shape (a mark starts at a default size and is moved), picking several
-      steps at once, panning or zooming the focused crop by hand, deleting or renaming a guide from Home, and cutting the
-      picture.
+- [ ] Draw a shape with the mouse: under Marks, open "Draw a shape with the mouse", choose one (Draw a rectangle, for example), and
+      drag on the picture. The shape should follow the pointer while you drag and be kept when you let go (one Undo takes it back);
+      the choice is used once. A click without a drag should place the usual-sized shape where you clicked. Escape should stop a
+      drawing in progress, and again turn the choice off. The crosshair pointer, and whether dragging a thin line or a step number
+      feels right, only a person can say. The tests send the same pointer events through the window without a mouse; nobody has
+      done it by hand. Narrator and NVDA: the heading folds open by keyboard and each choice is named ("Draw an oval"); Add and
+      Move still do everything by keyboard.
+- [ ] Not built in the editor yet: picking several steps at once, panning or zooming the focused crop by hand, deleting or
+      renaming a guide from Home, and cutting the picture.
 
 ## Milestone M6 (capture)
 

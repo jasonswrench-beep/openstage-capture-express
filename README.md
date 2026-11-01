@@ -18,7 +18,8 @@ while you work in other programs; before Start you choose what to capture: the w
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
 made. **Finish** opens the guide in the editor, where steps can be chosen, renamed, moved, skipped, deleted and restored, with undo
 and redo, and every change is saved. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
-spotlight) are added with buttons, listed, moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
+spotlight) are added with buttons or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
+moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
 whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
 thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (on Home) holds the colour scheme, how
 clicks make steps, the pointer and circle, the language of step titles, the two folders, the three hotkeys (each written as words,
@@ -32,8 +33,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 638 passed (239 in the core, 182 in the exports, 44 in the
-  Windows crate, 173 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 657 passed (247 in the core, 182 in the exports, 44 in the
+  Windows crate, 184 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -89,6 +90,15 @@ Run on Windows, and working:
   reader and Python's `zipfile` read both files too.
 
 Written and type-checked, not yet run on Windows:
+
+- Drawing a new shape by dragging on the picture in the editor (nine shapes; a click without a drag places the usual size; Escape
+  stops it): `core::marks::drawn_mark` turns a drag into a mark (any direction, kept on the picture, a step number's circle across
+  the longer side, text taking a wide drag's width) and is tested on any computer; the editor's choice of shape, the shape shown
+  while it is dragged and kept as one undoable change when the mouse is let go, the choice used once, Escape, and a drawing dropped
+  when another step is chosen or a change is undone are tested through the window with simulated pointer events and keys. Nobody
+  has drawn with a real mouse, so the crosshair pointer and the feel of it are unseen (`TESTING-TODO.md`). The nine choices are
+  folded behind one heading, so a keyboard user passes one Tab stop; every mark can still be added, moved and resized by buttons.
+  Sixteen deliberate faults were each caught.
 
 - The cue sounds (start, stop, step, problem) have never been played. They are made in the core as short quiet tones and held in memory;
   the tests check each is a well-formed WAV file, quiet, short, starts and ends in silence, and has the pitch it should, and that
@@ -147,7 +157,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, dragging to draw a new shape, picking several steps, deleting or renaming a guide from Home,
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, picking several steps, deleting or renaming a guide from Home,
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window

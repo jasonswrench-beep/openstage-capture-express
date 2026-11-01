@@ -55,6 +55,18 @@ pub struct EditorState {
     mark_words_for: Option<String>,
     /// A mark being dragged with the mouse: shown moved or resized, and only kept (as one change) when the mouse is let go.
     drag: Option<Drag>,
+    /// The kind of mark the mouse draws when it is dragged over the picture, if the person chose one. It is used once.
+    draw_tool: Option<Tool>,
+    /// A new mark being drawn with the mouse: shown as it will be, and only added (as one change) when the mouse is let go.
+    drawing: Option<Drawing>,
+}
+
+/// A shape being drawn: the tool, where the press was and where the pointer is now (picture pixels).
+#[derive(Debug, Clone, Copy)]
+struct Drawing {
+    tool: Tool,
+    from: (i32, i32),
+    to: (i32, i32),
 }
 
 /// What a drag on the picture is doing.
@@ -103,6 +115,8 @@ impl EditorState {
             mark_words: String::new(),
             mark_words_for: None,
             drag: None,
+            draw_tool: None,
+            drawing: None,
         };
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
         if let Some(id) = first {
@@ -133,6 +147,8 @@ impl EditorState {
             mark_words: String::new(),
             mark_words_for: None,
             drag: None,
+            draw_tool: None,
+            drawing: None,
         };
         state.saved_stamp = Some(state.stamp());
         let first = state.session.doc().guide.steps.first().map(|s| s.id.clone());
@@ -210,6 +226,7 @@ impl EditorState {
             if self.selected.as_deref() != Some(id) {
                 self.selected_mark = None;
                 self.drag = None;
+                self.drawing = None;
             }
             self.selected = Some(id.to_string());
         }
@@ -267,6 +284,7 @@ impl EditorState {
 
     fn keep_selection_valid(&mut self) {
         self.drag = None;
+        self.drawing = None;
         let still_there = self
             .selected_mark
             .as_deref()
@@ -282,6 +300,7 @@ impl EditorState {
     }
 
     pub fn undo(&mut self) -> Said {
+        self.drawing = None;
         self.commit_pending();
         if self.session.undo() {
             self.keep_selection_valid();
@@ -292,6 +311,7 @@ impl EditorState {
     }
 
     pub fn redo(&mut self) -> Said {
+        self.drawing = None;
         self.commit_pending();
         if self.session.redo() {
             self.keep_selection_valid();
@@ -532,16 +552,27 @@ impl EditorState {
         let Some((w, h)) = self.picture_size() else { return Some("This step has no picture to mark.".to_string()) };
         let step = self.selected_step()?;
         let around = step.click.as_ref().map(|c| (c.x, c.y));
-        let numbers = step.annotations.iter().filter(|a| a.kind == marks::Tool::Number.kind()).count() as u32;
+        let numbers = self.numbers_taken();
         let mark = marks::default_mark(tool, w, h, around, numbers);
         let now = utc_now_iso();
         match self.session.apply(|d| d.add_annotation(&step_id, mark, &now)) {
             Ok(id) => {
                 self.selected_mark = Some(id);
-                Some(format!("Added a {}: {}. Move it with the buttons or drag it.", tool.name(), self.mark_words()))
+                Some(format!(
+                    "Added {}: {}. Move it with the buttons or drag it.",
+                    tool.with_article(),
+                    self.mark_words()
+                ))
             }
             Err(_) => Some("The mark could not be added.".to_string()),
         }
+    }
+
+    /// How many step numbers the selected step already has, so the next one is the next number.
+    fn numbers_taken(&self) -> u32 {
+        self.selected_step()
+            .map(|s| s.annotations.iter().filter(|a| a.kind == marks::Tool::Number.kind()).count() as u32)
+            .unwrap_or(0)
     }
 
     /// Move the selected mark by dx, dy picture pixels.
@@ -677,6 +708,94 @@ impl EditorState {
         self.drag.is_some()
     }
 
+    // ---- drawing a new mark with the mouse (picture pixels)
+
+    /// The kind of mark the mouse will draw next, if one was chosen.
+    pub fn drawing_tool(&self) -> Option<Tool> {
+        self.draw_tool
+    }
+
+    /// Choose what the mouse draws when it is dragged over the picture (`None` to go back to picking and moving marks). Said when it
+    /// changes.
+    pub fn choose_drawing_tool(&mut self, tool: Option<Tool>) -> Said {
+        if self.draw_tool == tool {
+            return None;
+        }
+        self.drag = None;
+        self.drawing = None;
+        self.draw_tool = tool;
+        Some(match tool {
+            Some(tool) => format!("Drag on the picture to draw {}. Press Escape to stop.", tool.with_article()),
+            None => "Drawing with the mouse is off.".to_string(),
+        })
+    }
+
+    /// A press at a point of the picture, with a drawing tool chosen: begin drawing there. Returns whether drawing began.
+    pub fn begin_draw(&mut self, x: i32, y: i32) -> bool {
+        let Some(tool) = self.draw_tool else { return false };
+        if self.picture_size().is_none() {
+            return false;
+        }
+        self.drag = None;
+        self.drawing = Some(Drawing { tool, from: (x, y), to: (x, y) });
+        true
+    }
+
+    /// The pointer is now at this point of the picture.
+    pub fn draw_to(&mut self, x: i32, y: i32) {
+        if let Some(drawing) = self.drawing.as_mut() {
+            drawing.to = (x, y);
+        }
+    }
+
+    pub fn is_drawing(&self) -> bool {
+        self.drawing.is_some()
+    }
+
+    /// The mark being drawn, as it will be when the mouse is let go (it is not in the guide until then).
+    pub fn mark_being_drawn(&self) -> Option<Annotation> {
+        let drawing = self.drawing?;
+        let (w, h) = self.picture_size()?;
+        Some(marks::drawn_mark(drawing.tool, drawing.from, drawing.to, w, h, self.numbers_taken()))
+    }
+
+    /// The mouse was let go: add what was drawn to the step as one change, choose it, and stop drawing (a tool is used once). A press
+    /// that was not dragged places the tool's usual mark where it was.
+    pub fn end_draw(&mut self) -> Said {
+        let drawing = self.drawing.take()?;
+        let mark = {
+            let (w, h) = self.picture_size()?;
+            marks::drawn_mark(drawing.tool, drawing.from, drawing.to, w, h, self.numbers_taken())
+        };
+        let dragged = (drawing.to.0 - drawing.from.0).abs() >= marks::MIN_DRAG
+            || (drawing.to.1 - drawing.from.1).abs() >= marks::MIN_DRAG;
+        self.commit_pending();
+        let step_id = self.selected.clone()?;
+        let now = utc_now_iso();
+        match self.session.apply(|d| d.add_annotation(&step_id, mark, &now)) {
+            Ok(id) => {
+                self.selected_mark = Some(id);
+                self.draw_tool = None;
+                Some(format!(
+                    "{} {}: {}. Move or resize it with the buttons, or drag it.",
+                    if dragged { "Drew" } else { "Placed" },
+                    drawing.tool.with_article(),
+                    self.mark_words()
+                ))
+            }
+            Err(_) => Some("The mark could not be added.".to_string()),
+        }
+    }
+
+    /// Escape: stop the drawing in progress, or else turn the drawing tool off. Says what it did, or nothing if there was nothing to
+    /// stop.
+    pub fn cancel_draw(&mut self) -> Said {
+        if self.drawing.take().is_some() {
+            return Some("Cancelled. Nothing was drawn.".to_string());
+        }
+        self.draw_tool.take().map(|_| "Drawing with the mouse is off.".to_string())
+    }
+
     /// The selected step's picture with its marks, as a texture the window can draw. It is the whole picture, not the focused
     /// crop (the crop is drawn over it as a frame), so that a mark can be worked on anywhere. Made again when the step or its
     /// marks change, or while a mark is dragged.
@@ -686,6 +805,10 @@ impl EditorState {
             for m in step.annotations.iter_mut().filter(|m| m.id == drag.current.id) {
                 *m = drag.current.clone();
             }
+        }
+        // A shape being drawn is shown as it will be, though it is not in the guide until the mouse is let go.
+        if let Some(mark) = self.mark_being_drawn() {
+            step.annotations.push(mark);
         }
         let image = step.image.as_ref()?;
         let key = format!("{}|{:?}", step.id, step.annotations);
