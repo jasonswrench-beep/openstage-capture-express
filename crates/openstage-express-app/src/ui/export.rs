@@ -22,6 +22,8 @@ pub struct ExportState {
     pub said: Option<String>,
     /// Whether this computer can make a PDF.
     pub can_pdf: bool,
+    /// For a copy as one file: put the original pictures in it (off by default, so the marks are drawn in and a blur cannot be undone).
+    pub copy_originals: bool,
 }
 
 impl ExportState {
@@ -31,7 +33,7 @@ impl ExportState {
             selection.set(Format::Pdf, false);
             selection.set(Format::Word, true);
         }
-        ExportState { selection, folder, open_after: true, working: false, said: None, can_pdf }
+        ExportState { selection, folder, open_after: true, working: false, said: None, can_pdf, copy_originals: false }
     }
 }
 
@@ -42,6 +44,8 @@ pub enum ExportAction {
     Back,
     ChooseFolder,
     Export,
+    /// Save the guide as one file, a copy to send or keep.
+    SaveCopy,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
@@ -107,6 +111,31 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
             }
             if state.selection.is_empty() {
                 ui.label(RichText::new("Choose at least one format.").color(p.muted));
+            }
+            ui.add_space(14.0);
+            widgets::subheading(ui, "A copy as one file");
+            ui.label(
+                RichText::new(
+                    "Saves the whole guide as one file ending .osguide.zip, to send to someone or keep. It goes in the same folder as the \
+                     exports. Someone opens it with Open a copy on Home.",
+                )
+                .color(p.muted),
+            );
+            let originals = ui.add(egui::Checkbox::new(&mut state.copy_originals, "Include the original pictures"));
+            widgets::ring(ui, &originals);
+            let kind = if state.copy_originals {
+                "The original pictures are in the file, and the marks stay marks. A blur can be taken away by whoever opens it, and \
+                 then the picture under it can be seen. Steps you skipped are included."
+            } else {
+                "Each picture has its marks drawn into it, blur included, and the original pictures are not in the file, so a blur \
+                 cannot be undone. Steps you skipped are left out."
+            };
+            ui.label(RichText::new(format!("{kind} Deleted steps are never included.")).size(13.5).color(p.muted));
+            let copy = ui.add_enabled_ui(!state.working, |ui| {
+                widgets::button(ui, if state.working { "Working..." } else { "Save a copy as one file" })
+            });
+            if copy.inner.clicked() {
+                action = ExportAction::SaveCopy;
             }
             if let Some(said) = &state.said {
                 ui.add_space(8.0);

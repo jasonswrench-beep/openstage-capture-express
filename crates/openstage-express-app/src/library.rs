@@ -180,6 +180,51 @@ pub fn rename_guide(guide: &Path, title: &str, is_running: &dyn Fn(u32) -> bool)
     Ok(title.to_string())
 }
 
+/// The most a copy file may be before it is refused without being read (the reader has its own limits on what is inside it).
+const MAX_COPY_BYTES: u64 = 1 << 30;
+
+/// What opening a copy made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyOpened {
+    /// The new guide folder.
+    pub guide: PathBuf,
+    pub title: String,
+    /// How many steps the guide has (as Home counts them).
+    pub steps: usize,
+    /// Things the person may want to know, such as a picture the copy lacked.
+    pub warnings: Vec<String>,
+}
+
+/// Make a new guide of the person's own in `guides` from a copy saved as one file (`.osguide.zip`). The file is only read. The new
+/// guide gets a new id and the next free folder name, so it never takes the place of a guide that is already there, even a copy of
+/// the same one. Nothing is made unless the whole copy was understood; if something goes wrong while the new folder is being filled,
+/// that folder is removed again.
+pub fn open_copy(file: &Path, guides: &Path) -> Result<CopyOpened, String> {
+    if guides.as_os_str().is_empty() {
+        return Err("There is no guides folder to put the copy in.".to_string());
+    }
+    let meta = fs::metadata(file).map_err(|_| format!("The file {} could not be found or read.", file.display()))?;
+    if meta.is_dir() {
+        return Err(format!("{} is a folder, not a copy saved as one file.", file.display()));
+    }
+    if meta.len() > MAX_COPY_BYTES {
+        return Err("This file is larger than the copy of a guide should be, so it was not opened.".to_string());
+    }
+    let bytes = fs::read(file).map_err(|e| format!("The file {} could not be read ({e}).", file.display()))?;
+    let mut opened = openstage_express_export::share::read_copy(&bytes).map_err(|e| e.to_string())?;
+    let now = utc_now_iso();
+    opened.guide.id = openstage_express_core::fsutil::new_guide_id(&now);
+    opened.guide.updated_at = now;
+    let title = opened.guide.title.clone();
+    let steps = crate::ui::rows::step_count(&opened.guide);
+    let doc = openstage_express_core::Document::new(opened.guide);
+    let folder = GuideFolder::create_with_pictures(guides, &doc, &opened.pictures)
+        .map_err(|e| format!("The copy could not be made into a guide: {e}"))?;
+    let path = folder.path().to_path_buf();
+    drop(folder);
+    Ok(CopyOpened { guide: path, title, steps, warnings: opened.warnings })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

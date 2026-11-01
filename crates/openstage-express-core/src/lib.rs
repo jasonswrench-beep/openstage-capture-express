@@ -32,5 +32,5 @@ pub use model::{
 };
 pub use ops::{Document, OpError, Position, StepDraft, Trash, TrashEntry};
 pub use session::Session;
-pub use store::{Access, GuideFolder, Opened, SaveReport};
+pub use store::{read_guide, Access, GuideFolder, Opened, SaveReport};
 pub use titles::Language;

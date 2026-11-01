@@ -19,6 +19,7 @@ pub mod editor_state;
 pub mod export;
 pub mod fonts;
 pub mod home;
+pub mod open_copy;
 pub mod rows;
 pub mod settings;
 pub mod theme;
@@ -72,7 +73,7 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor, export, settings, about, trash, deleted, bar, choose-window or choose-area")?.as_str() {
+                    options.screen = Some(match value("home, editor, export, settings, about, trash, deleted, open-copy, bar, choose-window or choose-area")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
                         "export" => Screen::Export,
@@ -80,12 +81,13 @@ impl DevOptions {
                         "about" => Screen::About,
                         "trash" => Screen::Trash,
                         "deleted" => Screen::DeletedSteps,
+                        "open-copy" => Screen::OpenCopy,
                         "choose-window" => Screen::ChooseWindow,
                         "choose-area" => Screen::ChooseArea,
                         "bar" => Screen::Bar,
                         other => {
                             return Err(format!(
-                                "--screen is home, editor, export, settings, about, trash, deleted, bar, choose-window or choose-area, not {other:?}."
+                                "--screen is home, editor, export, settings, about, trash, deleted, open-copy, bar, choose-window or choose-area, not {other:?}."
                             ))
                         }
                     })
@@ -440,7 +442,15 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         Box::new(|folder| {
                             let _ = std::process::Command::new("explorer").arg(folder).spawn();
                         }),
-                    );
+                    )
+                    .with_file_chooser(Box::new(|start| {
+                        openstage_express_windows::dialogs::choose_file(
+                            start,
+                            "Choose a copy of a guide",
+                            "Copies of guides (*.zip)",
+                            "*.zip",
+                        )
+                    }));
                 app.set_hotkey_words(&words);
                 (app.with_settings(settings, settings_path, settings_note), hotkeys, hotkey_changes)
             };

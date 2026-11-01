@@ -206,6 +206,38 @@ written to a temporary file beside it (`guide.json.tmp`), forced to disk, and re
 the old file or the new one. A new picture is written **before** the guide that names it. So a crash costs at most the step being
 made: the last complete guide is there, plus possibly one picture nothing uses yet.
 
+## A guide as one file (`Title.osguide.zip`, spec A8)
+
+A copy of a guide in one file, to send or keep. It is a ZIP file (stored and deflate only, no encryption, no ZIP64) holding:
+
+```
+guide.json        the guide, in the same format as a guide folder's, written by the same code
+README.txt        a few lines for a person who finds the file: what it is and how to open it
+images/step-0001.png ...   the pictures the guide names
+```
+
+It never holds `guide.lock`, `trash/`, `trash.json`, a deleted step or a deleted step's picture: a copy is made from the guide alone.
+Which of two kinds it is shows in what is inside:
+
+* **Marks drawn in** (the default, spec P5). Each picture is the step's whole picture with its marks drawn on it (blur included, so
+  the original cannot be got back), the step's `annotations` are empty, and `image.file` is `images/step-NNNN.png` where NNNN is the
+  step's own number, so two steps that shared one picture each have a picture of their own. The step's `focus` and `click` are kept.
+  Steps that were skipped, and everything inside a skipped step, are left out. The original pictures are not in the file.
+* **With the original pictures** (the person chose it). `guide.json` is the guide exactly as it is, skipped steps and marks included,
+  and each picture is the original PNG file unchanged, once, under the name the guide gives it. A blur is still only a mark.
+
+Opening one makes a **new guide folder** in the guides folder (`Title.osguide`, or the next free name; an existing folder is never
+touched). The guide gets a new `id` and a new `updatedAt`, so that it is not taken for the guide it was copied from. The file is only
+read. Express opens a copy whose `guide.json` is at the top of the file, or inside the one folder the whole guide was zipped in (so a
+guide folder zipped by hand opens too). Pictures the guide does not name, and everything else in the file, are ignored. A picture the
+guide names that is not in the file, or is not a PNG, is left out with a warning, and the guide still opens (as a folder with a
+missing picture does). A `guide.json` made by a newer Express is refused, and an older one is brought up to date as for a folder.
+
+A copy is read as untrusted: a file name that could reach outside the folder it is unpacked into (`..`, a leading `/`, a drive
+`C:`, a backslash, an empty part) refuses the whole file; so do two files of the same name, encryption, ZIP64, a method other than
+stored or deflate, more than 5,000 files, one over 256 MB or all over 1 GB unpacked, and any file whose size or CRC does not match
+what its header says. A file is unpacked only as far as the size it says it has.
+
 ## How capturing fills a guide
 
 Capturing makes a guide folder when the **first step** arrives, so a capture of nothing leaves nothing behind. The guide is called

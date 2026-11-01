@@ -535,8 +535,9 @@ fn tab_visits_every_control_on_home_in_order_and_does_not_get_stuck() {
     assert_eq!(seen[2], "Settings");
     assert_eq!(seen[3], "About and licences");
     assert_eq!(seen[4], "Trash");
-    assert_eq!(seen[5], "How to submit an assignment, 5 steps, example guide");
-    assert!(seen[6..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
+    assert_eq!(seen[5], "Open a copy");
+    assert_eq!(seen[6], "How to submit an assignment, 5 steps, example guide");
+    assert!(seen[7..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
 }
 
 #[test]
@@ -577,7 +578,9 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     ],
                     Screen::Bar => &[(Role::Button, "Start"), (Role::Button, "Cancel")],
                     Screen::Export => &[(Role::Button, "Back to the guide")],
-                    Screen::Settings | Screen::About | Screen::Trash => &[(Role::Button, "Back to guides")],
+                    Screen::Settings | Screen::About | Screen::Trash | Screen::OpenCopy => {
+                        &[(Role::Button, "Back to guides")]
+                    }
                     Screen::DeletedSteps => &[
                         (Role::Button, "Back to the steps"),
                         (Role::Button, "Restore all 2 steps"),
@@ -2687,7 +2690,7 @@ fn the_rename_and_delete_buttons_follow_their_guide_in_the_tab_order() {
     let dir = guides_dir(&["Alpha"]);
     let (mut h, _) = home_over(dir.path(), &[]);
     let mut seen = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..10 {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
@@ -3298,7 +3301,7 @@ fn the_sort_button_is_one_tab_stop_before_the_first_card() {
         seen.push(h.focused_words().unwrap_or_default());
     }
     let sort = seen.iter().position(|w| w.starts_with("Sort: ")).expect("the sort button is reached");
-    assert_eq!(seen[sort - 1], "Trash");
+    assert_eq!(seen[sort - 1], "Open a copy");
     assert_eq!(seen[sort + 1], "banana, 5 steps", "then the first card");
 }
 
@@ -3491,14 +3494,17 @@ fn guide_with_pictures(parent: &std::path::Path, title: &str) -> std::path::Path
     let mut doc = openstage_express_export::demo::demo().document;
     doc.guide.title = title.to_string();
     let folder = GuideFolder::create(parent, &doc).unwrap();
-    for image in doc.guide.steps.iter().filter_map(|s| s.image.as_ref()) {
+    for (n, image) in doc.guide.steps.iter().filter_map(|s| s.image.as_ref()).enumerate() {
         let mut bytes = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut bytes, image.width, image.height);
             encoder.set_color(png::ColorType::Rgb);
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().unwrap();
-            writer.write_image_data(&vec![180u8; image.width as usize * image.height as usize * 3]).unwrap();
+            // A grey of its own for each picture, so one cannot be mistaken for another.
+            writer
+                .write_image_data(&vec![(60 + 20 * n) as u8; image.width as usize * image.height as usize * 3])
+                .unwrap();
         }
         std::fs::write(folder.path().join(&image.file), bytes).unwrap();
     }
@@ -4044,4 +4050,268 @@ fn with_the_focused_view_off_dragging_the_picture_moves_nothing() {
     assert!(!the_editor(&h).is_moving_crop());
     let_go(&mut h, at(x + 100, y + 50));
     assert!(the_editor(&h).selected_step().unwrap().focus.is_none(), "still the whole picture");
+}
+
+// ---- a copy as one file: saving it from Export, and opening it from Home
+
+use openstage_express_export::share::{make_copy, read_copy, CopyOptions};
+
+/// The run folder's `copy` folder under an exports folder, where the one file is put.
+fn the_copy_folder(exports: &std::path::Path, title: &str) -> PathBuf {
+    let runs: Vec<_> = std::fs::read_dir(exports.join(title)).unwrap().flatten().collect();
+    assert_eq!(runs.len(), 1, "one new folder for this run");
+    runs[0].path().join("copy")
+}
+
+/// A copy of the example guide, saved as a file in `dir`.
+fn a_copy_file(dir: &std::path::Path, include_originals: bool) -> PathBuf {
+    let d = openstage_express_export::demo::demo();
+    let made = make_copy(
+        &d.document.guide,
+        &d.pictures,
+        &openstage_capture_render::BlockText,
+        &CopyOptions { include_originals },
+    )
+    .unwrap();
+    let path = dir.join(&made.file_name);
+    std::fs::write(&path, &made.zip).unwrap();
+    path
+}
+
+#[test]
+fn the_export_screen_offers_a_copy_as_one_file_with_the_originals_unticked_and_says_what_each_choice_means() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    assert_eq!(h.node(h.find(Role::Heading, "A copy as one file")).level(), Some(2));
+    let tick = h.find(Role::CheckBox, "Include the original pictures");
+    assert_eq!(
+        h.node(tick).toggled(),
+        Some(accesskit::Toggled::False),
+        "off to begin with, so a blur cannot be undone"
+    );
+    let plain = |h: &Harness, start: &str| h.order.iter().filter_map(|id| h.name(*id)).any(|w| w.starts_with(start));
+    assert!(plain(&h, "Each picture has its marks drawn into it, blur included"));
+    h.invoke(Role::CheckBox, "Include the original pictures");
+    assert!(plain(&h, "The original pictures are in the file, and the marks stay marks."));
+    assert!(!plain(&h, "Each picture has its marks drawn into it"));
+    h.find(Role::Button, "Save a copy as one file");
+}
+
+#[test]
+fn saving_a_copy_makes_one_file_in_a_new_folder_with_the_marks_drawn_in_and_says_so_and_shows_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, opened) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::Button, "Save a copy as one file");
+    wait_for_export(&mut h);
+    let said = h.status();
+    assert!(said.starts_with("Saved a copy as one file: "), "{said}");
+    assert!(
+        said.contains("How to submit an assignment.osguide.zip") && said.contains("6 steps and 5 pictures"),
+        "{said}"
+    );
+    assert!(said.contains("The marks are drawn into the pictures and the originals are not in it."), "{said}");
+    assert!(said.contains("1 skipped step was left out."), "{said}");
+    let folder = the_copy_folder(dir.path(), "How to submit an assignment");
+    let file = folder.join("How to submit an assignment.osguide.zip");
+    let copy = read_copy(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(copy.guide.steps.len(), 6);
+    assert!(copy.guide.steps.iter().all(|s| s.annotations.is_empty()), "the marks are in the pictures");
+    assert_eq!(*opened.borrow(), [folder], "the folder was shown to the person");
+}
+
+#[test]
+fn a_copy_with_the_originals_keeps_the_guide_as_it_is_and_says_a_blur_can_be_taken_away() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "Include the original pictures");
+    h.invoke(Role::Button, "Save a copy as one file");
+    wait_for_export(&mut h);
+    let said = h.status();
+    assert!(
+        said.contains("7 steps and 6 pictures") && said.contains("a blur can be taken away by whoever opens it"),
+        "{said}"
+    );
+    assert!(!said.contains("skipped step"), "{said}");
+    let file =
+        the_copy_folder(dir.path(), "How to submit an assignment").join("How to submit an assignment.osguide.zip");
+    let copy = read_copy(&std::fs::read(file).unwrap()).unwrap();
+    assert_eq!(copy.guide, openstage_express_export::demo::demo().document.guide);
+}
+
+#[test]
+fn a_copy_of_a_real_guide_never_holds_a_deleted_step_or_its_picture_whichever_kind_is_chosen() {
+    let dir = tempfile::tempdir().unwrap();
+    let guide = guide_with_pictures(dir.path(), "Alpha");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Alpha, 5 steps");
+    h.invoke(Role::Button, "Delete step");
+    let deleted_picture = std::fs::read(guide.join("trash/step-0001.png")).unwrap();
+    for tick in [false, true] {
+        if tick {
+            // A run's folder is named from the time to the second, so wait for the next one.
+            std::thread::sleep(Duration::from_millis(1100));
+            h.invoke(Role::CheckBox, "Include the original pictures");
+        }
+        if h.app.screen != Screen::Export {
+            h.invoke(Role::Button, "Export");
+        }
+        h.invoke(Role::Button, "Save a copy as one file");
+        wait_for_export(&mut h);
+        assert!(h.status().starts_with("Saved a copy as one file: "), "{}", h.status());
+    }
+    let mut checked = 0;
+    for run in std::fs::read_dir(dir.path().join("exports").join("Alpha")).unwrap().flatten() {
+        let file = run.path().join("copy").join("Alpha.osguide.zip");
+        let files = openstage_express_export::zip::read(&std::fs::read(&file).unwrap(), &Default::default()).unwrap();
+        assert!(
+            files.iter().all(|(name, _)| !name.starts_with("trash/")),
+            "no trash folder: {:?}",
+            files.iter().map(|f| &f.0).collect::<Vec<_>>()
+        );
+        assert!(
+            files.iter().all(|(_, bytes)| *bytes != deleted_picture),
+            "the deleted step's picture is not in the copy"
+        );
+        let copy = read_copy(&std::fs::read(&file).unwrap()).unwrap();
+        assert!(copy.guide.steps.iter().all(|s| s.title != "Click \"Assignments\""), "the deleted step is not in it");
+        checked += 1;
+    }
+    assert_eq!(checked, 2, "one copy of each kind");
+}
+
+#[test]
+fn a_copy_becomes_a_new_guide_of_the_persons_own_and_the_file_is_not_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let guides = tempfile::tempdir().unwrap();
+    let file = a_copy_file(dir.path(), true);
+    let before = std::fs::read(&file).unwrap();
+    let first = crate::library::open_copy(&file, guides.path()).unwrap();
+    assert_eq!((first.title.as_str(), first.steps), ("How to submit an assignment", 5));
+    assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+    assert!(first.guide.ends_with("How to submit an assignment.osguide"));
+    let opened = GuideFolder::open(&first.guide, &|_| false).unwrap();
+    assert_ne!(opened.doc.guide.id, "g-demo", "a new id, so it is not taken for the guide it was copied from");
+    assert_eq!(opened.doc.guide.steps.len(), 7);
+    assert!(opened.problems.is_empty(), "{:?}", opened.problems);
+    assert_eq!(std::fs::read_dir(first.guide.join("images")).unwrap().count(), 6);
+    drop(opened);
+    let second = crate::library::open_copy(&file, guides.path()).unwrap();
+    assert!(second.guide.ends_with("How to submit an assignment (2).osguide"), "never over a guide that is there");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "the file is only read");
+}
+
+#[test]
+fn the_open_a_copy_screen_takes_a_path_with_quotes_opens_the_copy_as_a_guide_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let guides = guides_dir(&["Alpha"]);
+    let file = a_copy_file(dir.path(), true);
+    let (mut h, _) = home_over(guides.path(), &[]);
+    h.invoke(Role::Button, "Open a copy");
+    assert_eq!(h.app.screen, Screen::OpenCopy);
+    h.find(Role::Heading, "Open a copy");
+    assert_eq!(h.focused_words().as_deref(), Some("File to open"), "the keyboard is in the box");
+    assert!(h.node(h.find(Role::Button, "Open the copy")).is_disabled(), "nothing typed yet");
+    h.type_text(&format!("  \"{}\"  ", file.display()));
+    assert!(!h.node(h.find(Role::Button, "Open the copy")).is_disabled());
+    h.invoke(Role::Button, "Open the copy");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert_eq!(
+        h.status(),
+        "Opened a copy of How to submit an assignment as a new guide of your own, with 5 steps. The file was not changed."
+    );
+    assert_eq!(h.rows().len(), 7);
+    h.invoke(Role::Button, "Back to guides");
+    h.find(Role::Button, "How to submit an assignment, 5 steps");
+    h.find(Role::Button, "Alpha, 5 steps");
+}
+
+#[test]
+fn enter_in_the_box_opens_the_copy_and_browse_fills_the_box_from_the_dialog() {
+    let dir = tempfile::tempdir().unwrap();
+    let guides = guides_dir(&[]);
+    let file = a_copy_file(dir.path(), false);
+    let (mut h, _) = home_over(guides.path(), &[]);
+    let chosen = file.clone();
+    let answers = Rc::new(RefCell::new(vec![None, Some(chosen)]));
+    let record = Rc::clone(&answers);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_file_chooser(Box::new(move |_| record.borrow_mut().remove(0)));
+    h.settle();
+    h.invoke(Role::Button, "Open a copy");
+    h.invoke(Role::Button, "Browse...");
+    assert_eq!(h.app.open_copy_path(), "", "cancelled, so nothing was filled in");
+    h.invoke(Role::Button, "Browse...");
+    assert_eq!(h.app.open_copy_path(), file.display().to_string());
+    assert!(h.status().starts_with("Chosen: ") && h.status().ends_with("Press Open the copy."), "{}", h.status());
+    h.focus_on(Role::TextInput, "File to open");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.app.screen, Screen::Editor, "Enter opened it");
+    assert_eq!(h.rows().len(), 6, "a copy to share: the skipped step is not in it");
+}
+
+#[test]
+fn a_file_that_is_not_a_copy_is_said_in_words_the_screen_stays_and_no_guide_is_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let guides = guides_dir(&[]);
+    let text = dir.path().join("notes.zip");
+    std::fs::write(&text, b"these are only words, not a zip file").unwrap();
+    let hostile = dir.path().join("hostile.osguide.zip");
+    let zip = openstage_express_export::zip::build(&[
+        openstage_express_export::zip::ZipEntry::text("ab/cde", "{}"),
+        openstage_express_export::zip::ZipEntry::text("guide.json", "{}"),
+    ])
+    .unwrap();
+    let mut bad = zip.clone();
+    for window in 0..bad.len().saturating_sub(5) {
+        if &bad[window..window + 6] == b"ab/cde" {
+            bad[window..window + 6].copy_from_slice(b"../cde");
+        }
+    }
+    std::fs::write(&hostile, bad).unwrap();
+    let (mut h, _) = home_over(guides.path(), &[]);
+    h.invoke(Role::Button, "Open a copy");
+    for (path, expected) in [
+        (text.display().to_string(), "not a ZIP file"),
+        (hostile.display().to_string(), "Express will not open this ZIP file"),
+        (dir.path().join("missing.osguide.zip").display().to_string(), "could not be found or read"),
+        (dir.path().display().to_string(), "is a folder, not a copy"),
+    ] {
+        h.focus_on(Role::TextInput, "File to open");
+        h.key(Key::A, ctrl());
+        h.type_text(&path);
+        h.invoke(Role::Button, "Open the copy");
+        assert_eq!(h.app.screen, Screen::OpenCopy, "stays on the screen for {path}");
+        assert!(h.status().contains(expected), "{path}: {}", h.status());
+        h.find(Role::Label, &h.status());
+    }
+    assert_eq!(std::fs::read_dir(guides.path()).unwrap().count(), 0, "no guide was made");
+}
+
+#[test]
+fn the_open_a_copy_screen_reads_in_order_and_goes_back() {
+    let guides = guides_dir(&[]);
+    let (mut h, _) = home_over(guides.path(), &[]);
+    h.invoke(Role::Button, "Open a copy");
+    h.type_text("x");
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    assert!(
+        ["Back to guides", "File to open", "Browse...", "Open the copy"].iter().all(|w| seen.iter().any(|s| s == w)),
+        "{seen:?}"
+    );
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+#[test]
+fn the_dev_switch_for_the_open_a_copy_screen_is_read() {
+    use super::DevOptions;
+    let words = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(DevOptions::parse(&words(&["--screen", "open-copy"])).unwrap().screen, Some(Screen::OpenCopy));
 }
