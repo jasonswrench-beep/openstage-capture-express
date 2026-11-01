@@ -44,8 +44,16 @@ Run on Windows, and working:
   of pictures. The guide it wrote opened again with every step and no problems; each step took about 30 ms to write. Two checks
   failed. The drop-down list's step (`Select "Country"`) came out late, because Windows does not answer questions about a control
   while its list is open. And the Type step's picture showed the text a few letters short, because it was taken at the Enter. Both
-  are fixed (the test now closes the list first; a Type step's picture is taken at least 120 ms after the last key), and a second
-  run after the fixes is still to be done (see below).
+  were fixed (the test now closes the list first; a Type step's picture is taken at least 120 ms after the last key).
+- Capture of one window and of an area (spec C3) was run for real on 2026-11-01, in a longer run of the same click test that waited
+  until the PC was quiet: **all 36 checks passed**, the 25 above (the two earlier failures now passing, 8 steps, 2 screen pictures
+  thrown away as too slow to take, no step and no mouse or keyboard action lost) and 10 new ones. In window mode a step's picture was
+  exactly the size of the test window's frame, the button was titled `Click "Save"`, and the click was placed inside the picture
+  where the button is. After the window was moved with the program running, the pictures were still the window (same size) and the
+  next click was placed correctly in them. In area mode (an area drawn around the test window) a picture was exactly the area's
+  size, the click was placed inside it and titled from the button's name. No step was lost in either mode. What this run did not
+  cover: choosing the window or the area with the mouse or a screen reader (the screens are tested headlessly and were drawn by the
+  real program), a window dragged to another display, and menus that hang outside the window's frame (see `TESTING-TODO.md`).
 - The program behind `CHECK EXPRESS COMPUTER.bat` (`check-computer`) passed on this PC: Windows 11 build 26200, two displays (the
   second above the main one, at a negative place), a picture of the screen in 572 ms, UI Automation answering, the hooks and the
   three hotkeys available, 1002 GB free, WebView2 156.
@@ -72,6 +80,10 @@ Run on Windows, and working:
 
 Written and type-checked, not yet run on Windows:
 
+- Choosing a window or an area by a person: the list of windows and the screen for drawing the area are tested headlessly (a stand-in
+  desktop) and were drawn by the real program, and the capture itself ran for real (above), but nobody has used the two screens by
+  mouse, keyboard or screen reader on a real desktop, and whether the list of open windows matches what a person sees (which
+  windows are listed, which are left out) has not been looked at.
 - The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered), and
   the part that lists skipped tests (no skip has happened on this PC).
 - `GET OPENSTAGE CODE.bat` downloading (its "not found" and "stop" paths were tried).

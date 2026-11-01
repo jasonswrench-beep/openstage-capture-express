@@ -135,7 +135,8 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 - [ ] Antivirus and SmartScreen: the hooks that watch the mouse and keyboard can make an antivirus warn on a program that is not
       signed (spec K3). Nothing has warned here; try on another PC with an antivirus.
 - [ ] Capture one window by hand: on the capture bar choose One window, Choose window..., pick a program you use, Use this window, Start.
-      Click inside it and open a menu or a drop-down list. A menu that lies inside the window's frame stays in the picture; one that hangs
+      (The click test already did this with its test window on 2026-11-01, including a moved window, and passed; what is left is a real
+      program, the choosing screens and how it feels.) Click inside it and open a menu or a drop-down list. A menu that lies inside the window's frame stays in the picture; one that hangs
       outside the frame is outside the area, so a click in it makes no step (spec K8 chose cutting the display, not capturing the window
       alone, so menus still show; say whether clicks in menus that leave the frame should count). Move the window and click again: the
       pictures should follow it. Close it: capturing should stop and keep the steps. Drag it to your second display: steps should
