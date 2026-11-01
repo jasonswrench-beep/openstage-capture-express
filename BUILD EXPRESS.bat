@@ -15,6 +15,8 @@ echo minutes. Later runs are faster. You do not need to do anything
 echo while it works. A full log is saved in this folder as build-log.txt.
 echo.
 
+if not exist "%~dp0..\openstage-author\capture\crates\openstage-capture-render\Cargo.toml" goto no_capture
+
 call "%~dp0rust-setup.bat"
 if errorlevel 1 goto no_rust
 
@@ -73,6 +75,17 @@ echo are skipped. Fix: extract the ZIP into a NEW, empty folder and run the
 echo script from there.
 echo.
 powershell -NoProfile -Command "Get-Content -LiteralPath 'build-log.txt' -Tail 25"
+
+:no_capture
+echo ------------------------------------------------------------
+echo   The OpenStage code was not found next to this folder.
+echo ------------------------------------------------------------
+echo.
+echo Express builds on code from OpenStage Capture, which lives in a
+echo folder called openstage-author. It must sit next to this folder.
+echo Double-click GET OPENSTAGE CODE.bat to get it, then try again.
+echo Nothing was changed.
+goto done
 
 :done
 echo.

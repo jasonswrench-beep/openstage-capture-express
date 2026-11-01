@@ -7,6 +7,8 @@ OpenStage Capture Express is Apache-2.0. These Rust crates are built into it, ea
 |---|---|---|
 | bitflags | 2.13.2 | MIT OR Apache-2.0 |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
+| crc32fast | 1.5.3 | MIT OR Apache-2.0 |
+| deranged | 0.5.9 | MIT OR Apache-2.0 |
 | errno | 0.3.14 | MIT OR Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 |
@@ -14,7 +16,9 @@ OpenStage Capture Express is Apache-2.0. These Rust crates are built into it, ea
 | libc | 0.2.191 | MIT OR Apache-2.0 |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | memchr | 2.8.3 | Unlicense OR MIT |
+| num-conv | 0.2.2 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
+| powerfmt | 0.2.1 | MIT OR Apache-2.0 |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
@@ -27,6 +31,9 @@ OpenStage Capture Express is Apache-2.0. These Rust crates are built into it, ea
 | tempfile | 3.27.0 | MIT OR Apache-2.0 |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 |
+| time | 0.3.55 | MIT OR Apache-2.0 |
+| time-core | 0.1.9 | MIT OR Apache-2.0 |
+| time-macros | 0.2.32 | MIT OR Apache-2.0 |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 |
