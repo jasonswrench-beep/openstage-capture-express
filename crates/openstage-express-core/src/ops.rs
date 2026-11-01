@@ -448,6 +448,48 @@ impl Document {
         Ok(())
     }
 
+    /// Move several steps (each with its substeps) up (`delta` below 0) or down (above 0) one place at a time, `delta` times, among
+    /// their brothers and sisters, as one change. A step chosen together with the step it is inside is carried by that step. Chosen
+    /// steps that sit together move past the step beside them as a block; a chosen step already at the end of its level stays, and
+    /// so do the chosen steps packed against it. Returns whether anything moved (if not, nothing is changed, not even the time).
+    pub fn move_steps_by(&mut self, ids: &[String], delta: i32, now: &str) -> Result<bool, OpError> {
+        for id in ids {
+            self.require(id)?;
+        }
+        let mut tree = Tree::from_steps(&self.guide.steps);
+        let tops = self.top_chosen(&tree, ids);
+        let chosen: BTreeSet<&str> = tops.iter().map(String::as_str).collect();
+        let mut parents: Vec<Option<String>> = tops.iter().filter_map(|id| tree.locate(id).map(|(p, _)| p)).collect();
+        parents.sort();
+        parents.dedup();
+        let mut moved = false;
+        for _ in 0..delta.unsigned_abs() {
+            for parent in &parents {
+                let list = tree.siblings_mut(parent);
+                if delta < 0 {
+                    for i in 1..list.len() {
+                        if chosen.contains(list[i].as_str()) && !chosen.contains(list[i - 1].as_str()) {
+                            list.swap(i, i - 1);
+                            moved = true;
+                        }
+                    }
+                } else {
+                    for i in (0..list.len().saturating_sub(1)).rev() {
+                        if chosen.contains(list[i].as_str()) && !chosen.contains(list[i + 1].as_str()) {
+                            list.swap(i, i + 1);
+                            moved = true;
+                        }
+                    }
+                }
+            }
+        }
+        if moved {
+            self.commit_tree(&tree);
+            self.touch(now);
+        }
+        Ok(moved)
+    }
+
     /// Make a step a substep of the one just before it at the same level.
     pub fn indent(&mut self, id: &str, now: &str) -> Result<(), OpError> {
         self.require(id)?;
@@ -513,6 +555,17 @@ impl Document {
         self.require(id)?;
         let mut tree = Tree::from_steps(&self.guide.steps);
         let (parent, index) = tree.locate(id).ok_or_else(|| OpError::NoSuchStep(id.to_string()))?;
+        let top = self.copy_subtree(&mut tree, id, &parent)?;
+        tree.siblings_mut(&parent).insert(index + 1, top.clone());
+        self.commit_tree(&tree);
+        self.touch(now);
+        Ok(top)
+    }
+
+    /// Copy a step and everything under it with new ids, adding the copies to the step list and to `tree` (the copy's own
+    /// substeps are in the tree, but the copy itself is not in any list of brothers and sisters yet: the caller puts it
+    /// where it goes). `parent` is the parent the copy gets. Returns the copy's id.
+    fn copy_subtree(&mut self, tree: &mut Tree, id: &str, parent: &Option<String>) -> Result<String, OpError> {
         let originals = tree.subtree(id);
         let mut renamed: BTreeMap<String, String> = BTreeMap::new();
         for old in &originals {
@@ -530,11 +583,67 @@ impl Document {
                 tree.kids.insert(Some(renamed[old].clone()), kids);
             }
         }
-        let top = renamed[id].clone();
-        tree.siblings_mut(&parent).insert(index + 1, top.clone());
+        Ok(renamed[id].clone())
+    }
+
+    /// Copy several steps (each with its substeps) as one change. A step chosen together with the step it is inside is carried by
+    /// that step, so it is not copied twice. Steps that sit next to each other at one level are copied as a block, straight after
+    /// the last of them; steps that are apart are each copied straight after themselves. Returns the new ids of the copies, in
+    /// the order of the list.
+    pub fn duplicate_steps(&mut self, ids: &[String], now: &str) -> Result<Vec<String>, OpError> {
+        for id in ids {
+            self.require(id)?;
+        }
+        let mut tree = Tree::from_steps(&self.guide.steps);
+        let tops = self.top_chosen(&tree, ids);
+        if tops.is_empty() {
+            return Ok(Vec::new());
+        }
+        let places: Vec<(Option<String>, usize)> = tops.iter().filter_map(|id| tree.locate(id)).collect();
+        let as_a_block =
+            places.len() == tops.len() && places.windows(2).all(|w| w[0].0 == w[1].0 && w[1].1 == w[0].1 + 1);
+        let mut copies = Vec::with_capacity(tops.len());
+        for (id, (parent, _)) in tops.iter().zip(&places) {
+            copies.push(self.copy_subtree(&mut tree, id, parent)?);
+        }
+        if as_a_block {
+            let (parent, first) = places[0].clone();
+            let list = tree.siblings_mut(&parent);
+            for (n, copy) in copies.iter().enumerate() {
+                list.insert(first + tops.len() + n, copy.clone());
+            }
+        } else {
+            for (id, copy) in tops.iter().zip(&copies) {
+                let (parent, index) = tree.locate(id).ok_or_else(|| OpError::NoSuchStep(id.clone()))?;
+                tree.siblings_mut(&parent).insert(index + 1, copy.clone());
+            }
+        }
         self.commit_tree(&tree);
         self.touch(now);
-        Ok(top)
+        Ok(copies)
+    }
+
+    /// The chosen steps that are not inside another chosen step, in the order of the list.
+    fn top_chosen(&self, tree: &Tree, ids: &[String]) -> Vec<String> {
+        let chosen: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
+        let inside_a_chosen = |id: &str| {
+            let mut at = id.to_string();
+            // The walk up is cut short after as many steps as there are steps, so a damaged file with a loop cannot hang it.
+            for _ in 0..self.guide.steps.len() {
+                let Some((Some(parent), _)) = tree.locate(&at) else { return false };
+                if chosen.contains(parent.as_str()) {
+                    return true;
+                }
+                at = parent;
+            }
+            false
+        };
+        self.guide
+            .steps
+            .iter()
+            .filter(|s| chosen.contains(s.id.as_str()) && !inside_a_chosen(&s.id))
+            .map(|s| s.id.clone())
+            .collect()
     }
 
     /// Delete a step to the trash. Its substeps move up one level, into its place. Its picture stays where it is.
@@ -894,6 +1003,184 @@ pub(crate) mod tests {
         d.duplicate_step("step-2", LATER).unwrap();
         assert_eq!(shape(&d), ["A", "B(A)", "B(A)", "C(A)", "D", "E(D)"]);
         assert_sound(&d);
+    }
+
+    /// A, B, C, D, E at the top level, as step-1 to step-5.
+    fn five() -> Document {
+        let mut d = doc();
+        for title in ["A", "B", "C", "D", "E"] {
+            add(&mut d, title, Position::End);
+        }
+        d
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn several_steps_that_sit_together_move_past_the_step_beside_them_as_a_block() {
+        let mut d = five();
+        assert_eq!(d.move_steps_by(&ids(&["step-3", "step-4"]), -1, LATER), Ok(true));
+        assert_eq!(shape(&d), ["A", "C", "D", "B", "E"]);
+        assert_eq!(
+            d.move_steps_by(&ids(&["step-4", "step-3"]), -1, LATER),
+            Ok(true),
+            "the order they are given in does not matter"
+        );
+        assert_eq!(shape(&d), ["C", "D", "A", "B", "E"]);
+        let before = d.clone();
+        assert_eq!(d.move_steps_by(&ids(&["step-3", "step-4"]), -1, LATER), Ok(false), "the block is first already");
+        assert_eq!(d, before, "nothing changes, not even the time");
+        assert_eq!(d.move_steps_by(&ids(&["step-3", "step-4"]), 1, NOW), Ok(true));
+        assert_eq!(shape(&d), ["A", "C", "D", "B", "E"]);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn steps_that_are_apart_each_move_a_place_and_one_already_at_the_end_stays() {
+        let mut d = five();
+        assert_eq!(d.move_steps_by(&ids(&["step-1", "step-3"]), -1, LATER), Ok(true));
+        assert_eq!(shape(&d), ["A", "C", "B", "D", "E"], "A is first and stays, C moves up");
+        let mut d = five();
+        assert_eq!(d.move_steps_by(&ids(&["step-2", "step-5"]), 1, LATER), Ok(true));
+        assert_eq!(shape(&d), ["A", "C", "B", "D", "E"], "E is last and stays, B moves down");
+        let mut d = five();
+        let before = d.clone();
+        assert_eq!(d.move_steps_by(&ids(&["step-4", "step-5"]), 1, LATER), Ok(false));
+        assert_eq!(d, before);
+    }
+
+    #[test]
+    fn moving_by_two_places_and_by_none() {
+        let mut d = five();
+        assert_eq!(d.move_steps_by(&ids(&["step-5"]), -2, LATER), Ok(true));
+        assert_eq!(shape(&d), ["A", "B", "E", "C", "D"]);
+        let before = d.clone();
+        assert_eq!(d.move_steps_by(&ids(&["step-5"]), 0, NOW), Ok(false));
+        assert_eq!(d, before);
+    }
+
+    #[test]
+    fn a_step_chosen_with_its_own_parent_is_carried_by_it_and_does_not_move_on_its_own() {
+        let mut d = family();
+        assert_eq!(d.move_steps_by(&ids(&["step-1", "step-2"]), 1, LATER), Ok(true));
+        assert_eq!(shape(&d), ["D", "E(D)", "A", "B(A)", "C(A)"], "A moved with both its substeps, in their order");
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn steps_in_different_families_move_only_within_their_own_family() {
+        let mut d = family();
+        let before = d.clone();
+        assert_eq!(d.move_steps_by(&ids(&["step-2", "step-5"]), -1, LATER), Ok(false), "each is first in its family");
+        assert_eq!(d, before);
+        assert_eq!(d.move_steps_by(&ids(&["step-3", "step-5"]), -1, LATER), Ok(true));
+        assert_eq!(shape(&d), ["A", "C(A)", "B(A)", "D", "E(D)"]);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn moving_nothing_or_a_missing_step_changes_nothing() {
+        let mut d = five();
+        let before = d.clone();
+        assert_eq!(d.move_steps_by(&[], -1, LATER), Ok(false));
+        assert_eq!(
+            d.move_steps_by(&ids(&["step-2", "step-99"]), -1, LATER),
+            Err(OpError::NoSuchStep("step-99".into()))
+        );
+        assert_eq!(d, before);
+    }
+
+    #[test]
+    fn a_run_of_steps_is_copied_as_a_block_straight_after_the_run() {
+        let mut d = five();
+        let copies = d.duplicate_steps(&ids(&["step-3", "step-2"]), LATER).unwrap();
+        assert_eq!(shape(&d), ["A", "B", "C", "B", "C", "D", "E"]);
+        assert_eq!(copies, ["step-6", "step-7"], "in the order of the list, whatever order the steps were given in");
+        let order: Vec<&str> = d.guide.steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(order, ["step-1", "step-2", "step-3", "step-6", "step-7", "step-4", "step-5"]);
+        assert_eq!(d.guide.next_step_number, 8, "the ids that were given out are never given out again");
+        assert_eq!(d.guide.updated_at, LATER);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn steps_that_are_apart_are_each_copied_straight_after_themselves() {
+        let mut d = five();
+        let copies = d.duplicate_steps(&ids(&["step-1", "step-3"]), LATER).unwrap();
+        assert_eq!(shape(&d), ["A", "A", "B", "C", "C", "D", "E"]);
+        assert_eq!(copies, ["step-6", "step-7"]);
+        let order: Vec<&str> = d.guide.steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(order, ["step-1", "step-6", "step-2", "step-3", "step-7", "step-4", "step-5"]);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn a_step_chosen_with_its_own_parent_is_copied_once_with_the_whole_family() {
+        let mut d = family();
+        let copies = d.duplicate_steps(&ids(&["step-1", "step-2"]), LATER).unwrap();
+        assert_eq!(copies.len(), 1, "B is inside A, so the copy of A carries its own B");
+        assert_eq!(shape(&d), ["A", "B(A)", "C(A)", "A", "B(A)", "C(A)", "D", "E(D)"]);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn substeps_of_one_parent_are_copied_as_a_block_under_the_same_parent() {
+        let mut d = family();
+        let copies = d.duplicate_steps(&ids(&["step-2", "step-3"]), LATER).unwrap();
+        assert_eq!(shape(&d), ["A", "B(A)", "C(A)", "B(A)", "C(A)", "D", "E(D)"]);
+        assert!(copies.iter().all(|c| d.guide.step(c).unwrap().parent.as_deref() == Some("step-1")));
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn steps_from_two_families_are_each_copied_after_themselves_in_their_own_family() {
+        let mut d = family();
+        d.duplicate_steps(&ids(&["step-2", "step-5"]), LATER).unwrap();
+        assert_eq!(shape(&d), ["A", "B(A)", "B(A)", "C(A)", "D", "E(D)", "E(D)"]);
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn steps_in_different_families_at_neighbouring_places_are_not_taken_for_a_run() {
+        // A has substeps A1, A2; B has B1, B2, B3. A2 is second in its family and B3 third in its own: places 1 and 2.
+        let mut d = doc();
+        let a = add(&mut d, "A", Position::End);
+        let b = add(&mut d, "B", Position::End);
+        add(&mut d, "A1", Position::ChildOf(&a));
+        add(&mut d, "A2", Position::ChildOf(&a));
+        for title in ["B1", "B2", "B3"] {
+            add(&mut d, title, Position::ChildOf(&b));
+        }
+        let copies = d.duplicate_steps(&ids(&["step-4", "step-7"]), LATER).unwrap();
+        assert_eq!(
+            shape(&d),
+            ["A", "A1(A)", "A2(A)", "A2(A)", "B", "B1(B)", "B2(B)", "B3(B)", "B3(B)"],
+            "each copy went straight after its own step, in its own family"
+        );
+        assert_eq!(d.guide.step(&copies[0]).unwrap().parent.as_deref(), Some("step-1"));
+        assert_eq!(d.guide.step(&copies[1]).unwrap().parent.as_deref(), Some("step-2"));
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn copying_one_step_this_way_is_the_same_as_duplicating_it() {
+        let mut one = family();
+        let mut several = family();
+        let id = one.duplicate_step("step-1", LATER).unwrap();
+        let ids = several.duplicate_steps(&["step-1".to_string()], LATER).unwrap();
+        assert_eq!(ids, [id]);
+        assert_eq!(one, several);
+    }
+
+    #[test]
+    fn copying_nothing_or_a_missing_step_changes_nothing_and_uses_no_numbers() {
+        let mut d = five();
+        let before = d.clone();
+        assert_eq!(d.duplicate_steps(&[], LATER), Ok(Vec::new()));
+        assert_eq!(d.duplicate_steps(&ids(&["step-2", "step-99"]), LATER), Err(OpError::NoSuchStep("step-99".into())));
+        assert_eq!(d, before);
     }
 
     #[test]

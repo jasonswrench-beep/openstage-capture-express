@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 736 passed (250 in the core, 182 in the exports, 44 in the
-  Windows crate, 260 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 755 passed (264 in the core, 182 in the exports, 44 in the
+  Windows crate, 265 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -122,9 +122,24 @@ Written and type-checked, not yet run on Windows:
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
   only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
 
+- Moving and duplicating several chosen steps (spec E1, written and tested 2026-11-01). Alt+Up and Alt+Down, or the new "Move these
+  steps up" and "Move these steps down" buttons, move every chosen step one place among its neighbours as one change: steps that
+  sit together pass the step beside them as a block, a chosen step already at the end of its level stays (and so do the chosen
+  steps packed against it), steps in different families move only inside their own family, and a step chosen together with its
+  own parent is carried by the parent. "Duplicate these steps" copies them: a run of steps at one level is copied as a block straight
+  after the run, steps that are apart are each copied straight after themselves, and a step chosen with its own parent is copied
+  once, inside the copy of the parent. Every copy gets a new id and shares its picture file, as a single duplicate does. The copies
+  become the chosen steps (the first is the one the picture and the keyboard are on), and one Undo takes back a move or all the
+  copies. The move buttons are always pressable, so the keyboard is never left on a button that has just switched itself off; at
+  the end they say "Cannot move these steps down any further." A single step now has "Move step up" and "Move step down" buttons
+  as well (before, moving was only by Alt+Up and Alt+Down). Core: `Document::move_steps_by` and `duplicate_steps` (the single
+  `duplicate_step` now shares their copying code). Tested on any computer in the core and through the window; nobody has used it by
+  hand, and Narrator and NVDA have not read the new buttons. Sixteen deliberate faults were each caught (one first got through,
+  because no test had two steps in different families at neighbouring places; one does now). Looked at in both colour schemes.
+
 - Choosing several steps in the editor (Ctrl+click adds or takes out one, Shift+click or Shift+Up and Down chooses a run, Ctrl+A or the
   "Choose all steps" button chooses every step; the details give way to Skip, Put back, Delete and Choose just one, each done to all
-  the chosen steps as one undo; the picture and the marks are left alone, and moving or duplicating asks for one step): tested through
+  the chosen steps as one undo; the picture and the marks are left alone; moving and duplicating work on all of them too, see the next item): tested through
   the window with simulated clicks that hold Ctrl or Shift, and with keys. The steps list is still one stop for the Tab key however many
   are chosen (a test caught every chosen row becoming a stop). Nobody has done it with a real mouse or keyboard, a screen reader has
   not read it, and a person who cannot use Ctrl+click can use Shift+arrows, Ctrl+A and the button, but cannot pick separate steps
@@ -204,7 +219,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, moving or duplicating several steps at once, a "Save a copy as one file",
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, a "Save a copy as one file",
 panning the focused crop by hand, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file in Explorer, the program without a console box (it lets go of it when the window
