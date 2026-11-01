@@ -9,20 +9,20 @@ small program with its own window.
 
 ## Where this stands (honest status)
 
-**Milestone M0 is done: the empty workspace builds, tests and passes the rule checks. There is no program logic yet.** The
-program starts and prints one line. It has no window and captures nothing.
+**Milestones M0 and M1 are done. The guide model, the edit operations, undo and redo, and saving a guide folder are written and
+tested. There is still no window and no capture: the program starts and prints one line.**
 
-| Run on Windows, and working | Written and type-checked, not yet run on Windows | Tested on any computer | Not built |
+| Run on Windows, and working | Written and type-checked, not yet run on Windows | Tested on any computer (pure logic) | Not built |
 |---|---|---|---|
-| `BUILD EXPRESS.bat` built the four crates in release mode and the program printed its one line. `TEST EXPRESS.bat` ran 7 groups of tests (0 tests in all, nothing to test yet) and the rule checks, and said PASS. Both were run on 2026-10-31 on Jason's Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than double-clicked | The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered) | The rule checker (`tools/check_rules.py`) was shown to fail on an em dash, a Rust file with no licence header, a script that calls cargo directly, and a script with LF line ends and a non-ASCII byte; its licence and forbidden-crate logic was run on made-up packages | M1 to M8 and everything in the spec: the guide model, smart titles and step builder, drawing, exports, the window, capture, settings, the self-tests and the portable zip |
+| `BUILD EXPRESS.bat` and `TEST EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than double-clicked. The last run: 75 tests passed and the rule checks said PASS. The 75 tests include real files: guide folders were created, saved, locked, crashed and reopened in temporary folders on this PC | The part of `TEST EXPRESS.bat` that runs the rule checker again when it stops with a Windows error code (never triggered) | 75 tests in `openstage-express-core`: the model and its round trip with unknown fields kept; every edit operation; undo and redo, with a 300-step random walk on four seeds that returns to every earlier state; saving, the lock file, the trash and its pictures, migrations (with made-up versions, since no real migration exists yet), and crash states (a picture written but the guide not, a guide file half written). Five deliberate breakages of the code were each caught by a test. These tests use nothing Windows-specific but have only been run on this Windows PC, not on Linux | M2 to M8 and everything else in the spec: smart titles and the step builder, drawing and the focused view, the exports, the window, real capture, settings, the self-tests that need Windows, and the portable zip |
 
-Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The icon files are copied in but not yet used by any
-program (they are for milestone M7).
+Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The icon files are copied in but not used by any program
+yet (milestone M7). `TESTING-TODO.md` lists what only a person can check.
 
 ## What to do on Windows (no typing needed)
 
 1. Double-click **`BUILD EXPRESS.bat`**. It checks that Rust is installed (and explains how to install it if not), builds the
-   program, and says plainly whether it worked. The first build may ask before downloading libraries; there are none yet.
+   program, and says plainly whether it worked. The first build may ask before downloading libraries.
 2. Double-click **`TEST EXPRESS.bat`**. It runs every test, then the rule checks, and says PASS or what failed. It needs Python 3
    for the rule checks. If the checker stops with a Windows error code (not a rule failing) it tries up to three times.
 
@@ -41,6 +41,8 @@ Made by Jason on 2026-10-31, when the kickoff questions were put to him:
 | First slice? | Capture, edit, **and** PDF, Word and PowerPoint (spec D6, widened) | The first version includes the formats the spec calls S2 |
 
 Everything else in the spec (D7 to D9 and questions 4 to 12 in its section 16) is still a proposal and has not been put to Jason.
+a step-guide program is installed on Jason's computer (`C:\Program Files\a step-guide program`) and is the reference program; its behaviour may be looked at
+there, but never its code, templates, strings or artwork.
 
 ## Layout on every computer
 
@@ -60,15 +62,15 @@ new copy into a new, empty folder.
 
 ```
 crates/
-  openstage-express-core/       the guide model, edit operations, undo, smart titles, step builder, drawing (no Windows code)
-  openstage-express-export/     HTML, Markdown, JSON, images, GIF, then PDF, Word, PowerPoint (no Windows code)
-  openstage-express-windows/    hooks, UI Automation, screenshots, hotkeys (Windows only)
-  openstage-express-app/        the program openstage-capture-express.exe
+  openstage-express-core/       the guide model, edit operations, undo, saving; later smart titles, step builder, drawing
+  openstage-express-export/     HTML, Markdown, JSON, images, GIF, then PDF, Word, PowerPoint (empty so far)
+  openstage-express-windows/    hooks, UI Automation, screenshots, hotkeys (Windows only; empty so far)
+  openstage-express-app/        the program openstage-capture-express.exe (a placeholder so far)
+docs/guide-format.md            the guide format: the source of truth, kept equal to the code
 tools/check_rules.py            licence, header, writing-style and script checks
 assets/icon/                    the icon pack (SVG, PNG sizes, ICO)
+TESTING-TODO.md                 what only a person can check
 ```
-
-All four crates are empty stubs for now.
 
 ## Rules that shape the code
 
@@ -78,13 +80,14 @@ All four crates are empty stubs for now.
   telemetry crates.
 - Accessibility is not optional: every feature works by keyboard and with a screen reader, and nothing traps focus.
 - Typed text is read from the field, never logged key by key, and never for a password field.
-- Nothing is erased by the software. Delete means the trash folder.
+- Nothing is erased by the software. Delete means the trash folder, and only the person's "Empty the trash" deletes files.
+- The format is the source of truth: change `docs/guide-format.md` in the same commit as any code that reads or writes it.
 - a step-guide program is commercial. Use facts and behaviour only, never its code, templates, strings, artwork or file format.
 - Anything Jason runs is a double-clickable `.bat`. Never say something works that has only compiled.
 
 For developers, in a shell: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, `python -I tools/check_rules.py`. `python -I tools/check_rules.py --write-third-party` regenerates
-`THIRD-PARTY.md`.
+`THIRD-PARTY.md`. (On a PC whose processor makes Python crash unpredictably, run these pinned to the efficiency cores.)
 
 ## The icon
 
