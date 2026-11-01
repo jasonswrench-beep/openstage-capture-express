@@ -1,0 +1,184 @@
+# The Express guide format
+
+This document is the source of truth for what Express writes to disk. The code in `crates/openstage-express-core` must always agree
+with it: change this file in the same commit as any code that reads or writes the format. Every change to the format bumps
+`schemaVersion` and ships a migration with a fixture (see "Versions and migrations").
+
+Current version: **0.1.0**. Status: written and tested on any computer (the tests in `crates/openstage-express-core`); not yet used
+by a window or by real capture.
+
+## A guide is a folder
+
+```
+How to submit an assignment.osguide/
+  guide.json            the guide (always written atomically, and last)
+  images/step-0001.png  the original pictures, never modified
+  trash/                the pictures of deleted steps, and trash.json
+  guide.lock            present while a copy of Express has the guide open
+  guide.before-<v>.json a copy of the guide file as it was before it was brought up to date from version <v>
+```
+
+- The folder name is made from the title (characters Windows forbids become `_`, Windows reserved names get a `_`, at most 80
+  characters, `Title (2).osguide` if the name is taken). The `title` inside `guide.json` wins over the folder name.
+- Thumbnails and rendered previews are caches, not part of the format. They may be deleted at any time.
+- Default location: `Documents\OpenStage Express\Guides\`.
+- Times are ISO 8601 in UTC, such as `2026-10-31T14:32:05Z`.
+
+## `guide.json`
+
+```json
+{
+  "schemaVersion": "0.1.0",
+  "id": "g-2026-10-31-1432-a1b2",
+  "title": "How to submit an assignment",
+  "description": "",
+  "language": "en",
+  "createdAt": "2026-10-31T14:32:05Z",
+  "updatedAt": "2026-10-31T14:40:11Z",
+  "focusedView": true,
+  "nextStepNumber": 4,
+  "steps": [ { "...": "see below" } ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `schemaVersion` | Required. A version this program does not know to be older or equal is refused or migrated (see below). |
+| `id`, `title`, `createdAt`, `updatedAt`, `nextStepNumber` | Required. |
+| `description` | Optional, default empty. |
+| `language` | Optional, default `en`. The language of the step titles and the exports. |
+| `focusedView` | Optional, default `true`. The default for new steps. Each step's own `focus` decides what it shows. |
+| `nextStepNumber` | The number the next new step gets. It only ever goes up, so **a step id is never used twice**, even after a delete, an undo or emptying the trash. It must be above the number of every step in the guide. |
+| `steps` | All the steps, in reading order, as one flat list. |
+
+### Order and nesting
+
+`steps` is the depth-first order of a tree: a step is followed by all its substeps, then by its next brother or sister. A step's
+`parent` is the id of its parent, or `null` for a top-level step. **A child always comes after its parent.** Every operation that
+changes the order or nesting rewrites the list in this order, so a reader may rely on it, but a reader of a file written by something
+else must not crash on a list that is out of order (the program lists it as a problem and repairs it on the next structural edit,
+without losing a step).
+
+## A step
+
+```json
+{
+  "id": "step-1",
+  "kind": "image",
+  "title": "Click \"Assignments\"",
+  "description": "",
+  "image": { "file": "images/step-0001.png", "width": 1920, "height": 1080 },
+  "imageDescription": "",
+  "parent": null,
+  "skipped": false,
+  "click": { "x": 312, "y": 188, "button": "left" },
+  "control": { "name": "Assignments", "role": "link" },
+  "typed": null,
+  "program": "chrome.exe",
+  "focus": { "x": 0, "y": 0, "width": 1280, "height": 720 },
+  "annotations": [],
+  "capturedAt": "2026-10-31T14:32:41Z"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `id` | `step-<n>` with `n` from 1 up. Unique in the guide. Never reused (also not against deleted steps in the trash). |
+| `kind` | `image` (a picture, a title, a description), `empty` (no picture), `block` (a plain text content block, not in the table of contents). |
+| `title`, `description` | Plain text. The description may use a small Markdown subset (bold, italic, links, bullet and numbered lists), read by the exports. |
+| `image` | Required for `image`, and must be absent (`null`) for `empty` and `block`. `file` is `images/` and one plain file name (see "Picture paths"). `width` and `height` are the pixels of the original, above zero. All coordinates in the step are in these pixels, origin top left. |
+| `imageDescription` | The alt text the author wrote. If empty, exports use the title. |
+| `parent` | See "Order and nesting". |
+| `skipped` | Left out of every export. |
+| `click` | Where the click happened, in picture pixels. `button` is `left`, `right` or `middle` (default `left`). `null` for steps made by a hotkey. |
+| `control` | The control that was clicked, from UI Automation: `name` and `role`. Roles use the English names of OpenStage Capture (`button`, `link`, `edit`, and so on). `null` if unknown. |
+| `typed` | The text of a `Type` step, read from the field when typing finished (never logged key by key, never for a password field). **Private**: shown to the author, and in exports only as the step title. `null` otherwise. |
+| `program` | The program's file name only. Window titles are never stored. |
+| `focus` | The focused view crop in picture pixels, with a width and a height above zero. `null` means the whole picture. It is a stored rectangle, not an edited picture. |
+| `annotations` | Marks drawn on the picture, in drawing order. |
+| `capturedAt` | When the step was captured, or `null`. |
+
+### Picture paths
+
+A picture path is exactly `images/` followed by one file name. The name may not be empty, start with a dot, or contain `/`, `\`, `:`
+or control characters. Anything else (a path that climbs out of the folder, an absolute path, a drive letter) is refused when the
+guide is checked and never followed when it is read or saved. A path always names the picture as if it were in `images/`, even
+while the file is physically in `trash/` (see below).
+
+### Pictures and the trash
+
+Pictures are originals and are never modified; annotations, blur and the focused view are drawn on top of them at export. Two steps
+(a step and its duplicate) may name the same picture file.
+
+Where a picture file lives is decided when the guide is saved: in `images/` if any live step uses it, in `trash/` if only deleted
+steps do. A save moves the file, never copies or deletes it. A reader looks in `images/` first and then in `trash/`. A picture that
+no step uses (left by a crash between writing a picture and saving the guide) is listed to the person and never deleted by the
+program. Only the person's "Empty the trash" deletes files, and only pictures nothing uses.
+
+## Annotations
+
+```json
+{ "id": "a1", "type": "clickMark", "x": 312, "y": 188, "size": 40, "fill": "#7D87F233", "stroke": "#7D87F2", "strokeWidth": 4 }
+```
+
+`id` is unique within the step (`a1`, `a2`, ...; a new mark takes one above the highest in use). `type` and the fields each type uses:
+
+| `type` | Required | Optional | Meaning of `x`, `y` |
+|---|---|---|---|
+| `rect`, `oval`, `highlight`, `blur`, `spotlight` | `width`, `height` (above zero) | `fill`, `stroke`, `strokeWidth` | the top left corner |
+| `line`, `arrow` | `x2`, `y2` | `stroke`, `strokeWidth` | the start point (`x2`, `y2` is the end) |
+| `text` | `text` | `width`, `fontSize`, `fill`, `stroke`, `strokeWidth` | the top left corner of the text |
+| `number` | `number` | `size`, `fill`, `stroke` | the centre of the step number badge |
+| `cursor` | `style` (such as `pointer`) | `size` | the pointer's hot spot |
+| `clickMark` | `size` (above zero) | `fill`, `stroke`, `strokeWidth` | the centre of the circle |
+
+Colours are `#RRGGBB` or `#RRGGBBAA`. Fields a type does not use are left out of the file. This table fixes what is stored; how
+each mark is drawn is milestone M3 and will be written here when it is built.
+
+## `trash/trash.json`
+
+```json
+{
+  "schemaVersion": "0.1.0",
+  "entries": [
+    { "step": { "...": "a whole step, with parent null" }, "deletedAt": "2026-10-31T15:00:00Z", "wasParent": "step-1", "wasIndex": 2 }
+  ]
+}
+```
+
+Deleting a step moves it here. Its substeps are not deleted: they move up one level into its place. `wasParent` and `wasIndex` (its
+place among its brothers and sisters) let "restore" put it back; if its parent is gone it comes back at the top level. Substeps that
+moved up when it was deleted stay where they are. Steps in the trash keep their ids, and those ids are never reused.
+
+## `guide.lock`
+
+```json
+{ "pid": 1234, "startedAt": "2026-10-31T14:32:05Z" }
+```
+
+Written when a copy of Express opens the guide for editing and removed when it closes it. A second copy that finds the lock held
+by a running process opens the guide read-only and says so. A lock whose process is gone (or that cannot be read) was left by a
+crash: the next copy takes it over, and tells the person that Express closed unexpectedly and that every step up to the last one
+is safe.
+
+## Saving, and what a crash can lose
+
+A save does these in order: move pictures to where they belong, write `trash/trash.json`, write `guide.json`. Each JSON file is
+written to a temporary file beside it (`guide.json.tmp`), forced to disk, and renamed over the real one, so a crash leaves either
+the old file or the new one. A new picture is written **before** the guide that names it. So a crash costs at most the step being
+made: the last complete guide is there, plus possibly one picture nothing uses yet.
+
+## Versions and migrations
+
+- Opening a guide whose `schemaVersion` is newer than this program's is refused with "This guide was made by a newer Express", and
+  nothing is changed.
+- A guide with an older version is brought up to date in memory, one migration at a time, in order. Before the first save of a
+  migrated guide, a copy of the old file is kept as `guide.before-<old version>.json`.
+- A migration is a function from the old JSON to the new JSON plus a fixture file of the old format and a test that opens it. There
+  are **no migrations yet** (0.1.0 is the first version); the mechanism is tested with made-up versions.
+- Fields a reader does not know are kept and written back unchanged, in every object of the file, so a guide made by a slightly
+  newer Express with extra fields survives being opened and saved here.
+
+## Not in this document yet
+
+The JSON export (a flatter file for other programs, spec section 7.4) and the settings file are written when they are built.
