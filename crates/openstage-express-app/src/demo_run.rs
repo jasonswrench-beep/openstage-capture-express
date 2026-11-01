@@ -11,7 +11,7 @@ use openstage_express_export::demo::demo;
 use openstage_express_export::docx::{export_docx, DocxOptions};
 use openstage_express_export::gif::{export_gif, GifOptions};
 use openstage_express_export::html::export_html;
-use openstage_express_export::images::export_images;
+use openstage_express_export::images::{export_images, export_images_as, ImageFormat, DEFAULT_JPEG_QUALITY};
 use openstage_express_export::json::export_json;
 use openstage_express_export::markdown::export_markdown;
 use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
@@ -47,6 +47,7 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
         ("markdown", export_markdown(&the_plan)),
         ("json", export_json(&the_plan)),
         ("images", export_images(&the_plan)),
+        ("jpg", export_images_as(&the_plan, ImageFormat::Jpeg { quality: DEFAULT_JPEG_QUALITY })),
         (
             "gif",
             export_gif(
@@ -118,6 +119,7 @@ mod tests {
             "markdown/images/step-01.png",
             "json/How to submit an assignment.json",
             "images/step-06.png",
+            "jpg/step-06.jpg",
             "gif/How to submit an assignment.gif",
             "pdf/How to submit an assignment.pdf",
             "word/How to submit an assignment.docx",

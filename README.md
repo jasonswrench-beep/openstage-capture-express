@@ -12,13 +12,13 @@ small program with its own window.
 **Milestones M0 to M4 are done: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
 focused view, and exports to a web page, Markdown, JSON, a folder of pictures, an animated GIF and (since 2026-11-01) a PDF made
 by the WebView2 engine that Windows ships, a Word file and a PowerPoint file that Express writes itself. There is still no window
-and no capture. JPG is not built.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
+and no capture. JPG pictures (with a quality setting) are built too.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
 
 Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat` and `EXPORT DEMO.bat` ran on 2026-10-31 and 2026-11-01 on Jason's Windows 11 x64 PC
   (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than
-  double-clicked. The last full run of the tests: 350 passed (174 in the core, 162 in the exports, 11 in the Windows engine, 3 in
+  double-clicked. The last full run of the tests: 369 passed (174 in the core, 181 in the exports, 11 in the Windows engine, 3 in
   the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved, locked, crashed and
   reopened in temporary folders.
 - The demo's output was checked with programs that are not ours: Windows' own image decoder read the GIF (800 by 450, seven
@@ -61,19 +61,24 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 - The Word and PowerPoint exports (every XML part well formed, every relationship and content type resolving, headings, the contents
   field, alt text, notes, language, options, escaping of the author's words) and the ZIP writer they share (read back by a
   separate strict reader: every checksum, size and signature), with the real Word and PowerPoint checks above.
+- The JPG encoder (the standard tables, quality scaling, byte stuffing, odd picture sizes, transparency over white), read back by a
+  small separate decoder written for the tests, and the demo's five JPG files decoded by Windows' own imaging code (1280 by 720,
+  49 to 51 dB from the PNGs at quality 90).
 - The PDF's print page (paper, margins, cover, contents, page numbers, header and footer, languages, escaping of the author's
   words in the page and in its style rules, no script, no outside request, Roboto inside the page) and the check of the finished
   PDF (tags, language, bookmarks, alt text, "not a PDF"), with a stand-in for the engine.
 - 25 deliberate breakages of the code were each caught by a test (one slipped through the first time and got a better test). Seven
   more were tried on the Word, PowerPoint, ZIP and shared code on 2026-11-01 (a wrong checksum, lost alt text in each, contents links
   pointing at the wrong heading, a slide title that is not a title, no speaker notes, `<` not escaped): every one was caught. Five
+  more were tried on the JPG encoder (two zigzag places swapped, the cosine transform scaled wrongly, the DC change not remembered,
+  a colour sign flipped, no byte stuffing): every one was caught. Five
   more were tried on the PDF export on 2026-11-01: four were caught by the portable tests and the one that switches tagging off was
   caught by the real-engine tests. Several attempts to bring back the doubled bookmark titles (see `docs/guide-format.md`) did not
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, JPG,
-the optional logo on slides, and the portable zip.
+Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, WebP, the optional
+logo on slides, and the portable zip.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own

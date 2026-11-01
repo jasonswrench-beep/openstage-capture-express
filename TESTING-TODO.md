@@ -56,7 +56,9 @@ milestones are built; tick an item (and say on which PC and when) once it has be
 - [ ] Open the GIF in a browser and in a program you use. Windows' own decoder reads it, but it has not been seen playing. Is three
       seconds a step about right? Does the progress bar help? (The demo turns on the title card and the progress bar.)
 - [ ] The demo's screenshots draw their words as blocks. Real text drawing arrives with capture (milestone M6).
-- [ ] JPG is not built yet.
+- [ ] Open a few of the `jpg` folder's pictures next to the PNGs. At quality 90 the marks and text should look as sharp. Try
+      quality 50 and 70 (not offered anywhere until the window exists, milestone M5): are the marks still readable? JPGs of the
+      flat demo screenshots are larger than the PNGs; check a real screenshot with a photograph in it.
 
 ## PDF export (WebView2)
 
