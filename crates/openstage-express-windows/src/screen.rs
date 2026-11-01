@@ -15,9 +15,11 @@ use std::time::{Duration, Instant};
 
 use openstage_capture_windows::{system_platform, DisplayInfo};
 use openstage_express_core::capture::{Area, Picture};
-use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic, IsWindow};
 
 /// The displays, the main one first (Windows' own numbering for Express: 1 is the main display).
 pub fn displays() -> Result<Vec<DisplayInfo>, String> {
@@ -33,6 +35,73 @@ pub fn windows_version() -> Result<(String, u32), String> {
 /// Whether Windows' screen capture service is available.
 pub fn capture_supported() -> bool {
     system_platform().capture_supported()
+}
+
+/// One open window that can be captured, as the list shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowEntry {
+    /// Windows' own number for the window.
+    pub handle: isize,
+    pub title: String,
+    /// The program it belongs to, such as `notepad.exe`.
+    pub process: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl WindowEntry {
+    /// For the list and for a screen reader: `notepad.exe: Untitled (800 by 600)`.
+    pub fn describe(&self) -> String {
+        format!("{}: {} ({} by {})", self.process, self.title, self.width, self.height)
+    }
+}
+
+/// The windows a person would call open (what Alt+Tab shows), the one in front first, leaving out this program's own.
+pub fn windows() -> Result<Vec<WindowEntry>, String> {
+    let all = system_platform().list_windows().map_err(|e| e.to_string())?;
+    Ok(all
+        .into_iter()
+        .map(|w| WindowEntry { handle: w.handle, title: w.title, process: w.process, width: w.width, height: w.height })
+        .collect())
+}
+
+/// Whether this window still exists.
+pub fn window_is_open(handle: isize) -> bool {
+    unsafe { IsWindow(Some(HWND(handle as *mut std::ffi::c_void))).as_bool() }
+}
+
+/// The frame of a window as a person sees it (without the invisible borders Windows adds), in desktop pixels. None if the window
+/// is closed, minimised or has no size.
+pub fn window_area(handle: isize) -> Option<Area> {
+    let hwnd = HWND(handle as *mut std::ffi::c_void);
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() || IsIconic(hwnd).as_bool() {
+            return None;
+        }
+        let mut frame = RECT::default();
+        let measured = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame as *mut RECT as *mut std::ffi::c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .is_ok()
+            || GetWindowRect(hwnd, &mut frame).is_ok();
+        if !measured {
+            return None;
+        }
+        let (width, height) = ((frame.right - frame.left).max(0) as u32, (frame.bottom - frame.top).max(0) as u32);
+        (width > 0 && height > 0).then_some(Area { x: frame.left, y: frame.top, width, height })
+    }
+}
+
+/// The display that holds most of an area (the first, the main one, if the area is on none).
+pub fn display_of<'a>(area: &Area, all: &'a [DisplayInfo]) -> Option<&'a DisplayInfo> {
+    all.iter()
+        .max_by_key(|d| area_of(d).intersect(area).map(|o| u64::from(o.width) * u64::from(o.height)).unwrap_or(0))
+        .filter(|d| area_of(d).intersect(area).is_some())
+        .or_else(|| all.iter().find(|d| d.main))
+        .or_else(|| all.first())
 }
 
 /// The part of the desktop a display covers.
@@ -223,5 +292,34 @@ mod tests {
         let d = display(1, true);
         let percent = dpi_percent(&d);
         assert!((100..=500).contains(&percent), "{percent}");
+    }
+
+    #[test]
+    fn a_real_windows_frame_is_found_and_it_stops_being_open_when_it_closes() {
+        let beacon = crate::testwin::Beacon::show(240, 260, 150, 100).expect("a window can be shown");
+        let handle = beacon.hwnd().0 as isize;
+        assert!(window_is_open(handle));
+        assert_eq!(window_area(handle), Some(Area { x: 240, y: 260, width: 150, height: 100 }));
+        drop(beacon);
+        assert!(!window_is_open(handle));
+        assert_eq!(window_area(handle), None);
+    }
+
+    #[test]
+    fn this_programs_own_windows_are_not_offered_for_capture() {
+        let _beacon = crate::testwin::Beacon::show(300, 300, 120, 80).expect("a window can be shown");
+        let listed = windows().expect("Windows lists its windows");
+        assert!(listed.iter().all(|w| w.title != "Express beacon"), "{listed:?}");
+        assert!(listed.iter().all(|w| w.width > 0 && w.height > 0 && !w.title.is_empty()));
+    }
+
+    #[test]
+    fn a_window_is_captured_on_the_display_that_holds_most_of_it() {
+        let all = displays().expect("this PC has displays");
+        let first = &all[0];
+        let inside = Area { x: first.x + 10, y: first.y + 10, width: 100, height: 100 };
+        assert_eq!(display_of(&inside, &all).map(|d| d.number), Some(first.number));
+        let nowhere = Area { x: -1_000_000, y: -1_000_000, width: 10, height: 10 };
+        assert_eq!(display_of(&nowhere, &all).map(|d| d.main), Some(true), "off every display, the main one");
     }
 }

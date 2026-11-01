@@ -134,7 +134,18 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       closed, so the step appears a moment late (its picture and place are right). Does a delay of a second or two bother you?
 - [ ] Antivirus and SmartScreen: the hooks that watch the mouse and keyboard can make an antivirus warn on a program that is not
       signed (spec K3). Nothing has warned here; try on another PC with an antivirus.
-- [ ] Not built yet in capture: capturing one window or a drawn area, the screenshot delay and capture-mode choices (they are in the
+- [ ] Capture one window by hand: on the capture bar choose One window, Choose window..., pick a program you use, Use this window, Start.
+      Click inside it and open a menu or a drop-down list. A menu that lies inside the window's frame stays in the picture; one that hangs
+      outside the frame is outside the area, so a click in it makes no step (spec K8 chose cutting the display, not capturing the window
+      alone, so menus still show; say whether clicks in menus that leave the frame should count). Move the window and click again: the
+      pictures should follow it. Close it: capturing should stop and keep the steps. Drag it to your second display: steps should
+      be left out, with a message (the window is only captured on the display it was on when you started).
+- [ ] Capture an area by hand: choose An area I draw, Draw the area..., drag on the picture to draw, to move and to resize, try the number
+      boxes and the buttons, then Use this area and Start. Is the picture of the display clear enough to place the area? (It shows
+      the screen without Express's own windows.) Is the area what you meant in the pictures?
+- [ ] The window list and the area screen with Narrator and NVDA, only when you are away and on your go: the list is read row by row with
+      Up and Down, the number boxes are named, the picture has words with the area's numbers.
+- [ ] Not built yet in capture: the screenshot delay and capture-mode choices (they are in the
       engine and tested, but no setting reaches them), sound cues, cancelling after starting (Finish keeps the steps), HDR and
       protected content.
 - [ ] Open a guide in the folder `Documents\OpenStage Express\Guides` after a capture: is that the place you want guides kept? Is

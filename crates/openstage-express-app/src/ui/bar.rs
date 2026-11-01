@@ -7,6 +7,7 @@
 use eframe::egui::{self, RichText};
 
 use super::widgets::{self, palette};
+use crate::target::TargetKind;
 
 /// What the bar is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,13 +29,25 @@ pub struct BarView {
     pub last: Option<String>,
     /// What is being captured, for example "the whole screen (Display 1, 1920 by 1080, main display)".
     pub what: String,
+    /// Which of the three kinds of thing to capture is chosen (the choice is open only before Start).
+    pub target: TargetKind,
+    /// Whether Start can be pressed: a window or an area must have been chosen.
+    pub can_start: bool,
     /// The hotkeys, in one sentence (empty if none could be set).
     pub hotkeys: String,
 }
 
 impl BarView {
     pub fn ready(what: &str, hotkeys: &str) -> BarView {
-        BarView { phase: BarPhase::Ready, steps: 0, last: None, what: what.to_string(), hotkeys: hotkeys.to_string() }
+        BarView {
+            phase: BarPhase::Ready,
+            steps: 0,
+            last: None,
+            what: what.to_string(),
+            target: TargetKind::Screen,
+            can_start: true,
+            hotkeys: hotkeys.to_string(),
+        }
     }
 
     /// The bar's main words, which are also read out.
@@ -54,6 +67,10 @@ pub enum BarAction {
     None,
     Start,
     Cancel,
+    /// Capture the whole screen, one window or an area.
+    SetTarget(TargetKind),
+    ChooseWindow,
+    ChooseArea,
     Pause,
     Resume,
     Finish,
@@ -80,10 +97,36 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
         if let Some(last) = &view.last {
             ui.label(RichText::new(format!("Last step: {last}")).color(p.muted));
         }
+        if view.phase == BarPhase::Ready {
+            ui.label(RichText::new("What to capture:").color(p.muted));
+            ui.horizontal_wrapped(|ui| {
+                for kind in TargetKind::ALL {
+                    let r = ui.add(egui::RadioButton::new(view.target == kind, kind.name()));
+                    widgets::ring(ui, &r);
+                    if r.clicked() && view.target != kind {
+                        action = BarAction::SetTarget(kind);
+                    }
+                }
+            });
+            let choose = match view.target {
+                TargetKind::Screen => None,
+                TargetKind::Window => Some(("Choose window...", BarAction::ChooseWindow)),
+                TargetKind::Area => Some(("Draw the area...", BarAction::ChooseArea)),
+            };
+            if let Some((words, choice)) = choose {
+                if widgets::button(ui, words).clicked() {
+                    action = choice;
+                }
+            }
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| match view.phase {
             BarPhase::Ready => {
-                let start = widgets::primary_button(ui, "Start");
+                let start = if view.can_start {
+                    widgets::primary_button(ui, "Start")
+                } else {
+                    widgets::button_enabled(ui, false, "Start")
+                };
                 if phase_changed {
                     start.request_focus();
                 }

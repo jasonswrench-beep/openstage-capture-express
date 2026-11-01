@@ -8,6 +8,7 @@
 //! (M4), and the capture engine that gives the step builder its pictures ([`capture`]) is the start of M6.
 //! The format is written down in `docs/guide-format.md` and the two must always agree.
 
+pub mod area;
 pub mod builder;
 pub mod capture;
 pub mod error;

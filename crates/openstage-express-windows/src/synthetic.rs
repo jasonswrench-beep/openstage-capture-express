@@ -35,6 +35,24 @@ fn keyboard(vk: u16, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     }
 }
 
+/// Move a window (of any program) to a new top left corner, keeping its size. `true` if Windows did it.
+pub fn move_window(handle: isize, x: i32, y: i32) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER};
+    unsafe {
+        SetWindowPos(
+            HWND(handle as *mut std::ffi::c_void),
+            None,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    }
+    .is_ok()
+}
+
 /// How long, in milliseconds, nobody has touched the mouse or keyboard. `None` if Windows will not say.
 pub fn idle_ms() -> Option<u32> {
     use windows::Win32::System::SystemInformation::GetTickCount;

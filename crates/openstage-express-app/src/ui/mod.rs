@@ -11,6 +11,8 @@ pub mod about;
 pub mod app;
 pub mod bar;
 pub mod capture;
+pub mod choose_area;
+pub mod choose_window;
 pub mod editor;
 pub mod editor_state;
 pub mod export;
@@ -58,16 +60,18 @@ impl DevOptions {
             let mut value = |what: &str| it.next().cloned().ok_or_else(|| format!("{flag} needs {what}."));
             match flag.as_str() {
                 "--screen" => {
-                    options.screen = Some(match value("home, editor, export, settings, about or bar")?.as_str() {
+                    options.screen = Some(match value("home, editor, export, settings, about, bar, choose-window or choose-area")?.as_str() {
                         "home" => Screen::Home,
                         "editor" => Screen::Editor,
                         "export" => Screen::Export,
                         "settings" => Screen::Settings,
                         "about" => Screen::About,
+                        "choose-window" => Screen::ChooseWindow,
+                        "choose-area" => Screen::ChooseArea,
                         "bar" => Screen::Bar,
                         other => {
                             return Err(format!(
-                                "--screen is home, editor, export, settings, about or bar, not {other:?}."
+                                "--screen is home, editor, export, settings, about, bar, choose-window or choose-area, not {other:?}."
                             ))
                         }
                     })
@@ -107,7 +111,8 @@ enum HotkeyEvent {
 /// The window's size as the whole program, and as the strip of the capture bar.
 const NORMAL_SIZE: [f32; 2] = [1280.0, 760.0];
 const NORMAL_MIN: [f32; 2] = [900.0, 560.0];
-const BAR_SIZE: [f32; 2] = [620.0, 250.0];
+const BAR_SIZE: [f32; 2] = [620.0, 340.0];
+const TALL_SIZE: [f32; 2] = [620.0, 620.0];
 const BAR_MIN: [f32; 2] = [360.0, 150.0];
 
 struct ExpressApp {
@@ -183,16 +188,22 @@ impl ExpressApp {
         if mode == self.applied_mode {
             return;
         }
+        let before = self.applied_mode;
         self.applied_mode = mode;
         match mode {
-            WindowMode::Bar => {
-                self.normal_position = ctx.input(|i| i.viewport().outer_rect).map(|r| r.min);
+            WindowMode::Bar | WindowMode::Tall => {
+                let size = if mode == WindowMode::Tall { TALL_SIZE } else { BAR_SIZE };
                 ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(BAR_MIN[0], BAR_MIN[1])));
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(BAR_SIZE[0], BAR_SIZE[1])));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(size[0], size[1])));
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-                if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
-                    let left = (monitor.x - BAR_SIZE[0] - 24.0).max(0.0);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(left, 24.0)));
+                // Coming from the whole program: remember where it was, and put the strip at the top right of the screen. Going
+                // between the bar and the list of windows leaves the place alone.
+                if before == WindowMode::Normal {
+                    self.normal_position = ctx.input(|i| i.viewport().outer_rect).map(|r| r.min);
+                    if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
+                        let left = (monitor.x - size[0] - 24.0).max(0.0);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(left, 24.0)));
+                    }
                 }
             }
             WindowMode::Normal => {
@@ -205,7 +216,6 @@ impl ExpressApp {
             }
         }
     }
-
     /// Mark every window of this program as left out of pictures of the screen (spec 8.5). Windows made later are caught within
     /// half a second.
     fn protect_own_windows(&mut self) {
@@ -346,6 +356,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         &crate::capture_win::ready_words(),
                         Box::new(openstage_express_windows::system::process_is_running),
                     )
+                    .with_desktop(Box::new(crate::capture_win::WindowsDesktop))
                     .with_system(
                         exports,
                         crate::export_run::system_pdf().is_some(),
@@ -372,6 +383,18 @@ pub fn run(options: DevOptions) -> eframe::Result {
             let mut app = app;
             if with_marks {
                 app.add_demo_marks();
+            }
+            // The two choosing screens are looked at over a made-up desktop, so no one's real windows are shown.
+            match screen {
+                Screen::ChooseWindow => {
+                    app = app.with_desktop(Box::new(capture::DemoDesktop));
+                    app.show_choose_window();
+                }
+                Screen::ChooseArea => {
+                    app = app.with_desktop(Box::new(capture::DemoDesktop));
+                    app.show_choose_area();
+                }
+                _ => {}
             }
             Ok(Box::new(ExpressApp {
                 app,

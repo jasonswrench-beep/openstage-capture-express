@@ -14,6 +14,7 @@ mod export_run;
 mod guide_writer;
 mod library;
 mod settings;
+mod target;
 mod ui;
 
 use std::path::PathBuf;
@@ -23,7 +24,8 @@ const USAGE: &str = "\
 OpenStage Capture Express: turns what you do on screen into a step-by-step guide
 
   openstage-capture-express                          open the window
-  openstage-capture-express --screen editor          start in the editor (or: home)
+  openstage-capture-express --screen editor          start in the editor (or: home, export, settings, about, bar,
+                                                     choose-window, choose-area)
   openstage-capture-express --theme dark             use the dark or the light colours (or: light) instead of Windows' setting
   openstage-capture-express --screenshot <file.png>  save a picture of the window, then close it
   openstage-capture-express --close-after <seconds>  close the window by itself
