@@ -230,6 +230,17 @@ impl App {
         }
     }
 
+    /// For looking at the editor without a person: choose the first three steps of the open guide, so the screen for several
+    /// chosen steps can be drawn.
+    pub fn choose_demo_steps(&mut self) {
+        let Some(editor) = self.editor.as_mut() else { return };
+        let ids: Vec<String> = editor.rows().into_iter().map(|r| r.id).collect();
+        if let (Some(first), Some(third)) = (ids.first(), ids.get(2)) {
+            editor.select(first);
+            let _ = editor.choose_run_to(third);
+        }
+    }
+
     /// For looking at the editor without a person: add one of each kind of mark to the open guide's chosen step.
     pub fn add_demo_marks(&mut self) {
         use openstage_express_core::marks::Tool;

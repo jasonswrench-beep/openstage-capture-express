@@ -31,6 +31,8 @@ struct Harness {
     depth: HashMap<NodeId, usize>,
     focus: Option<NodeId>,
     events: Vec<Event>,
+    /// The modifier keys held down (Ctrl, Shift) while the next frames run, as when a person clicks with a key held.
+    held: Modifiers,
 }
 
 impl Harness {
@@ -54,6 +56,7 @@ impl Harness {
             depth: HashMap::new(),
             focus: None,
             events: Vec::new(),
+            held: Modifiers::NONE,
         };
         h.settle();
         h
@@ -62,10 +65,13 @@ impl Harness {
     /// One pass of the whole window, with whatever has been queued as input.
     fn frame(&mut self) {
         self.time += 1.0 / 60.0;
+        // The keys held down are told to the window first, as a keyboard does, so that a click in this pass is made with them.
+        let mut events = std::mem::take(&mut self.events);
+        events.insert(0, Event::ModifiersChanged(self.held));
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
             time: Some(self.time),
-            events: std::mem::take(&mut self.events),
+            events,
             ..Default::default()
         };
         let app = &mut self.app;
@@ -2707,4 +2713,308 @@ fn every_control_on_home_and_the_trash_has_a_name_and_a_keyboard_route() {
             _ => {}
         }
     }
+}
+
+// ---- choosing several steps at once
+
+/// Ctrl held, as on Windows.
+fn ctrl_held() -> Modifiers {
+    Modifiers { ctrl: true, command: true, ..Modifiers::NONE }
+}
+
+fn shift_held() -> Modifiers {
+    Modifiers::SHIFT
+}
+
+fn chosen(h: &Harness) -> Vec<String> {
+    h.selected_rows()
+}
+
+/// Click a row with `held` down.
+fn click_row_with(h: &mut Harness, held: Modifiers, row: &str) {
+    h.held = held;
+    h.invoke(Role::ListBoxOption, row);
+    h.held = Modifiers::NONE;
+}
+
+/// The step rows of the example guide, in list order: 1, 2, 2.1, 3, a skipped one, a note, 4.
+fn example_rows(h: &Harness) -> Vec<String> {
+    let rows = h.rows();
+    assert_eq!(rows.len(), 7, "{rows:?}");
+    rows
+}
+
+#[test]
+fn ctrl_click_adds_a_step_to_the_chosen_ones_and_takes_it_out_again() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    assert_eq!(chosen(&h), [rows[0].clone()]);
+    click_row_with(&mut h, ctrl_held(), &rows[2]);
+    click_row_with(&mut h, ctrl_held(), &rows[3]);
+    assert_eq!(chosen(&h), [rows[0].clone(), rows[2].clone(), rows[3].clone()], "in the order of the list");
+    assert!(h.status().starts_with("3 steps chosen."), "{}", h.status());
+    assert_eq!(the_editor(&h).selected_id(), Some("step-1"), "the picture stays on the step that was chosen first");
+    click_row_with(&mut h, ctrl_held(), &rows[2]);
+    assert_eq!(chosen(&h), [rows[0].clone(), rows[3].clone()]);
+    // Taking out the step the picture is on moves the picture to another chosen step.
+    click_row_with(&mut h, ctrl_held(), &rows[0]);
+    assert_eq!(chosen(&h), [rows[3].clone()]);
+    assert_eq!(h.status(), rows[3], "one step left: it is said, as any step chosen is");
+    h.find(Role::TextInput, "Title");
+    // The last chosen step cannot be taken out: one is always chosen.
+    click_row_with(&mut h, ctrl_held(), &rows[3]);
+    assert_eq!(chosen(&h), [rows[3].clone()]);
+}
+
+#[test]
+fn shift_click_chooses_the_run_from_where_it_started() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[1]);
+    click_row_with(&mut h, shift_held(), &rows[4]);
+    assert_eq!(chosen(&h), rows[1..=4].to_vec());
+    assert_eq!(the_editor(&h).selected_id(), the_editor(&h).chosen_ids().last().map(String::as_str));
+    // Shift+click again from the same start: the run follows, backwards too.
+    click_row_with(&mut h, shift_held(), &rows[0]);
+    assert_eq!(chosen(&h), rows[0..=1].to_vec(), "from the first-chosen step up to this one");
+    // A plain click chooses just that step again.
+    h.invoke(Role::ListBoxOption, &rows[5]);
+    assert_eq!(chosen(&h), [rows[5].clone()]);
+    // Ctrl+click starts a new run from the step clicked.
+    click_row_with(&mut h, ctrl_held(), &rows[2]);
+    click_row_with(&mut h, shift_held(), &rows[3]);
+    assert_eq!(
+        chosen(&h),
+        rows[2..=3].to_vec(),
+        "the run starts at the Ctrl+clicked step, and the steps before it are let go"
+    );
+}
+
+#[test]
+fn shift_up_and_down_lengthen_and_shorten_a_run_and_ctrl_a_chooses_every_step() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.focus_on(Role::ListBoxOption, &rows[0]);
+    h.key(Key::ArrowDown, Modifiers::SHIFT);
+    h.key(Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(chosen(&h), rows[0..=2].to_vec());
+    assert_eq!(h.focused_words().as_deref(), Some(rows[2].as_str()), "the keyboard goes with the end of the run");
+    h.key(Key::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(chosen(&h), rows[0..=1].to_vec(), "Shift+Up shortens it again");
+    // A plain Down chooses just the next step.
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(chosen(&h), [rows[2].clone()]);
+    // At the ends nothing more happens.
+    h.focus_on(Role::ListBoxOption, &rows[2]);
+    h.key(Key::A, ctrl());
+    assert_eq!(chosen(&h).len(), 7);
+    assert!(h.status().starts_with("All 7 steps chosen."), "{}", h.status());
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(chosen(&h).len(), 1, "a plain arrow goes back to one step");
+}
+
+#[test]
+fn shift_up_on_the_first_step_and_shift_down_on_the_last_choose_nothing_more() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.focus_on(Role::ListBoxOption, &rows[0]);
+    h.key(Key::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(chosen(&h), [rows[0].clone()]);
+    h.invoke(Role::ListBoxOption, &rows[6]);
+    h.focus_on(Role::ListBoxOption, &rows[6]);
+    h.key(Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(chosen(&h), [rows[6].clone()]);
+}
+
+#[test]
+fn the_choose_all_button_is_a_way_to_choose_several_without_keys_or_the_mouse() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::Button, "Choose all steps");
+    assert_eq!(chosen(&h), rows);
+    assert!(h.node(h.find(Role::Button, "Choose all steps")).is_disabled(), "everything is chosen already");
+    h.find(Role::Heading, "Several steps chosen");
+    h.find(Role::Label, "7 steps are chosen:");
+    h.invoke(Role::Button, "Choose just one step: 1. Click \"Assignments\"");
+    assert_eq!(chosen(&h), [rows[0].clone()]);
+    assert_eq!(h.focused_words().as_deref(), Some(rows[0].as_str()), "the keyboard is back on the list");
+    assert!(!h.node(h.find(Role::Button, "Choose all steps")).is_disabled());
+}
+
+#[test]
+fn with_several_chosen_the_details_of_one_step_give_way_to_what_can_be_done_to_all() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.find(Role::TextInput, "Title");
+    click_row_with(&mut h, shift_held(), &rows[1]);
+    assert!(!h.has(Role::TextInput, "Title"), "one step's title box is not shown over two steps");
+    assert!(!h.has(Role::CheckBox, "Skip in export"));
+    h.find(Role::Heading, "Several steps chosen");
+    h.find(Role::Label, "2 steps are chosen:");
+    h.find(Role::Label, &rows[0]);
+    h.find(Role::Label, &rows[1]);
+    for words in ["Skip these steps in export", "Delete these steps"] {
+        assert!(!h.node(h.find(Role::Button, words)).is_disabled(), "{words}");
+    }
+    assert!(h.node(h.find(Role::Button, "Put these steps back in export")).is_disabled(), "none is skipped");
+    assert!(h.node(h.find(Role::Button, "Duplicate step")).is_disabled(), "duplicating is for one step");
+    // The guide's own title box stays.
+    h.find(Role::TextInput, "Guide title");
+}
+
+#[test]
+fn skipping_several_steps_is_one_change_and_one_undo_and_the_buttons_follow_what_is_skipped() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[0]);
+    click_row_with(&mut h, shift_held(), &rows[1]);
+    h.invoke(Role::Button, "Skip these steps in export");
+    assert_eq!(h.status(), "2 steps will be left out of exports. Undo brings them back.");
+    let after = h.rows();
+    assert!(after[0].ends_with("(skipped)") && after[1].ends_with("(skipped)"), "{after:?}");
+    assert!(after[2].ends_with("(skipped)"), "the step inside a skipped step is left out with it: {after:?}");
+    assert!(h.node(h.find(Role::Button, "Skip these steps in export")).is_disabled(), "all of them are skipped now");
+    assert!(!h.node(h.find(Role::Button, "Put these steps back in export")).is_disabled());
+    h.invoke(Role::Button, "Put these steps back in export");
+    assert_eq!(h.status(), "2 steps will be in exports.");
+    assert!(!h.rows()[0].ends_with("(skipped)"));
+    // Both are enabled when the chosen steps are a mixture.
+    h.invoke(Role::ListBoxOption, &rows[3]);
+    click_row_with(&mut h, shift_held(), &rows[4]);
+    assert!(!h.node(h.find(Role::Button, "Skip these steps in export")).is_disabled());
+    assert!(!h.node(h.find(Role::Button, "Put these steps back in export")).is_disabled());
+    // One undo takes back the whole of a skip.
+    h.invoke(Role::Button, "Skip these steps in export");
+    let skipped_now = h.rows().iter().filter(|r| r.ends_with("(skipped)")).count();
+    assert!(skipped_now >= 2);
+    h.invoke(Role::Button, "Undo");
+    let skipped_after_undo = h.rows().iter().filter(|r| r.ends_with("(skipped)")).count();
+    assert_eq!(skipped_after_undo, 1, "only the step that was skipped before is still skipped: {:?}", h.rows());
+}
+
+#[test]
+fn deleting_several_steps_is_one_change_and_one_undo_and_the_keyboard_goes_to_the_next_step() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[1]);
+    click_row_with(&mut h, shift_held(), &rows[3]);
+    assert_eq!(chosen(&h).len(), 3);
+    h.invoke(Role::Button, "Delete these steps");
+    assert_eq!(h.status(), "Deleted 3 steps. Undo brings them back.");
+    let left = h.rows();
+    assert_eq!(left.len(), 4, "{left:?}");
+    assert_eq!(chosen(&h), [rows[4].clone()], "the step after the last one deleted is chosen");
+    h.find(Role::TextInput, "Title");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(h.rows(), rows, "one undo brings all three back, in their places");
+}
+
+#[test]
+fn deleting_the_last_steps_leaves_the_step_before_and_the_delete_key_deletes_every_chosen_step() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[5]);
+    click_row_with(&mut h, shift_held(), &rows[6]);
+    h.key(Key::Delete, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(h.status(), "Deleted 2 steps. Undo brings them back.");
+    assert_eq!(h.rows().len(), 5);
+    assert_eq!(chosen(&h), [rows[4].clone()], "nothing was left after them, so the one before is chosen");
+    // With one step chosen the same key deletes that one, as before.
+    h.key(Key::Delete, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert!(h.status().starts_with("Deleted "), "{}", h.status());
+    assert_eq!(h.rows().len(), 4);
+}
+
+#[test]
+fn moving_and_duplicating_are_for_one_step_so_several_chosen_are_told_to_choose_one() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::ListBoxOption, &rows[0]);
+    click_row_with(&mut h, shift_held(), &rows[1]);
+    h.key(Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(h.status(), "Moving works on one step at a time. Choose just one step first.");
+    assert_eq!(h.rows(), rows, "nothing moved");
+    assert_eq!(chosen(&h).len(), 2, "and the choice is kept");
+}
+
+#[test]
+fn adding_a_step_or_undoing_goes_back_to_one_chosen_step() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.invoke(Role::Button, "Choose all steps");
+    h.invoke(Role::Button, "Add a step");
+    assert_eq!(chosen(&h).len(), 1, "only the new step is chosen");
+    assert_eq!(h.rows().len(), 8);
+    h.invoke(Role::Button, "Choose all steps");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(chosen(&h).len(), 1);
+    assert_eq!(h.rows(), rows);
+}
+
+#[test]
+fn with_several_steps_chosen_the_mouse_does_not_pick_up_a_mark() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    let at = picture_mapper(&h);
+    let mark = the_editor(&h).marks()[0].clone();
+    let (mx, my) = (mark.x, mark.y);
+    // With one step chosen, pressing on its mark picks it up.
+    press_and_move(&mut h, at(mx, my), at(mx + 5, my + 5));
+    assert!(the_editor(&h).is_dragging(), "a mark is picked up when one step is chosen");
+    let_go(&mut h, at(mx + 5, my + 5));
+    // Ctrl+click adds a second step and leaves the picture on the first, whose mark this is.
+    click_row_with(&mut h, ctrl_held(), &rows[1]);
+    assert_eq!(the_editor(&h).selected_id(), Some("step-1"));
+    assert_eq!(the_editor(&h).chosen_count(), 2);
+    let at = picture_mapper(&h);
+    press_and_move(&mut h, at(mx, my), at(mx + 5, my + 5));
+    assert!(!the_editor(&h).is_dragging(), "the picture is only shown when several steps are chosen");
+    let_go(&mut h, at(mx + 5, my + 5));
+}
+
+#[test]
+fn the_steps_list_is_still_one_stop_for_the_tab_key_and_every_control_has_a_name() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Choose all steps");
+    let mut stops = Vec::new();
+    for _ in 0..8 {
+        h.key(Key::Tab, NO_MODS);
+        stops.push(h.focused_words().unwrap_or_default());
+    }
+    let in_the_list =
+        stops.iter().filter(|w| w.starts_with("1. ") || w.starts_with("2. ") || w.starts_with("3. ")).count();
+    assert!(in_the_list <= 1, "the list is a single stop even with every step chosen: {stops:?}");
+    for id in &h.order {
+        let node = h.node(*id);
+        if egui::accessibility::is_input(node.role()) {
+            assert!(h.name(*id).is_some_and(|w| !w.trim().is_empty()), "unnamed {:?}\n{}", node.role(), h.dump());
+        }
+    }
+}
+
+#[test]
+fn which_step_a_run_starts_from_follows_the_last_plain_choice_or_ctrl_click() {
+    let mut e = super::editor_state::EditorState::new(openstage_express_export::demo::demo());
+    let ids: Vec<String> = e.rows().into_iter().map(|r| r.id).collect();
+    e.select(&ids[1]);
+    assert_eq!(e.chosen_ids(), [ids[1].clone()]);
+    e.choose_run_to(&ids[3]);
+    assert_eq!(e.chosen_ids(), ids[1..=3].to_vec());
+    assert_eq!(e.selected_id(), Some(ids[3].as_str()), "the end that moved is the selected one");
+    // Back past the start: the run is from the start to the new end, whichever side.
+    e.choose_run_to(&ids[0]);
+    assert_eq!(e.chosen_ids(), ids[0..=1].to_vec());
+    // Ctrl+click moves the start.
+    e.toggle_chosen(&ids[5]);
+    e.choose_run_to(&ids[6]);
+    assert_eq!(e.chosen_ids(), ids[5..=6].to_vec());
+    assert!(e.is_chosen(&ids[5]) && !e.is_chosen(&ids[0]));
+    assert_eq!(e.chosen_count(), 2);
+    // A step that is not there changes nothing.
+    assert!(e.toggle_chosen("step-99").is_none());
+    assert!(e.choose_run_to("step-99").is_none());
+    assert_eq!(e.chosen_count(), 2);
+    // Doing a bulk change to one chosen step is the ordinary single change.
+    e.select(&ids[2]);
+    assert!(e.skip_chosen(true).is_none(), "one step is not several");
 }

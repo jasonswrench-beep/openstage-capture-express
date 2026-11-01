@@ -54,6 +54,8 @@ pub struct DevOptions {
     pub height: Option<f32>,
     /// Keep the Settings page scrolled this many pixels down, so that a picture shows its lower part.
     pub scroll: Option<f32>,
+    /// Choose the first three steps of the example guide, so a picture of the editor shows several chosen steps.
+    pub choose_steps: bool,
 }
 
 impl DevOptions {
@@ -83,6 +85,7 @@ impl DevOptions {
                     })
                 }
                 "--with-marks" => options.with_marks = true,
+                "--choose-steps" => options.choose_steps = true,
                 "--scroll" => {
                     let pixels: f32 = value("a number of pixels")?
                         .parse()
@@ -450,6 +453,9 @@ pub fn run(options: DevOptions) -> eframe::Result {
             }
             if with_marks {
                 app.add_demo_marks();
+            }
+            if options.choose_steps {
+                app.choose_demo_steps();
             }
             // The two choosing screens are looked at over a made-up desktop, so no one's real windows are shown.
             match screen {
