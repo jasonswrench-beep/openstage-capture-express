@@ -3018,3 +3018,160 @@ fn which_step_a_run_starts_from_follows_the_last_plain_choice_or_ctrl_click() {
     e.select(&ids[2]);
     assert!(e.skip_chosen(true).is_none(), "one step is not several");
 }
+
+// ---- sorting the guides on Home
+
+/// A guides folder with one real guide for each title, each saying it was last changed at the time given.
+fn guides_dir_dated(guides: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = guides_dir(&guides.iter().map(|(title, _)| *title).collect::<Vec<_>>());
+    for (title, updated) in guides {
+        let file = dir.path().join(format!("{title}.osguide")).join("guide.json");
+        let mut json: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        json["updatedAt"] = serde_json::Value::String(updated.to_string());
+        std::fs::write(&file, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+    }
+    dir
+}
+
+/// The guides in the order Home shows them (the cards, from the top).
+fn card_order(h: &Harness) -> Vec<String> {
+    h.order
+        .iter()
+        .filter(|id| h.node(**id).role() == Role::Button)
+        .filter_map(|id| h.name(*id))
+        .filter_map(|name| name.strip_suffix(", 5 steps").map(str::to_string))
+        .collect()
+}
+
+/// Banana is the newest, Apple the oldest, and cherry is between; so each order gives a different list.
+fn three_guides() -> tempfile::TempDir {
+    guides_dir_dated(&[
+        ("banana", "2026-01-03T10:00:00Z"),
+        ("Apple", "2026-01-01T10:00:00Z"),
+        ("cherry", "2026-01-02T10:00:00Z"),
+    ])
+}
+
+#[test]
+fn the_sort_button_is_there_when_there_are_two_or_more_guides_and_says_what_it_does() {
+    let h = Harness::new(Screen::Home);
+    assert!(h.pressable_named("Sort: newest first. Press to change the order.").is_empty(), "the example is one guide");
+    let dir = guides_dir(&["Only"]);
+    let (h, _) = home_over(dir.path(), &[]);
+    assert!(h.pressable_named("Sort: newest first. Press to change the order.").is_empty(), "one guide has no order");
+    let dir = three_guides();
+    let (h, _) = home_over(dir.path(), &[]);
+    h.find(Role::Button, "Sort: newest first. Press to change the order.");
+}
+
+#[test]
+fn each_press_goes_to_the_next_order_says_so_and_the_cards_follow() {
+    let dir = three_guides();
+    let (mut h, _) = home_over(dir.path(), &[]);
+    assert_eq!(card_order(&h), ["banana", "cherry", "Apple"], "newest first to begin with");
+    h.invoke(Role::Button, "Sort: newest first. Press to change the order.");
+    assert_eq!(h.status(), "Sorted by oldest first.");
+    assert_eq!(card_order(&h), ["Apple", "cherry", "banana"]);
+    h.invoke(Role::Button, "Sort: oldest first. Press to change the order.");
+    assert_eq!(h.status(), "Sorted by name, A to Z.");
+    assert_eq!(card_order(&h), ["Apple", "banana", "cherry"], "capitals do not matter: Apple is before banana");
+    h.invoke(Role::Button, "Sort: name, A to Z. Press to change the order.");
+    assert_eq!(h.status(), "Sorted by name, Z to A.");
+    assert_eq!(card_order(&h), ["cherry", "banana", "Apple"]);
+    h.invoke(Role::Button, "Sort: name, Z to A. Press to change the order.");
+    assert_eq!(h.status(), "Sorted by newest first.");
+    assert_eq!(card_order(&h), ["banana", "cherry", "Apple"], "and round again");
+}
+
+#[test]
+fn the_order_is_remembered_in_the_settings_and_used_when_the_program_opens() {
+    let dir = three_guides();
+    let settings_dir = tempfile::tempdir().unwrap();
+    let path = settings_dir.path().join("settings.json");
+    let (mut h, _) = home_over(dir.path(), &[]);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_settings(AppSettings::default(), Some(path.clone()), None);
+    h.settle();
+    h.invoke(Role::Button, "Sort: newest first. Press to change the order.");
+    h.invoke(Role::Button, "Sort: oldest first. Press to change the order.");
+    assert_eq!(crate::settings::load(&path).0.home_sort, crate::settings::HomeSort::NameAz);
+    // A new run: the guides are looked at first, and then the settings are given, as the program does.
+    let (mut again, _) = home_over(dir.path(), &[]);
+    assert_eq!(card_order(&again), ["banana", "cherry", "Apple"], "before the settings are known, the usual order");
+    let (settings, note) = crate::settings::load(&path);
+    assert!(note.is_none());
+    let app = std::mem::replace(&mut again.app, App::new(Screen::Home));
+    again.app = app.with_settings(settings, Some(path), None);
+    again.settle();
+    assert_eq!(card_order(&again), ["Apple", "banana", "cherry"]);
+    again.find(Role::Button, "Sort: name, A to Z. Press to change the order.");
+}
+
+#[test]
+fn searching_keeps_the_order_and_a_renamed_guide_moves_to_where_its_new_time_puts_it() {
+    let dir = three_guides();
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Sort: newest first. Press to change the order.");
+    h.invoke(Role::Button, "Sort: oldest first. Press to change the order.");
+    h.invoke(Role::Button, "Sort: name, A to Z. Press to change the order.");
+    assert_eq!(card_order(&h), ["cherry", "banana", "Apple"]);
+    h.focus_on(Role::TextInput, "Search");
+    h.type_text("an");
+    assert_eq!(card_order(&h), ["banana"]);
+    h.key(Key::A, ctrl());
+    h.key(Key::Backspace, NO_MODS);
+    assert_eq!(card_order(&h), ["cherry", "banana", "Apple"]);
+    // Renaming changes when the guide was last changed: under name order it goes by its new name.
+    h.invoke(Role::Button, "Rename Apple");
+    h.key(Key::A, ctrl());
+    h.type_text("Zebra");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(card_order(&h), ["Zebra", "cherry", "banana"], "Z to A, so Zebra is first");
+    h.invoke(Role::Button, "Sort: name, Z to A. Press to change the order.");
+    assert_eq!(
+        card_order(&h),
+        ["Zebra", "banana", "cherry"],
+        "newest first: Zebra was just changed, then banana, then cherry"
+    );
+}
+
+#[test]
+fn a_restored_guide_takes_its_place_in_the_order_and_an_empty_list_keeps_the_choice() {
+    let dir = three_guides();
+    let (mut h, _) = home_over(dir.path(), &[]);
+    h.invoke(Role::Button, "Sort: newest first. Press to change the order.");
+    h.invoke(Role::Button, "Sort: oldest first. Press to change the order.");
+    assert_eq!(card_order(&h), ["Apple", "banana", "cherry"]);
+    h.invoke(Role::Button, "Delete banana");
+    h.invoke(Role::Button, "Move to the Trash");
+    assert_eq!(card_order(&h), ["Apple", "cherry"]);
+    h.invoke(Role::Button, "Trash");
+    h.invoke(Role::Button, "Restore banana");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(card_order(&h), ["Apple", "banana", "cherry"], "back between the two, by name");
+    for title in ["Apple", "banana", "cherry"] {
+        h.invoke(Role::Button, &format!("Delete {title}"));
+        h.invoke(Role::Button, "Move to the Trash");
+    }
+    assert!(h.app.home.shows_example());
+    assert_eq!(h.app.home.sort, crate::settings::HomeSort::NameAz, "the choice is not lost when the list is empty");
+    h.invoke(Role::Button, "Trash");
+    h.invoke(Role::Button, "Restore cherry");
+    h.invoke(Role::Button, "Restore banana");
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(card_order(&h), ["banana", "cherry"], "and is used again when guides come back");
+}
+
+#[test]
+fn the_sort_button_is_one_tab_stop_before_the_first_card() {
+    let dir = three_guides();
+    let (mut h, _) = home_over(dir.path(), &[]);
+    let mut seen = Vec::new();
+    for _ in 0..9 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    let sort = seen.iter().position(|w| w.starts_with("Sort: ")).expect("the sort button is reached");
+    assert_eq!(seen[sort - 1], "Trash");
+    assert_eq!(seen[sort + 1], "banana, 5 steps", "then the first card");
+}

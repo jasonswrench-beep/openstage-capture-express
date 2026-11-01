@@ -9,6 +9,7 @@ use eframe::egui::{self, RichText};
 use openstage_express_export::demo::demo;
 
 use crate::library::Entry;
+use crate::settings::HomeSort;
 
 use super::rows::{step_count, steps_words};
 use super::widgets::{self, palette};
@@ -22,6 +23,8 @@ pub struct GuideCard {
     pub example: bool,
     /// Where the guide's folder is (the example has none).
     pub path: Option<PathBuf>,
+    /// When the guide was last changed, as the guide says (an ISO time, so it sorts as text; the example has none).
+    pub updated_at: String,
 }
 
 impl GuideCard {
@@ -58,6 +61,8 @@ pub struct HomeState {
     pub guides: Vec<GuideCard>,
     pub renaming: Option<Renaming>,
     pub deleting: Option<Deleting>,
+    /// How the guides are ordered.
+    pub sort: HomeSort,
 }
 
 impl HomeState {
@@ -71,10 +76,18 @@ impl HomeState {
                 steps: step_count(&guide),
                 example: true,
                 path: None,
+                updated_at: String::new(),
             }],
             renaming: None,
             deleting: None,
+            sort: HomeSort::default(),
         }
+    }
+
+    /// Order the guides this way, now and whenever the list is made again.
+    pub fn set_sort(&mut self, sort: HomeSort) {
+        self.sort = sort;
+        sort_cards(&mut self.guides, sort);
     }
 
     /// Begin renaming the guide at this place in the list. Nothing happens for the example, which is not a guide on disk.
@@ -107,9 +120,10 @@ impl HomeState {
             self.deleting = None;
         }
         if entries.is_empty() {
-            let search = std::mem::take(&mut self.search);
+            let (search, sort) = (std::mem::take(&mut self.search), self.sort);
             *self = HomeState::example();
             self.search = search;
+            self.sort = sort;
         } else {
             self.guides = entries
                 .iter()
@@ -118,8 +132,10 @@ impl HomeState {
                     steps: e.steps,
                     example: false,
                     path: Some(e.path.clone()),
+                    updated_at: e.updated_at.clone(),
                 })
                 .collect();
+            sort_cards(&mut self.guides, self.sort);
         }
     }
 
@@ -143,6 +159,20 @@ impl HomeState {
     }
 }
 
+/// Put the cards in order. Names are compared without minding capitals; guides that tie are put in a steady order (by name, then by when
+/// they changed) so that the list never shuffles from one look at the folder to the next.
+fn sort_cards(cards: &mut [GuideCard], sort: HomeSort) {
+    let by_name = |a: &GuideCard, b: &GuideCard| {
+        a.title.to_lowercase().cmp(&b.title.to_lowercase()).then_with(|| a.title.cmp(&b.title))
+    };
+    cards.sort_by(|a, b| match sort {
+        HomeSort::Newest => b.updated_at.cmp(&a.updated_at).then_with(|| by_name(a, b)),
+        HomeSort::Oldest => a.updated_at.cmp(&b.updated_at).then_with(|| by_name(a, b)),
+        HomeSort::NameAz => by_name(a, b).then_with(|| b.updated_at.cmp(&a.updated_at)),
+        HomeSort::NameZa => by_name(b, a).then_with(|| b.updated_at.cmp(&a.updated_at)),
+    });
+}
+
 /// What the person asked for on this screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -164,6 +194,8 @@ pub enum Action {
     ConfirmDelete,
     /// No, keep it.
     KeepGuide,
+    /// Go to the next order for the list of guides.
+    Sort,
 }
 
 /// What a card takes of the width and what is left for the Rename and Delete buttons beside it.
@@ -198,7 +230,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
             }
         });
         ui.add_space(14.0);
-        widgets::subheading(ui, "Your guides");
+        ui.horizontal(|ui| {
+            widgets::subheading(ui, "Your guides");
+            // Ordering one guide is not a thing, so the button is there when there are two or more.
+            if state.guides.len() > 1 {
+                ui.add_space(12.0);
+                let shown = format!("Sort: {}", state.sort.name());
+                let spoken = format!("{shown}. Press to change the order.");
+                if widgets::button_named(ui, &shown, &spoken).clicked() {
+                    action = Action::Sort;
+                }
+            }
+        });
         if let Some(rename) = state.renaming.as_mut() {
             let shown = format!("Rename \"{}\"", rename.title);
             widgets::subheading(ui, &shown);
@@ -299,7 +342,10 @@ mod tests {
         assert_eq!(home.guides[0].steps, 5);
         assert!(home.guides[0].example);
         assert_eq!(home.guides[0].label(), "How to submit an assignment, 5 steps, example guide");
-        assert_eq!(GuideCard { title: "One".into(), steps: 1, example: false, path: None }.label(), "One, 1 step");
+        assert_eq!(
+            GuideCard { title: "One".into(), steps: 1, example: false, path: None, updated_at: String::new() }.label(),
+            "One, 1 step"
+        );
     }
 
     fn with_two_real_guides() -> HomeState {
@@ -309,6 +355,75 @@ mod tests {
             Entry { path: PathBuf::from("b.osguide"), title: "Beta".into(), steps: 3, updated_at: "1".into() },
         ]);
         home
+    }
+
+    fn card(title: &str, updated: &str) -> GuideCard {
+        GuideCard {
+            title: title.into(),
+            steps: 1,
+            example: false,
+            path: Some(PathBuf::from(format!("{title}.osguide"))),
+            updated_at: updated.into(),
+        }
+    }
+
+    fn titles(cards: &[GuideCard]) -> Vec<&str> {
+        cards.iter().map(|c| c.title.as_str()).collect()
+    }
+
+    #[test]
+    fn each_order_puts_the_guides_in_its_order_and_guides_that_tie_stay_in_a_steady_order() {
+        let mut cards = vec![
+            card("banana", "2026-01-02"),
+            card("apple", "2026-01-02"),
+            card("Cherry", "2026-01-03"),
+            card("Apple", "2026-01-01"),
+            card("date", ""),
+        ];
+        sort_cards(&mut cards, HomeSort::Newest);
+        assert_eq!(
+            titles(&cards),
+            ["Cherry", "apple", "banana", "Apple", "date"],
+            "newest first; the same time by name"
+        );
+        sort_cards(&mut cards, HomeSort::Oldest);
+        assert_eq!(titles(&cards), ["date", "Apple", "apple", "banana", "Cherry"], "no time is the oldest");
+        sort_cards(&mut cards, HomeSort::NameAz);
+        assert_eq!(
+            titles(&cards),
+            ["Apple", "apple", "banana", "Cherry", "date"],
+            "capitals do not matter, and Apple comes before apple"
+        );
+        sort_cards(&mut cards, HomeSort::NameZa);
+        assert_eq!(titles(&cards), ["date", "Cherry", "banana", "apple", "Apple"]);
+        // However they start out, the same guides come out in the same order.
+        let mut shuffled = cards.clone();
+        shuffled.reverse();
+        sort_cards(&mut shuffled, HomeSort::NameZa);
+        assert_eq!(titles(&shuffled), titles(&cards));
+    }
+
+    #[test]
+    fn the_list_made_again_keeps_the_order_the_person_chose_even_when_it_was_empty_for_a_while() {
+        let entry = |t: &str, u: &str| Entry {
+            path: PathBuf::from(format!("{t}.osguide")),
+            title: t.into(),
+            steps: 1,
+            updated_at: u.into(),
+        };
+        let mut home = HomeState::example();
+        home.set_sort(HomeSort::NameZa);
+        home.with_guides(&[entry("a", "3"), entry("c", "1"), entry("b", "2")]);
+        assert_eq!(titles(&home.guides), ["c", "b", "a"]);
+        home.with_guides(&[entry("z", "1"), entry("y", "2")]);
+        assert_eq!(titles(&home.guides), ["z", "y"], "a new look at the folder is in the same order");
+        home.with_guides(&[]);
+        assert!(home.shows_example());
+        assert_eq!(home.sort, HomeSort::NameZa);
+        home.with_guides(&[entry("m", "1"), entry("n", "2")]);
+        assert_eq!(titles(&home.guides), ["n", "m"]);
+        home.set_sort(HomeSort::Oldest);
+        assert_eq!(titles(&home.guides), ["m", "n"], "changing the order orders the list at once");
     }
 
     #[test]
@@ -357,7 +472,13 @@ mod tests {
     #[test]
     fn the_search_lets_through_guides_that_have_all_the_words_in_any_case() {
         let mut home = HomeState::example();
-        home.guides.push(GuideCard { title: "Set up two-step sign-in".into(), steps: 7, example: false, path: None });
+        home.guides.push(GuideCard {
+            title: "Set up two-step sign-in".into(),
+            steps: 7,
+            example: false,
+            path: None,
+            updated_at: String::new(),
+        });
         assert_eq!(home.visible(), [0, 1]);
         home.search = "  SUBMIT ".into();
         assert_eq!(home.visible(), [0]);

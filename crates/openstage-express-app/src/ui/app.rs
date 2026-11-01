@@ -201,6 +201,7 @@ impl App {
         if !formats.is_empty() {
             self.export.selection = crate::export_run::Selection::none_then(&formats);
         }
+        self.home.set_sort(settings.home_sort);
         self.settings = settings;
         self.settings_path = path;
         self.settings_note = note;
@@ -667,6 +668,13 @@ impl App {
                 self.status.say(format!("Kept {title}."));
             }
             Action::ConfirmDelete => self.move_to_trash(),
+            Action::Sort => {
+                let next = self.home.sort.next();
+                self.settings.home_sort = next;
+                self.home.set_sort(next);
+                self.save_settings();
+                self.status.say(format!("Sorted by {}.", next.name()));
+            }
         }
     }
 
