@@ -28,12 +28,12 @@ use crate::{Export, OutFile};
 pub const MIN_MARGIN_MM: u32 = 10;
 pub const MAX_MARGIN_MM: u32 = 40;
 
-// Roboto 2.137 (Apache License 2.0, Copyright 2011 Google Inc.), put into every PDF so that it does not depend on the fonts
+// Roboto 2.137 (Apache License 2.0, Copyright 2011 Google Inc.), put into every PDF (and used by the window when the computer has no\n// Segoe UI) so that it does not depend on the fonts
 // installed on the computer that makes it, and so that no Windows font is copied into the file. It has no Chinese, Japanese,
 // Korean or Arabic letters: those fall back to a Windows font. The licence is named in each file and in `NOTICE`.
-const ROBOTO_REGULAR: &[u8] = include_bytes!("../fonts/Roboto-Regular.ttf");
-const ROBOTO_BOLD: &[u8] = include_bytes!("../fonts/Roboto-Bold.ttf");
-const ROBOTO_ITALIC: &[u8] = include_bytes!("../fonts/Roboto-Italic.ttf");
+pub const ROBOTO_REGULAR: &[u8] = include_bytes!("../fonts/Roboto-Regular.ttf");
+pub const ROBOTO_BOLD: &[u8] = include_bytes!("../fonts/Roboto-Bold.ttf");
+pub const ROBOTO_ITALIC: &[u8] = include_bytes!("../fonts/Roboto-Italic.ttf");
 const FONT_STACK: &str = "Roboto,'Segoe UI',Arial,Helvetica,sans-serif";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

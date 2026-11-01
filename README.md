@@ -9,18 +9,26 @@ small program with its own window.
 
 ## Where this stands (honest status)
 
-**Milestones M0 to M4 are done: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
-focused view, and exports to a web page, Markdown, JSON, a folder of pictures, an animated GIF and (since 2026-11-01) a PDF made
-by the WebView2 engine that Windows ships, a Word file and a PowerPoint file that Express writes itself. There is still no window
-and no capture. JPG pictures (with a quality setting) are built too.** The program starts, and can make every export of a made-up guide (`EXPORT DEMO.bat`).
+**Milestones M0 to M5 are built: the guide model, editing, undo, saving, smart titles, the step builder, drawing of marks, the
+focused view, exports to a web page, Markdown, JSON, a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the
+WebView2 engine that Windows ships, a Word file and a PowerPoint file that Express writes itself, and (since 2026-11-01) a window.
+There is still no capture.** The window has two screens: Home, and an editor where the steps of an example guide can be chosen,
+renamed, moved, skipped, deleted and restored, with undo and redo. The program also still makes every export of a made-up guide
+(`EXPORT DEMO.bat`). The window has been read back through Windows UI Automation, but not spoken by Narrator or NVDA (see below).
 
 Run on Windows, and working:
 
-- `BUILD EXPRESS.bat`, `TEST EXPRESS.bat` and `EXPORT DEMO.bat` ran on 2026-10-31 and 2026-11-01 on Jason's Windows 11 x64 PC
-  (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard attached rather than
-  double-clicked. The last full run of the tests: 369 passed (174 in the core, 181 in the exports, 11 in the Windows engine, 3 in
-  the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved, locked, crashed and
-  reopened in temporary folders.
+- `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
+  Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
+  attached rather than double-clicked. The last full run of the tests: 423 passed (174 in the core, 181 in the exports, 11 in the
+  Windows engine, 57 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  locked, crashed and reopened in temporary folders.
+- The window (M5) opened from `OPEN EXPRESS.bat` as a release build and closed cleanly. Before that it was drawn in both colour
+  schemes by the real program and the pictures were looked at. Its tree of controls was read back through Windows UI Automation
+  (the interface screen readers use): each button, the steps list and its options, the headings and the status line have the
+  right role and name, and pressing a button that way works. 57 tests drive the same window without opening it: Tab order,
+  one stop for the steps list, Up and Down, every shortcut, undo and redo, the live status line, reading order, and colour
+  contrast of both schemes (text at least 4.5 to 1, outlines and the focus ring at least 3 to 1).
 - The demo's output was checked with programs that are not ours: Windows' own image decoder read the GIF (800 by 450, seven
   frames, three seconds each, looping forever) and the PNGs, and a headless Microsoft Edge drew the web page, which was looked at
   (light colours; headings, contents list, pictures with marks, the blurred name, the list and the link all showed correctly).
@@ -44,6 +52,10 @@ Written and type-checked, not yet run on Windows:
 - `tools/check-office.ps1`, which repeats the Office checks: its PowerPoint half ran and passed (7 checks); its Word half has
   not run in its final form, because Word was already open when it was tried (the script skips a program that is open, so it
   cannot disturb anyone). The checks it makes were each run before, by hand, in Word.
+- Narrator and NVDA with the window: neither has been run, so it is not yet known whether the Narrator and NVDA pass of M5 holds.
+  The plan if it fails is Tauri (spec D5). The window letting go of its console box has been checked only in that no console
+  window is left among the program's windows, not by watching a double-click. Keyboard feel, 125 to 200 percent scaling and a
+  Windows contrast theme are unchecked (`TESTING-TODO.md`).
 - PDF export on a computer with no WebView2 runtime: the "not installed" message and the demo's "pdf: skipped" line are tested only
   with a stand-in engine. The paper sizes A3, A5 and Legal, other margins and the header and footer lines are written and their page
   rules tested, but not printed with the real engine.
@@ -73,12 +85,14 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   more were tried on the JPG encoder (two zigzag places swapped, the cosine transform scaled wrongly, the DC change not remembered,
   a colour sign flipped, no byte stuffing): every one was caught. Five
   more were tried on the PDF export on 2026-11-01: four were caught by the portable tests and the one that switches tagging off was
-  caught by the real-engine tests. Several attempts to bring back the doubled bookmark titles (see `docs/guide-format.md`) did not
+  caught by the real-engine tests. Four more were tried on the window on 2026-11-01 (the status line no longer a live region, the
+  chosen step no longer marked as chosen, the same message twice made identical, every step a Tab stop): each was caught by the
+  test written for it. Several attempts to bring back the doubled bookmark titles (see `docs/guide-format.md`) did not
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M5 to M8 and everything else in the spec: the window, real capture, settings, the self-tests that need Windows, WebP, the optional
-logo on slides, and the portable zip.
+Not built: M6 to M8 and everything else in the spec: real capture, drawing and cropping in the editor, the Export dialog, settings,
+the self-tests that need Windows, WebP, the optional logo on slides, and the portable zip.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
@@ -97,7 +111,11 @@ scheme of the web page has not been seen rendered. The icon files are copied in 
 
 If the OpenStage code is not next to this folder, the scripts say so; double-click **`GET OPENSTAGE CODE.bat`** (it asks first).
 
-More scripts arrive with their milestones: `OPEN EXPRESS.bat` (M5), `CHECK EXPRESS COMPUTER.bat` and `TEST EXPRESS CLICKS.bat` (M6).
+4. Double-click **`OPEN EXPRESS.bat`**. It builds the program if needed (a few seconds when nothing has changed) and opens the
+   window. Press Tab to move between controls and Enter to press one. The example guide ("How to submit an assignment") is a
+   card under "Your guides"; opening it shows the editor. "Start capturing" says that capturing is not built yet.
+
+More scripts arrive with their milestones: `CHECK EXPRESS COMPUTER.bat` and `TEST EXPRESS CLICKS.bat` (M6).
 
 ## Decisions
 
@@ -137,7 +155,8 @@ crates/
   openstage-express-export/     HTML, Markdown, JSON, pictures, GIF, the PDF's print page, Word and PowerPoint (with a small ZIP
                                 writer); a made-up demo guide; the Roboto font files for the PDF (fonts/)
   openstage-express-windows/    Windows only: the PDF engine (WebView2) so far; hooks, UI Automation, screenshots, hotkeys later
-  openstage-express-app/        the program openstage-capture-express.exe (no window yet; runs the export demo)
+  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home and the editor, in src/ui), and
+                                the command-line export demo
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code
 tools/check_rules.py            licence, header, writing-style and script checks
 assets/icon/                    the icon pack (SVG, PNG sizes, ICO)

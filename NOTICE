@@ -34,4 +34,13 @@ Microsoft Edge WebView2 Runtime
   computer (it ships with Windows 11) to print a page. The crates webview2-com and windows that
   talk to it are MIT or Apache-2.0 and are listed in THIRD-PARTY.md.
 
+The window (milestone M5) is drawn with egui and eframe, with AccessKit for screen readers, winit for the
+  window and wgpu for the drawing. They and the crates under them are listed in THIRD-PARTY.md, each with its
+  licence. self_cell, which one of them uses, is offered under Apache-2.0 and is used under that licence.
+
+Segoe UI, Tahoma and Arial
+  Not part of this program and not redistributed. The window reads Segoe UI from the computer's own
+  fonts folder when it starts (Tahoma, then Arial, if there is none), and never copies it. Roboto, above,
+  is the font used when none of them can be read.
+
 The application icon (assets/icon) was made for this project and supplied by Jason S. Wrench.

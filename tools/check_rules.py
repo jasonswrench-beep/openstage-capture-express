@@ -126,14 +126,37 @@ def license_ok(expr):
 
 
 def cargo_packages():
+    """The packages Express is built from on this computer, read with `cargo tree` and never downloading anything.
+
+    Express is a Windows program, so the list is the one for Windows: `cargo metadata` would also list (and fetch) the crates
+    that only other systems use, such as the ones the window library needs for Linux and the web. Each package is a dict with
+    its name, version and license; `source` is None for the project's own crates.
+    """
     out = subprocess.run(
-        ["cargo", "metadata", "--format-version", "1", "--manifest-path", str(ROOT / "Cargo.toml")],
-        capture_output=True, text=True,
+        ["cargo", "tree", "--offline", "--workspace", "-e", "normal,build,dev", "--prefix", "none", "--format", "{p}|{l}"],
+        capture_output=True, text=True, cwd=str(ROOT),
     )
     if out.returncode != 0:
         record("FAIL", "read the dependency list", out.stderr.strip()[-400:])
         return []
-    return json.loads(out.stdout)["packages"]
+    found = {}
+    for line in out.stdout.splitlines():
+        text, bar, license_text = line.strip().partition("|")
+        if not bar:
+            continue
+        text = re.sub(r" \(\*\)$", "", text.strip()).replace(" (proc-macro)", "")
+        match = re.match(r"^(\S+) v(\S+)(?: \((.*)\))?$", text)
+        if not match:
+            continue
+        name, version, where = match.groups()
+        is_own = bool(where) and not where.startswith(("registry+", "git+", "http"))
+        found[(name, version)] = {
+            "name": name,
+            "version": version,
+            "license": license_text.strip() or None,
+            "source": None if is_own else "registry",
+        }
+    return sorted(found.values(), key=lambda p: (p["name"], p["version"]))
 
 
 def check_dependencies(packages):

@@ -11,9 +11,10 @@ echo ============================================================
 echo.
 echo This makes a made-up guide (with made-up screenshots, so nothing
 echo is recorded) and exports it in every format that is built: a web
-echo page, Markdown, JSON, a folder of pictures and an animated GIF.
-echo Each run goes into a new folder, so nothing is ever replaced. A
-echo full log is saved in this folder as export-demo-log.txt.
+echo page, Markdown, JSON, pictures (PNG and JPG), an animated GIF, a PDF,
+echo a Word file and a PowerPoint file. Each run goes into a new folder,
+echo so nothing is ever replaced. A full log is saved in this folder as
+echo export-demo-log.txt.
 echo.
 
 if not exist "%~dp0..\openstage-author\capture\crates\openstage-capture-render\Cargo.toml" goto no_capture
