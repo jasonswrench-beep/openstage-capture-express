@@ -3803,3 +3803,245 @@ fn one_step_with_its_own_picture_is_said_in_the_singular() {
     assert_eq!(h.status(), "Emptied the trash: 1 step and 1 picture deleted for good. Undo cannot go back past this.");
     assert!(!guide.join("images/step-0001.png").exists() && !guide.join("trash/step-0001.png").exists());
 }
+
+// ---- moving and zooming the focused crop
+
+type Crop = openstage_express_core::model::Rect;
+
+/// The crop kept for the selected step.
+fn crop_of(h: &Harness) -> Crop {
+    the_editor(h).selected_step().unwrap().focus.clone().expect("the step has a crop")
+}
+
+const CROP_BUTTONS: [&str; 7] = [
+    "Move crop left",
+    "Move crop right",
+    "Move crop up",
+    "Move crop down",
+    "Zoom crop in",
+    "Zoom crop out",
+    "Reset crop",
+];
+
+#[test]
+fn a_focused_step_says_where_its_crop_is_and_has_buttons_to_move_and_zoom_it() {
+    let mut h = Harness::new(Screen::Editor);
+    for words in CROP_BUTTONS {
+        assert!(!h.node(h.find(Role::Button, words)).is_disabled(), "{words}");
+    }
+    let (w, picture_h) = the_editor(&h).picture_size().unwrap();
+    let crop = crop_of(&h);
+    let words = the_editor(&h).crop_words().unwrap();
+    assert!(words.starts_with("The crop shows 67 percent of the picture across: "), "{words}");
+    assert!(words.contains(&format!("{} by {} of {w} by {picture_h} pixels", crop.width, crop.height)), "{words}");
+    h.find(Role::Label, &words);
+    // With the focused view off there is no crop, so no buttons for it; with it on again they come back.
+    h.invoke(Role::CheckBox, "Focused view");
+    for words in CROP_BUTTONS {
+        assert!(!h.has(Role::Button, words), "{words} is not shown without a crop");
+    }
+    h.invoke(Role::CheckBox, "Focused view");
+    assert!(h.has(Role::Button, "Move crop left"));
+}
+
+#[test]
+fn the_move_buttons_move_the_crop_a_tenth_of_its_size_stop_at_the_edges_and_say_so() {
+    let mut h = Harness::new(Screen::Editor);
+    let (picture_w, picture_h) = the_editor(&h).picture_size().unwrap();
+    let start = crop_of(&h);
+    assert_eq!(
+        (start.x, start.y),
+        (0, 0),
+        "the example's click is near the top left, so the crop starts in the corner"
+    );
+    h.invoke(Role::Button, "Move crop left");
+    assert_eq!(h.status(), "The crop is already at the left edge of the picture.");
+    h.invoke(Role::Button, "Move crop up");
+    assert_eq!(h.status(), "The crop is already at the top edge of the picture.");
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled(), "nothing moved, so there is nothing to undo");
+    h.invoke(Role::Button, "Move crop right");
+    assert!(h.status().starts_with("Moved the crop right. The crop shows 67 percent"), "{}", h.status());
+    let moved = crop_of(&h);
+    assert_eq!((moved.x, moved.y, moved.width, moved.height), (start.width / 10, 0, start.width, start.height));
+    h.invoke(Role::Button, "Move crop down");
+    assert!(h.status().starts_with("Moved the crop down."), "{}", h.status());
+    assert_eq!(crop_of(&h).y, start.height / 10);
+    h.invoke(Role::Button, "Undo");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(crop_of(&h), start, "each move was one change");
+    for _ in 0..30 {
+        h.invoke(Role::Button, "Move crop right");
+    }
+    assert_eq!(crop_of(&h).x + start.width, picture_w as i32, "stopped at the right edge");
+    assert_eq!(h.status(), "The crop is already at the right edge of the picture.");
+    for _ in 0..30 {
+        h.invoke(Role::Button, "Move crop down");
+    }
+    assert_eq!(crop_of(&h).y + start.height, picture_h as i32, "stopped at the bottom edge");
+    assert_eq!(h.status(), "The crop is already at the bottom edge of the picture.");
+    h.invoke(Role::Button, "Move crop left");
+    assert!(h.status().starts_with("Moved the crop left."), "it can come back from an edge");
+}
+
+#[test]
+fn zooming_keeps_the_middle_of_the_crop_and_stops_at_the_whole_picture_and_at_eight_times() {
+    let mut h = Harness::new(Screen::Editor);
+    let (picture_w, picture_h) = the_editor(&h).picture_size().unwrap();
+    for _ in 0..3 {
+        h.invoke(Role::Button, "Move crop right");
+        h.invoke(Role::Button, "Move crop down");
+    }
+    let before = crop_of(&h);
+    h.invoke(Role::Button, "Zoom crop in");
+    assert!(h.status().starts_with("Zoomed in. The crop shows"), "{}", h.status());
+    let closer = crop_of(&h);
+    assert!(
+        closer.width < before.width && closer.height < before.height,
+        "closer shows less: {before:?} then {closer:?}"
+    );
+    let centre = |r: &Crop| (r.x + r.width / 2, r.y + r.height / 2);
+    let (a, b) = (centre(&before), centre(&closer));
+    assert!((a.0 - b.0).abs() <= 2 && (a.1 - b.1).abs() <= 2, "the middle stays: {a:?} then {b:?}");
+    h.invoke(Role::Button, "Zoom crop out");
+    assert!(h.status().starts_with("Zoomed out. The crop shows"), "{}", h.status());
+    for _ in 0..30 {
+        h.invoke(Role::Button, "Zoom crop in");
+    }
+    assert_eq!(h.status(), "The crop is already as close as it goes: eight times closer than the whole picture.");
+    assert_eq!(crop_of(&h).width, picture_w as i32 * 100 / 800);
+    for _ in 0..30 {
+        h.invoke(Role::Button, "Zoom crop out");
+    }
+    assert_eq!(h.status(), "The crop already shows the whole picture.");
+    let whole = crop_of(&h);
+    assert_eq!((whole.x, whole.y, whole.width, whole.height), (0, 0, picture_w as i32, picture_h as i32));
+}
+
+#[test]
+fn reset_crop_goes_back_to_the_usual_crop_around_the_click_and_says_when_it_already_is() {
+    let mut h = Harness::new(Screen::Editor);
+    let start = crop_of(&h);
+    h.invoke(Role::Button, "Reset crop");
+    assert_eq!(h.status(), "The crop is already the usual one around the click.");
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled(), "nothing changed, so nothing was recorded");
+    for _ in 0..3 {
+        h.invoke(Role::Button, "Move crop right");
+    }
+    h.invoke(Role::Button, "Zoom crop in");
+    h.invoke(Role::Button, "Reset crop");
+    assert!(h.status().starts_with("The crop is back to the usual one around the click."), "{}", h.status());
+    assert_eq!(crop_of(&h), start);
+    h.invoke(Role::Button, "Undo");
+    assert_ne!(crop_of(&h), start, "the reset was one change");
+}
+
+#[test]
+fn the_crop_buttons_come_in_order_after_the_focused_view_box_and_the_keyboard_stays_on_one() {
+    let mut h = Harness::new(Screen::Editor);
+    h.focus_on(Role::CheckBox, "Focused view");
+    let mut seen = Vec::new();
+    for _ in 0..8 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    assert_eq!(seen[..7], CROP_BUTTONS, "{seen:?}");
+    assert_eq!(seen[7], "Skip in export");
+    h.focus_on(Role::Button, "Move crop left");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "The crop is already at the left edge of the picture.");
+    assert_eq!(
+        h.focused_words().as_deref(),
+        Some("Move crop left"),
+        "a press at an edge leaves the keyboard where it is"
+    );
+}
+
+#[test]
+fn dragging_the_picture_moves_the_crop_with_the_pointer_and_is_one_undo() {
+    let mut h = Harness::new(Screen::Editor);
+    let start = crop_of(&h);
+    let (picture_w, picture_h) = the_editor(&h).picture_size().unwrap();
+    let at = picture_mapper(&h);
+    // A place on the lower right of the picture, away from the marks round the click.
+    let (x, y) = (picture_w as i32 * 3 / 4, picture_h as i32 * 3 / 4);
+    press_and_move(&mut h, at(x, y), at(x + 120, y + 70));
+    assert!(the_editor(&h).is_moving_crop());
+    let shown = the_editor(&h).crop().unwrap();
+    assert!((shown.x - 120).abs() <= 3 && (shown.y - 70).abs() <= 3, "the crop follows the pointer: {shown:?}");
+    assert_eq!(crop_of(&h), start, "nothing is kept until the mouse is let go");
+    let_go(&mut h, at(x + 120, y + 70));
+    assert!(!the_editor(&h).is_moving_crop());
+    assert!(h.status().starts_with("Moved the crop. The crop shows"), "{}", h.status());
+    let kept = crop_of(&h);
+    assert!((kept.x - 120).abs() <= 3 && (kept.y - 70).abs() <= 3 && kept.width == start.width, "{kept:?}");
+    h.invoke(Role::Button, "Undo");
+    assert_eq!(crop_of(&h), start, "the whole drag is one undo");
+}
+
+#[test]
+fn a_press_on_the_picture_that_does_not_move_leaves_the_crop_alone() {
+    let mut h = Harness::new(Screen::Editor);
+    let start = crop_of(&h);
+    let (picture_w, picture_h) = the_editor(&h).picture_size().unwrap();
+    let at = picture_mapper(&h);
+    let spot = at(picture_w as i32 * 3 / 4, picture_h as i32 * 3 / 4);
+    press_and_move(&mut h, spot, spot);
+    let_go(&mut h, spot);
+    assert_eq!(crop_of(&h), start);
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled(), "a click is not a change");
+}
+
+#[test]
+fn a_drag_that_starts_on_a_mark_moves_the_mark_and_with_space_held_it_moves_the_crop() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Add rectangle");
+    let mark = the_selected_mark(&h);
+    let (cx, cy) = (mark.x + mark.width.unwrap() / 2, mark.y + mark.height.unwrap() / 2);
+    let at = picture_mapper(&h);
+    let start = crop_of(&h);
+    press_and_move(&mut h, at(cx, cy), at(cx + 60, cy + 30));
+    assert!(
+        the_editor(&h).is_dragging() && !the_editor(&h).is_moving_crop(),
+        "the mark under the pointer is picked up"
+    );
+    let_go(&mut h, at(cx + 60, cy + 30));
+    assert_eq!(crop_of(&h), start, "the crop did not move");
+    // The same drag with Space held moves the crop instead of the mark.
+    let mark_after = the_selected_mark(&h);
+    let (cx, cy) = (mark_after.x + mark_after.width.unwrap() / 2, mark_after.y + mark_after.height.unwrap() / 2);
+    h.events.push(Event::Key {
+        key: Key::Space,
+        physical_key: Some(Key::Space),
+        pressed: true,
+        repeat: false,
+        modifiers: NO_MODS,
+    });
+    h.frame();
+    press_and_move(&mut h, at(cx, cy), at(cx + 90, cy + 40));
+    assert!(the_editor(&h).is_moving_crop() && !the_editor(&h).is_dragging(), "Space moves the crop even over a mark");
+    let_go(&mut h, at(cx + 90, cy + 40));
+    h.events.push(Event::Key {
+        key: Key::Space,
+        physical_key: Some(Key::Space),
+        pressed: false,
+        repeat: false,
+        modifiers: NO_MODS,
+    });
+    h.settle();
+    assert_ne!(crop_of(&h), start);
+    let after = the_selected_mark(&h);
+    assert_eq!((after.x, after.y), (mark_after.x, mark_after.y), "the mark stayed where it was");
+}
+
+#[test]
+fn with_the_focused_view_off_dragging_the_picture_moves_nothing() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::CheckBox, "Focused view");
+    let (picture_w, picture_h) = the_editor(&h).picture_size().unwrap();
+    let at = picture_mapper(&h);
+    let (x, y) = (picture_w as i32 * 3 / 4, picture_h as i32 * 3 / 4);
+    press_and_move(&mut h, at(x, y), at(x + 100, y + 50));
+    assert!(!the_editor(&h).is_moving_crop());
+    let_go(&mut h, at(x + 100, y + 50));
+    assert!(the_editor(&h).selected_step().unwrap().focus.is_none(), "still the whole picture");
+}

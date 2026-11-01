@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 755 passed (264 in the core, 182 in the exports, 44 in the
-  Windows crate, 265 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 766 passed (264 in the core, 182 in the exports, 44 in the
+  Windows crate, 276 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -121,6 +121,21 @@ Written and type-checked, not yet run on Windows:
   the same second hid it; a test that does not depend on the clock now catches it). Fifteen more deliberate faults in the emptying
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
   only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
+
+- Moving and zooming the focused crop by hand (spec E5, written and tested 2026-11-01; Jason said 'Yes, build it'). When a step's
+  Focused view is on, the details show where its crop is in words ("The crop shows 67 percent of the picture across: 853 by 480 of
+  1280 by 720 pixels, 0 from the left and 0 from the top.") and seven buttons: Move crop left, right, up and down (a tenth of the
+  crop's own size each), Zoom crop in and Zoom crop out (a quarter closer, a fifth further away, keeping the middle and the shape,
+  from the whole picture down to eight times closer), and Reset crop (back to the usual crop around the click). Every press is one
+  change, so one Undo takes it back; the buttons are always pressable, so the keyboard is never stranded, and at an edge the status
+  line says "The crop is already at the left edge of the picture." Dragging the picture moves the crop with the pointer (the frame
+  follows it, only kept as one change when the mouse is let go); a drag that starts on a mark still moves the mark, and holding Space
+  moves the crop even over a mark (spec: drag with Space held to pan). The arithmetic (`core::focus::pan` and `zoom`, which keep every
+  crop inside the picture) was already built and tested; this adds the editor's controls, state and words. The original picture is
+  never changed. Tested through the window with simulated clicks, keys and pointer events (including Space held); nobody has done it
+  by hand, so how dragging feels is unseen, and Narrator and NVDA have not read the new buttons. Sixteen deliberate faults were each caught; the editor
+  was drawn by the real program in both colour schemes. Not built: the focused-view toggle for a whole guide, and a wheel or key for
+  zooming.
 
 - The installer and the program's icon (2026-11-01; `docs/installer.md`; Jason said to download Inno Setup and to use the product
   icon in the installer). `MAKE EXPRESS INSTALLER.bat` builds the program and has Inno Setup 7.1.1 (free; downloaded from its
@@ -233,7 +248,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   checking function has (against the real doubled titles).
 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, a "Save a copy as one file",
-panning the focused crop by hand, options on the
+the focused view for a whole guide at once (it is per step), options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.
