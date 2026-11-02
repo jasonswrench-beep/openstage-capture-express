@@ -17,7 +17,7 @@ use openstage_express_export::json::export_json;
 use openstage_express_export::markdown::export_markdown;
 use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
 use openstage_express_export::picture::PictureSource;
-use openstage_express_export::plan::{plan as make_plan, ExportOptions, Plan};
+use openstage_express_export::plan::{plan as make_plan, ExportOptions, Plan, Preview, DEFAULT_IMAGE_WIDTH};
 use openstage_express_export::pptx::{export_pptx, PptxOptions};
 use openstage_express_export::share::{make_copy, CopyOptions};
 use openstage_express_export::{Export, OutFile};
@@ -151,6 +151,30 @@ impl Selection {
     }
 }
 
+/// What the Export screen chooses about the pictures (spec 10.4 and 10.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PictureChoices {
+    /// How many pixels across every picture is made.
+    pub width: u32,
+    /// The quality of the pictures made as JPG files, from 1 to 100.
+    pub jpg_quality: u8,
+    /// Only the first this many steps (a preview), or all of them.
+    pub first_steps: Option<usize>,
+}
+
+impl Default for PictureChoices {
+    fn default() -> PictureChoices {
+        PictureChoices { width: DEFAULT_IMAGE_WIDTH, jpg_quality: DEFAULT_JPEG_QUALITY, first_steps: None }
+    }
+}
+
+impl PictureChoices {
+    /// What the plan of the export is made with.
+    pub fn export_options(&self) -> ExportOptions {
+        ExportOptions { image_width: self.width, first_steps: self.first_steps }
+    }
+}
+
 /// What a run made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -161,6 +185,8 @@ pub struct Report {
     pub warnings: Vec<String>,
     /// Formats not made, and why.
     pub skipped: Vec<(Format, String)>,
+    /// Set when a preview was asked for.
+    pub preview: Option<Preview>,
 }
 
 impl Report {
@@ -169,6 +195,24 @@ impl Report {
         let made = self.made.len();
         let mut words =
             format!("Exported {} format{} to {}.", made, if made == 1 { "" } else { "s" }, self.folder.display());
+        if let Some(preview) = &self.preview {
+            if preview.is_cut() {
+                let first = if preview.shown == 1 {
+                    "the first step".to_string()
+                } else {
+                    format!("the first {}", preview.shown)
+                };
+                words.push_str(&format!(
+                    " It is a preview, not the whole guide: {first} of the guide's {}.",
+                    crate::ui::rows::steps_words(preview.total)
+                ));
+            } else {
+                words.push_str(&format!(
+                    " You asked for a preview, but the guide has only {}, so all of it is in.",
+                    crate::ui::rows::steps_words(preview.total)
+                ));
+            }
+        }
         for (format, why) in &self.skipped {
             words.push_str(&format!(" {} was not made: {why}", format.name()));
         }
@@ -185,16 +229,24 @@ pub fn run_folder_name(now_iso: &str) -> String {
     now_iso.trim_end_matches('Z').replace('T', " ").replace(':', "-")
 }
 
+/// The folder name of a run that is a preview of the first `shown` steps, such as `2026-11-01 10-30-05 (preview of 5 steps)`, so a
+/// folder of a preview is never taken for the whole guide.
+pub fn preview_run_folder_name(now_iso: &str, shown: usize) -> String {
+    format!("{} (preview of {})", run_folder_name(now_iso), crate::ui::rows::steps_words(shown.max(1)))
+}
+
 /// Why a PDF was not made when this computer has no PDF engine.
 pub const NO_PDF_ENGINE: &str =
     "this computer has no Microsoft Edge WebView2 Runtime (it comes with Windows 11), so no PDF can be made.";
 
 /// Make the chosen exports of `plan` in `folder` (made if needed; nothing already there is replaced). `pdf` is the engine that
 /// makes PDF files, or `None` when this computer has none, in which case a chosen PDF is reported as skipped and the rest are made.
+/// `jpg_quality` (1 to 100) is for the pictures made as JPG files.
 pub fn make(
     plan: &Plan,
     selection: &Selection,
     gif: &GifOptions,
+    jpg_quality: u8,
     text: &dyn TextRenderer,
     pdf: Option<&dyn PdfRenderer>,
     folder: &Path,
@@ -208,7 +260,7 @@ pub fn make(
             Format::Markdown => export_markdown(plan),
             Format::Json => export_json(plan),
             Format::Images => export_images(plan),
-            Format::Jpg => export_images_as(plan, ImageFormat::Jpeg { quality: DEFAULT_JPEG_QUALITY }),
+            Format::Jpg => export_images_as(plan, ImageFormat::Jpeg { quality: jpg_quality }),
             Format::Gif => export_gif(plan, gif, text),
             Format::Word => {
                 export_docx(plan, &DocxOptions::default()).map_err(|e| format!("{}: {e}", format.name()))?
@@ -230,7 +282,7 @@ pub fn make(
         made.push((format, written.len()));
         warnings.extend(export.warnings.iter().map(|w| format!("{}: {w}", format.name())));
     }
-    Ok(Report { folder: folder.to_path_buf(), made, warnings, skipped })
+    Ok(Report { folder: folder.to_path_buf(), made, warnings, skipped, preview: plan.preview })
 }
 
 /// Everything an export needs, owned, so that it can be made on a thread of its own.
@@ -238,6 +290,8 @@ pub struct Job {
     pub guide: Guide,
     pub pictures: Arc<dyn PictureSource + Send + Sync>,
     pub selection: Selection,
+    /// How wide the pictures are, how good the JPGs are, and whether this is a preview.
+    pub choices: PictureChoices,
     /// The new folder everything goes into.
     pub folder: PathBuf,
 }
@@ -259,12 +313,13 @@ pub fn spawn(job: Job) -> Receiver<Result<Report, String>> {
     let (tx, rx) = mpsc::channel();
     let started = std::thread::Builder::new().name("express-export".into()).spawn(move || {
         let text = crate::text::renderer();
-        let the_plan = make_plan(&job.guide, &*job.pictures, text, &ExportOptions::default());
+        let the_plan = make_plan(&job.guide, &*job.pictures, text, &job.choices.export_options());
         let pdf = if job.selection.contains(Format::Pdf) { system_pdf() } else { None };
         let result = make(
             &the_plan,
             &job.selection,
             &GifOptions::default(),
+            job.choices.jpg_quality,
             text,
             pdf.as_deref().map(|p| p as &dyn PdfRenderer),
             &job.folder,
@@ -434,6 +489,7 @@ mod tests {
             guide: guide.clone(),
             pictures: Arc::new(d.pictures),
             selection: Selection::none_then(&[Format::Images]),
+            choices: PictureChoices::default(),
             folder: dir.path().to_path_buf(),
         };
         spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -454,7 +510,9 @@ mod tests {
         let mut selection = Selection::none();
         selection.set(Format::Markdown, true);
         selection.set(Format::Word, true);
-        let report = make(&the_plan(), &selection, &GifOptions::default(), &BlockText, None, dir.path()).unwrap();
+        let report =
+            make(&the_plan(), &selection, &GifOptions::default(), DEFAULT_JPEG_QUALITY, &BlockText, None, dir.path())
+                .unwrap();
         assert_eq!(report.made.iter().map(|(f, _)| *f).collect::<Vec<_>>(), [Format::Markdown, Format::Word]);
         assert!(dir.path().join("markdown/How to submit an assignment.md").is_file());
         assert!(dir.path().join("word/How to submit an assignment.docx").is_file());
@@ -467,7 +525,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut selection = Selection::starting();
         selection.set(Format::Json, true);
-        let report = make(&the_plan(), &selection, &GifOptions::default(), &BlockText, None, dir.path()).unwrap();
+        let report =
+            make(&the_plan(), &selection, &GifOptions::default(), DEFAULT_JPEG_QUALITY, &BlockText, None, dir.path())
+                .unwrap();
         assert_eq!(report.skipped.len(), 1);
         assert_eq!(report.skipped[0].0, Format::Pdf);
         assert!(report.skipped[0].1.contains("WebView2"));
@@ -480,9 +540,16 @@ mod tests {
     #[test]
     fn every_format_can_be_made_at_once() {
         let dir = tempfile::tempdir().unwrap();
-        let report =
-            make(&the_plan(), &Selection::all(), &GifOptions::default(), &BlockText, Some(&StandIn), dir.path())
-                .unwrap();
+        let report = make(
+            &the_plan(),
+            &Selection::all(),
+            &GifOptions::default(),
+            DEFAULT_JPEG_QUALITY,
+            &BlockText,
+            Some(&StandIn),
+            dir.path(),
+        )
+        .unwrap();
         assert_eq!(report.made.len(), 9);
         for format in Format::ALL {
             assert!(dir.path().join(format.folder()).is_dir(), "{}", format.folder());
@@ -494,8 +561,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut selection = Selection::none();
         selection.set(Format::Json, true);
-        make(&the_plan(), &selection, &GifOptions::default(), &BlockText, None, dir.path()).unwrap();
-        let again = make(&the_plan(), &selection, &GifOptions::default(), &BlockText, None, dir.path());
+        make(&the_plan(), &selection, &GifOptions::default(), DEFAULT_JPEG_QUALITY, &BlockText, None, dir.path())
+            .unwrap();
+        let again =
+            make(&the_plan(), &selection, &GifOptions::default(), DEFAULT_JPEG_QUALITY, &BlockText, None, dir.path());
         assert!(again.unwrap_err().contains("without replacing it"));
     }
 
@@ -527,5 +596,133 @@ mod tests {
         let name = run_folder_name("2026-11-01T10:30:05Z");
         assert_eq!(name, "2026-11-01 10-30-05");
         assert!(!name.contains([':', '/', '\\']));
+    }
+
+    fn file_names(folder: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(folder)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_picture_choices_reach_the_files_and_the_title_and_the_report_says_it_is_a_preview() {
+        use openstage_express_export::picture::decode_png;
+        use openstage_express_export::plan::exported_step_count;
+        let d = demo();
+        let total = exported_step_count(&d.document.guide);
+        assert!(total > 3);
+        let choices = PictureChoices { width: 640, jpg_quality: 50, first_steps: Some(3) };
+        let the_plan = plan(&d.document.guide, &d.pictures, &BlockText, &choices.export_options());
+        let dir = tempfile::tempdir().unwrap();
+        let selection = Selection::none_then(&[Format::Images, Format::Jpg, Format::Json]);
+        let report =
+            make(&the_plan, &selection, &GifOptions::default(), choices.jpg_quality, &BlockText, None, dir.path())
+                .unwrap();
+        assert_eq!(file_names(&dir.path().join("images")), ["step-01.png", "step-02.png", "step-03.png"]);
+        for name in file_names(&dir.path().join("images")) {
+            let picture = decode_png(&std::fs::read(dir.path().join("images").join(name)).unwrap()).unwrap();
+            assert_eq!(picture.width, 640);
+        }
+        let jpgs = file_names(&dir.path().join("jpg"));
+        assert_eq!(jpgs, ["step-01.jpg", "step-02.jpg", "step-03.jpg"]);
+        assert!(std::fs::read(dir.path().join("jpg").join(&jpgs[0])).unwrap().starts_with(&[0xFF, 0xD8]));
+        let json_files = file_names(&dir.path().join("json"));
+        let json_file = json_files.iter().find(|name| name.ends_with(".json")).expect("a .json file");
+        let json = std::fs::read_to_string(dir.path().join("json").join(json_file)).unwrap();
+        assert!(json.contains(&format!("Preview, first 3 of {total} steps - ")), "{json}");
+        assert_eq!(report.preview, Some(Preview { shown: 3, total }));
+        let said = report.sentence();
+        assert!(
+            said.contains(&format!("It is a preview, not the whole guide: the first 3 of the guide's {total} steps.")),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_higher_jpg_quality_makes_bigger_files() {
+        let size_at = |quality: u8| -> u64 {
+            let dir = tempfile::tempdir().unwrap();
+            let selection = Selection::none_then(&[Format::Jpg]);
+            make(&the_plan(), &selection, &GifOptions::default(), quality, &BlockText, None, dir.path()).unwrap();
+            std::fs::read_dir(dir.path().join("jpg")).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum()
+        };
+        let (best, usual, smallest) = (size_at(100), size_at(DEFAULT_JPEG_QUALITY), size_at(50));
+        assert!(best > usual && usual > smallest, "{best} {usual} {smallest}");
+    }
+
+    #[test]
+    fn a_job_is_made_with_the_choices_it_was_given() {
+        use openstage_express_export::picture::decode_png;
+        let d = demo();
+        let dir = tempfile::tempdir().unwrap();
+        let job = Job {
+            guide: d.document.guide.clone(),
+            pictures: Arc::new(d.pictures),
+            selection: Selection::none_then(&[Format::Images]),
+            choices: PictureChoices { width: 800, jpg_quality: 90, first_steps: Some(2) },
+            folder: dir.path().to_path_buf(),
+        };
+        let report = spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
+        assert_eq!(report.made, [(Format::Images, 2)]);
+        let names = file_names(&dir.path().join("images"));
+        assert_eq!(names, ["step-01.png", "step-02.png"]);
+        for name in names {
+            let picture = decode_png(&std::fs::read(dir.path().join("images").join(name)).unwrap()).unwrap();
+            assert_eq!(picture.width, 800);
+        }
+    }
+
+    #[test]
+    fn the_usual_picture_choices_are_the_usual_width_and_quality_and_every_step() {
+        let usual = PictureChoices::default();
+        assert_eq!((usual.width, usual.jpg_quality, usual.first_steps), (1280, 90, None));
+        assert_eq!(usual.export_options(), ExportOptions::default());
+        let asked = PictureChoices { width: 800, jpg_quality: 40, first_steps: Some(7) };
+        assert_eq!(asked.export_options(), ExportOptions { image_width: 800, first_steps: Some(7) });
+    }
+
+    fn report_with(preview: Option<Preview>) -> Report {
+        Report {
+            folder: PathBuf::from("X"),
+            made: vec![(Format::Json, 1)],
+            warnings: Vec::new(),
+            skipped: Vec::new(),
+            preview,
+        }
+    }
+
+    #[test]
+    fn the_report_says_when_it_is_a_preview_and_when_the_preview_was_the_whole_guide() {
+        assert_eq!(report_with(None).sentence(), "Exported 1 format to X.");
+        assert_eq!(
+            report_with(Some(Preview { shown: 5, total: 12 })).sentence(),
+            "Exported 1 format to X. It is a preview, not the whole guide: the first 5 of the guide's 12 steps."
+        );
+        assert_eq!(
+            report_with(Some(Preview { shown: 1, total: 12 })).sentence(),
+            "Exported 1 format to X. It is a preview, not the whole guide: the first step of the guide's 12 steps."
+        );
+        assert_eq!(
+            report_with(Some(Preview { shown: 4, total: 4 })).sentence(),
+            "Exported 1 format to X. You asked for a preview, but the guide has only 4 steps, so all of it is in."
+        );
+        assert_eq!(
+            report_with(Some(Preview { shown: 1, total: 1 })).sentence(),
+            "Exported 1 format to X. You asked for a preview, but the guide has only 1 step, so all of it is in."
+        );
+    }
+
+    #[test]
+    fn the_folder_of_a_preview_says_so_and_has_no_characters_windows_forbids() {
+        let name = preview_run_folder_name("2026-11-01T10:30:05Z", 5);
+        assert_eq!(name, "2026-11-01 10-30-05 (preview of 5 steps)");
+        assert_eq!(preview_run_folder_name("2026-11-01T10:30:05Z", 1), "2026-11-01 10-30-05 (preview of 1 step)");
+        assert_eq!(preview_run_folder_name("2026-11-01T10:30:05Z", 0), "2026-11-01 10-30-05 (preview of 1 step)");
+        assert!(!name.contains([':', '/', '\\', '*', '?', '"', '<', '>', '|']));
+        assert!(name.starts_with(&run_folder_name("2026-11-01T10:30:05Z")), "it sorts with the other runs");
     }
 }

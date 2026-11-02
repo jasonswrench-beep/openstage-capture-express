@@ -8,6 +8,7 @@ use std::path::Path;
 use openstage_express_core::fsutil::utc_now_iso;
 use openstage_express_export::demo::demo;
 use openstage_express_export::gif::GifOptions;
+use openstage_express_export::images::DEFAULT_JPEG_QUALITY;
 use openstage_express_export::pdf::PdfRenderer;
 use openstage_express_export::plan::{plan, ExportOptions};
 
@@ -33,7 +34,7 @@ fn run_at(out: &Path, now_iso: &str, pdf: Option<&dyn PdfRenderer>) -> Result<St
     let folder = out.join(run_folder_name(now_iso));
     // The demo turns on the title card and the progress bar, to show them.
     let gif = GifOptions { progress_bar: true, title_card: true, ..GifOptions::default() };
-    let made = make(&the_plan, &Selection::all(), &gif, text, pdf, &folder)?;
+    let made = make(&the_plan, &Selection::all(), &gif, DEFAULT_JPEG_QUALITY, text, pdf, &folder)?;
     let mut report = String::new();
     writeln!(
         report,

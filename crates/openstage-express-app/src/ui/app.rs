@@ -11,6 +11,7 @@ use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
 use openstage_express_core::hotkey::{self, HotkeySet, KeyCombo};
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
+use openstage_express_export::plan::exported_step_count;
 use openstage_express_export::share::CopyOptions;
 
 use super::about;
@@ -242,6 +243,11 @@ impl App {
         if !formats.is_empty() {
             self.export.selection = crate::export_run::Selection::none_then(&formats);
         }
+        self.export.set_pictures(
+            settings.export_picture_width,
+            settings.export_jpg_quality,
+            settings.export_preview_steps,
+        );
         self.home.set_sort(settings.home_sort);
         self.settings = settings;
         self.settings_path = path;
@@ -265,9 +271,21 @@ impl App {
     /// Keep the settings that the Export screen also changes in step with it.
     fn sync_export_settings(&mut self) {
         let chosen: Vec<String> = self.export.selection.formats().iter().map(|f| f.folder().to_string()).collect();
-        if self.export.open_after != self.settings.open_folder_after_export || chosen != self.settings.export_formats {
+        // The quality and the number of steps kept are the last ones that were whole numbers in range, never half of what is being typed.
+        let pictures = (self.export.width, u32::from(self.export.jpg_quality), self.export.preview_steps);
+        let kept =
+            (self.settings.export_picture_width, self.settings.export_jpg_quality, self.settings.export_preview_steps);
+        if self.export.open_after != self.settings.open_folder_after_export
+            || chosen != self.settings.export_formats
+            || pictures != kept
+        {
             self.settings.open_folder_after_export = self.export.open_after;
             self.settings.export_formats = chosen;
+            (
+                self.settings.export_picture_width,
+                self.settings.export_jpg_quality,
+                self.settings.export_preview_steps,
+            ) = pictures;
             self.save_settings();
         }
     }
@@ -652,19 +670,37 @@ impl App {
             self.status.say("Choose at least one format.");
             return;
         }
+        // What is typed in the boxes is read now, so that it counts however the button was pressed.
+        let choices = match self.export.picture_choices() {
+            Ok(choices) => choices,
+            Err(why) => {
+                let words = format!("Nothing was exported. {why}");
+                self.export.said = Some(words.clone());
+                self.status.say(words);
+                return;
+            }
+        };
         let Some(editor) = self.editor.as_ref() else { return };
         let guide = editor.doc().guide.clone();
-        let folder = self
-            .export
-            .folder
-            .join(sanitise_folder_name(&guide.title))
-            .join(export_run::run_folder_name(&utc_now_iso()));
-        let job = Job { guide, pictures: editor.pictures(), selection: self.export.selection.clone(), folder };
+        // A preview that leaves steps out says so in the name of its folder.
+        let when = utc_now_iso();
+        let run_name = match choices.first_steps.map(|n| n.max(1)).filter(|n| *n < exported_step_count(&guide)) {
+            Some(shown) => export_run::preview_run_folder_name(&when, shown),
+            None => export_run::run_folder_name(&when),
+        };
+        let folder = self.export.folder.join(sanitise_folder_name(&guide.title)).join(run_name);
+        let job = Job { guide, pictures: editor.pictures(), selection: self.export.selection.clone(), choices, folder };
         let n = job.selection.count();
         self.export_job = Some(export_run::spawn(job));
         self.export.working = true;
         self.export.said = None;
-        self.status.say(format!("Exporting {n} format{}. Please wait.", if n == 1 { "" } else { "s" }));
+        let formats = format!("{n} format{}", if n == 1 { "" } else { "s" });
+        let words = if choices.first_steps.is_some() {
+            format!("Exporting a preview in {formats}. Please wait.")
+        } else {
+            format!("Exporting {formats}. Please wait.")
+        };
+        self.status.say(words);
     }
 
     /// Take what the capture has to say, and open the guide when it has finished. Call it every frame.

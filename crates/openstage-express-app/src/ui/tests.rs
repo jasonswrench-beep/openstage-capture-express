@@ -1155,6 +1155,330 @@ fn a_guide_with_no_steps_cannot_be_exported() {
     assert!(h.node(h.find(Role::Button, "Export")).is_disabled());
 }
 
+// ---- the Export screen's picture choices
+
+fn is_on(h: &Harness, role: Role, words: &str) -> bool {
+    h.node(h.find(role, words)).toggled() == Some(accesskit::Toggled::True)
+}
+
+const PREVIEW_CHECK: &str = "Make a preview of the first steps only";
+const OTHER_QUALITY: &str = "JPG quality, another number typed in the box";
+const NOT_A_QUALITY: &str = "Type a whole number from 1 to 100 for the quality, such as 80.";
+const NOT_A_COUNT: &str = "Type a whole number from 1 to 9999 for the number of steps, such as 5.";
+
+/// Type `words` into the text box called `name`, replacing what is in it, as a keyboard user does.
+fn type_in_box(h: &mut Harness, name: &str, words: &str) {
+    h.focus_on(Role::TextInput, name);
+    h.key(Key::A, ctrl());
+    if words.is_empty() {
+        h.key(Key::Backspace, NO_MODS);
+    } else {
+        h.type_text(words);
+    }
+}
+
+/// An editor over the example guide with an exports folder and settings saved in `dir`.
+fn picture_harness(dir: &std::path::Path, settings: AppSettings) -> Harness {
+    let mut h = Harness::new(Screen::Editor);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_system(dir.join("exports"), false, Box::new(|_| None), Box::new(|_| {})).with_settings(
+        settings,
+        Some(dir.join("settings.json")),
+        None,
+    );
+    h.app.screen = Screen::Editor;
+    h.settle();
+    h
+}
+
+fn files_in(folder: &std::path::Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(folder).unwrap().flatten().map(|e| e.path()).collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn the_export_screen_offers_widths_qualities_and_a_preview_each_named_for_what_it_is_a_choice_of() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    for width in [640, 800, 1024, 1280, 1600, 1920] {
+        assert_eq!(is_on(&h, Role::RadioButton, &format!("Picture width {width} pixels")), width == 1280, "{width}");
+    }
+    let qualities = [
+        ("JPG quality 100, best picture", false),
+        ("JPG quality 90, the usual", true),
+        ("JPG quality 70, smaller file", false),
+        ("JPG quality 50, smallest file", false),
+        (OTHER_QUALITY, false),
+    ];
+    for (name, on) in qualities {
+        assert_eq!(is_on(&h, Role::RadioButton, name), on, "{name}");
+    }
+    assert_eq!(h.node(h.find(Role::TextInput, "Quality, 1 to 100")).value(), Some("90"));
+    assert_eq!(h.node(h.find(Role::TextInput, "Steps in the preview")).value(), Some("5"));
+    assert!(!is_on(&h, Role::CheckBox, PREVIEW_CHECK));
+    // The words on the screen are short; the names say what they are for.
+    h.find(Role::Heading, "How wide the pictures are");
+    h.find(Role::Heading, "Quality of the JPG pictures");
+    h.find(Role::Heading, "Try it on a few steps first");
+    // Nothing is wrong, so no message about a number shows.
+    assert!(!h.has(Role::Label, NOT_A_QUALITY) && !h.has(Role::Label, NOT_A_COUNT));
+    // They sit between the formats and the folder, in reading order.
+    let at = |role: Role, words: &str| h.order.iter().position(|id| *id == h.find(role, words)).unwrap();
+    let order = [
+        at(Role::CheckBox, "PowerPoint presentation"),
+        at(Role::Heading, "How wide the pictures are"),
+        at(Role::RadioButton, "Picture width 640 pixels"),
+        at(Role::Heading, "Quality of the JPG pictures"),
+        at(Role::RadioButton, "JPG quality 100, best picture"),
+        at(Role::TextInput, "Quality, 1 to 100"),
+        at(Role::Heading, "Try it on a few steps first"),
+        at(Role::CheckBox, PREVIEW_CHECK),
+        at(Role::TextInput, "Steps in the preview"),
+        at(Role::Button, "Choose folder..."),
+    ];
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}\n{}", h.dump());
+}
+
+#[test]
+fn every_picture_choice_can_be_reached_and_changed_with_the_keyboard_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.focus_on(Role::Button, "Back to the guide");
+    let mut seen = Vec::new();
+    for _ in 0..80 {
+        h.key(Key::Tab, NO_MODS);
+        seen.extend(h.focused_words());
+    }
+    for name in [
+        "Picture width 640 pixels",
+        "Picture width 1920 pixels",
+        "JPG quality 100, best picture",
+        "JPG quality 50, smallest file",
+        OTHER_QUALITY,
+        "Quality, 1 to 100",
+        PREVIEW_CHECK,
+        "Steps in the preview",
+    ] {
+        assert!(seen.iter().any(|s| s == name), "the keyboard never reached {name:?}: {seen:?}");
+    }
+    // A radio button is chosen with the keyboard's Space, and a check box too.
+    h.focus_on(Role::RadioButton, "Picture width 1600 pixels");
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::RadioButton, "Picture width 1600 pixels"));
+    assert!(!is_on(&h, Role::RadioButton, "Picture width 1280 pixels"));
+    assert_eq!(h.focused_words().as_deref(), Some("Picture width 1600 pixels"), "the keyboard stays where it was");
+    h.focus_on(Role::CheckBox, PREVIEW_CHECK);
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::CheckBox, PREVIEW_CHECK));
+}
+
+#[test]
+fn a_width_a_quality_and_a_preview_chosen_on_the_screen_decide_the_files_and_the_name_of_the_folder() {
+    use openstage_express_export::picture::decode_png;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, opened) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    for name in ["Web page", "Word document"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::CheckBox, "Pictures (PNG)");
+    h.invoke(Role::CheckBox, "Pictures (JPG)");
+    h.invoke(Role::RadioButton, "Picture width 640 pixels");
+    h.invoke(Role::RadioButton, "JPG quality 50, smallest file");
+    type_in_box(&mut h, "Steps in the preview", "2");
+    assert!(is_on(&h, Role::CheckBox, PREVIEW_CHECK), "typing a number of steps asks for a preview");
+    h.invoke(Role::Button, "Export 2 formats");
+    assert!(h.status().starts_with("Exporting a preview in 2 formats."), "{}", h.status());
+    wait_for_export(&mut h);
+    let said = h.status();
+    assert!(said.starts_with("Exported 2 formats to "), "{said}");
+    assert!(said.contains("It is a preview, not the whole guide: the first 2 of the guide's "), "{said}");
+    let guide_folder = dir.path().join("How to submit an assignment");
+    let runs = files_in(&guide_folder);
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0].to_string_lossy().ends_with(" (preview of 2 steps)"), "{:?}", runs[0]);
+    assert_eq!(*opened.borrow(), [runs[0].clone()]);
+    let pngs = files_in(&runs[0].join("images"));
+    assert_eq!(pngs.len(), 2, "only the first two steps");
+    for png in &pngs {
+        assert_eq!(decode_png(&std::fs::read(png).unwrap()).unwrap().width, 640);
+    }
+    let small: u64 = files_in(&runs[0].join("jpg")).iter().map(|p| std::fs::metadata(p).unwrap().len()).sum();
+    assert_eq!(files_in(&runs[0].join("jpg")).len(), 2);
+    // Another run with the best quality is bigger, and a run of every step is not called a preview.
+    std::thread::sleep(Duration::from_millis(1100));
+    h.invoke(Role::RadioButton, "JPG quality 100, best picture");
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    let runs = files_in(&guide_folder);
+    assert_eq!(runs.len(), 2);
+    let best: u64 = files_in(&runs[1].join("jpg")).iter().map(|p| std::fs::metadata(p).unwrap().len()).sum();
+    assert!(best > small, "quality 100 ({best}) is bigger than quality 50 ({small})");
+    std::thread::sleep(Duration::from_millis(1100));
+    h.invoke(Role::CheckBox, PREVIEW_CHECK);
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    let runs = files_in(&guide_folder);
+    assert_eq!(runs.len(), 3);
+    assert!(!runs[2].to_string_lossy().contains("preview"), "every step: {:?}", runs[2]);
+    assert!(files_in(&runs[2].join("images")).len() > 2);
+    assert!(!h.status().contains("preview"), "{}", h.status());
+}
+
+#[test]
+fn a_preview_as_long_as_the_guide_is_not_called_a_preview_but_the_report_says_what_happened() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    type_in_box(&mut h, "Steps in the preview", "500");
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    let said = h.status();
+    assert!(said.contains("You asked for a preview, but the guide has only "), "{said}");
+    assert!(said.contains("so all of it is in."), "{said}");
+    let runs = files_in(&dir.path().join("How to submit an assignment"));
+    assert_eq!(runs.len(), 1);
+    assert!(!runs[0].to_string_lossy().contains("preview"), "{:?}", runs[0]);
+}
+
+#[test]
+fn what_is_typed_in_a_box_is_used_even_when_the_button_is_pressed_before_the_box_is_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = picture_harness(dir.path(), AppSettings::default());
+    h.invoke(Role::Button, "Export");
+    // The saved settings start with only the web page (the PDF in them is left out on a computer without a PDF engine).
+    h.invoke(Role::CheckBox, "Web page");
+    h.invoke(Role::CheckBox, "Pictures (JPG)");
+    type_in_box(&mut h, "Quality, 1 to 100", "35");
+    assert!(is_on(&h, Role::RadioButton, OTHER_QUALITY), "typing a quality chooses another number");
+    assert!(!is_on(&h, Role::RadioButton, "JPG quality 90, the usual"));
+    assert_eq!(h.focused_words().as_deref(), Some("Quality, 1 to 100"), "the keyboard is still in the box");
+    h.invoke(Role::Button, "Export 1 format");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 1 format to "), "{}", h.status());
+    assert_eq!(h.app.settings.export_jpg_quality, 35);
+    let run = files_in(&dir.path().join("exports").join("How to submit an assignment")).remove(0);
+    assert!(!run.to_string_lossy().contains("preview"));
+    assert!(files_in(&run.join("jpg")).len() > 2, "every step, as the preview was not asked for");
+}
+
+#[test]
+fn a_box_with_something_that_is_not_a_number_stops_the_export_and_says_why_and_the_message_goes_when_it_is_put_right() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    type_in_box(&mut h, "Quality, 1 to 100", "abc");
+    h.find(Role::Label, NOT_A_QUALITY);
+    h.invoke(Role::Button, "Export 2 formats");
+    assert_eq!(h.status(), format!("Nothing was exported. {NOT_A_QUALITY}"));
+    assert!(!h.app.is_exporting());
+    assert!(!dir.path().join("How to submit an assignment").exists(), "nothing was made");
+    h.find(Role::Label, &format!("Nothing was exported. {NOT_A_QUALITY}"));
+    // A quality out of range is just as wrong.
+    for wrong in ["0", "101", "", "7.5"] {
+        type_in_box(&mut h, "Quality, 1 to 100", wrong);
+        h.find(Role::Label, NOT_A_QUALITY);
+        h.invoke(Role::Button, "Export 2 formats");
+        assert_eq!(h.status(), format!("Nothing was exported. {NOT_A_QUALITY}"), "{wrong:?}");
+    }
+    // Choosing one of the four qualities puts it right, whatever is left in the box.
+    h.invoke(Role::RadioButton, "JPG quality 70, smaller file");
+    assert!(!h.has(Role::Label, NOT_A_QUALITY), "the box is not in use now");
+    // The number of steps is read the same way, but only while a preview is wanted.
+    type_in_box(&mut h, "Steps in the preview", "0");
+    h.find(Role::Label, NOT_A_COUNT);
+    h.invoke(Role::Button, "Export 2 formats");
+    assert_eq!(h.status(), format!("Nothing was exported. {NOT_A_COUNT}"));
+    assert!(!dir.path().join("How to submit an assignment").exists());
+    h.invoke(Role::CheckBox, PREVIEW_CHECK);
+    assert!(!h.has(Role::Label, NOT_A_COUNT), "no preview, so the box is not in use");
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 2 formats to "), "{}", h.status());
+}
+
+#[test]
+fn choosing_another_number_starts_from_the_quality_in_use_and_the_box_then_decides() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::RadioButton, "JPG quality 70, smaller file");
+    h.invoke(Role::RadioButton, OTHER_QUALITY);
+    assert!(is_on(&h, Role::RadioButton, OTHER_QUALITY));
+    assert!(!is_on(&h, Role::RadioButton, "JPG quality 70, smaller file"));
+    assert_eq!(h.node(h.find(Role::TextInput, "Quality, 1 to 100")).value(), Some("70"), "the box starts from 70");
+    assert_eq!(h.app.export.jpg_quality_now(), Ok(70));
+    type_in_box(&mut h, "Quality, 1 to 100", "64");
+    h.invoke(Role::RadioButton, OTHER_QUALITY);
+    assert_eq!(h.node(h.find(Role::TextInput, "Quality, 1 to 100")).value(), Some("64"), "pressing it again keeps 64");
+    assert_eq!(h.app.export.jpg_quality_now(), Ok(64));
+    h.invoke(Role::RadioButton, "JPG quality 50, smallest file");
+    assert!(!is_on(&h, Role::RadioButton, OTHER_QUALITY));
+    assert_eq!(h.app.export.jpg_quality_now(), Ok(50), "a preset takes over from the box");
+}
+#[test]
+fn the_picture_choices_are_kept_in_the_settings_and_a_preview_is_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut h = picture_harness(dir.path(), AppSettings::default());
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::RadioButton, "Picture width 800 pixels");
+    h.invoke(Role::RadioButton, "JPG quality 70, smaller file");
+    type_in_box(&mut h, "Steps in the preview", "12");
+    let (kept, note) = crate::settings::load(&path);
+    assert!(note.is_none());
+    assert_eq!((kept.export_picture_width, kept.export_jpg_quality, kept.export_preview_steps), (800, 70, 12));
+    // Half of a number being typed is not kept: only a whole number in range, so a box being emptied keeps the last good one.
+    type_in_box(&mut h, "Quality, 1 to 100", "5");
+    assert_eq!(crate::settings::load(&path).0.export_jpg_quality, 5);
+    h.type_text("5");
+    assert_eq!(crate::settings::load(&path).0.export_jpg_quality, 55);
+    type_in_box(&mut h, "Quality, 1 to 100", "");
+    assert_eq!(crate::settings::load(&path).0.export_jpg_quality, 55, "an empty box keeps the last good number");
+    h.type_text("77");
+    type_in_box(&mut h, "Steps in the preview", "x");
+    assert_eq!(crate::settings::load(&path).0.export_preview_steps, 12, "and so does a box with something else");
+    type_in_box(&mut h, "Steps in the preview", "12");
+    // A new run of the program starts from the settings file.
+    let (settings, note) = crate::settings::load(&path);
+    assert!(note.is_none());
+    assert_eq!((settings.export_picture_width, settings.export_jpg_quality), (800, 77));
+    assert!(
+        !std::fs::read_to_string(&path).unwrap().contains("exportPreview\""),
+        "no on-or-off for a preview is written"
+    );
+    let mut again = picture_harness(dir.path(), settings);
+    again.invoke(Role::Button, "Export");
+    assert!(is_on(&again, Role::RadioButton, "Picture width 800 pixels"));
+    assert!(!is_on(&again, Role::RadioButton, "Picture width 1280 pixels"));
+    assert!(is_on(&again, Role::RadioButton, OTHER_QUALITY));
+    assert_eq!(again.node(again.find(Role::TextInput, "Quality, 1 to 100")).value(), Some("77"));
+    assert_eq!(again.node(again.find(Role::TextInput, "Steps in the preview")).value(), Some("12"));
+    assert!(!is_on(&again, Role::CheckBox, PREVIEW_CHECK), "a preview is never on by itself");
+}
+
+#[test]
+fn a_setting_that_is_not_on_offer_is_shown_as_the_nearest_choice_that_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let wild = AppSettings {
+        export_picture_width: 1000,
+        export_jpg_quality: 9000,
+        export_preview_steps: 0,
+        ..AppSettings::default()
+    };
+    let mut h = picture_harness(dir.path(), wild);
+    h.invoke(Role::Button, "Export");
+    assert!(is_on(&h, Role::RadioButton, "Picture width 1024 pixels"));
+    assert!(is_on(&h, Role::RadioButton, "JPG quality 100, best picture"));
+    assert_eq!(h.node(h.find(Role::TextInput, "Steps in the preview")).value(), Some("1"));
+    // The screen tidies the file up the next time it is open.
+    let kept = crate::settings::load(&dir.path().join("settings.json")).0;
+    assert_eq!((kept.export_picture_width, kept.export_jpg_quality, kept.export_preview_steps), (1024, 100, 1));
+}
+
 // ---- the Settings screen
 
 use crate::settings::{AppSettings, Appearance, KeyChoice, ModeChoice};
