@@ -308,6 +308,18 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
             status.say(format!("The guide is now called {}.", state.doc().guide.title));
         }
     }
+    // The focused view for the whole guide: how many steps have it, and one press to turn it on or off for all of them. Like the other
+    // buttons that change many things, they are always pressable, and the status line says what was done.
+    ui.add_space(4.0);
+    ui.label(RichText::new(state.focus_summary()).size(13.5).color(p.muted));
+    ui.horizontal_wrapped(|ui| {
+        if widgets::button(ui, "Focused view on for every step").clicked() {
+            status.say_opt(state.set_focused_for_all(true));
+        }
+        if widgets::button(ui, "Focused view off for every step").clicked() {
+            status.say_opt(state.set_focused_for_all(false));
+        }
+    });
     ui.add_space(6.0);
     widgets::subheading(ui, "Step details");
     if state.selected_step().is_none() {

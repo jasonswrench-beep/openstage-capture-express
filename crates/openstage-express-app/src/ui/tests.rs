@@ -4315,3 +4315,58 @@ fn the_dev_switch_for_the_open_a_copy_screen_is_read() {
     let words = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     assert_eq!(DevOptions::parse(&words(&["--screen", "open-copy"])).unwrap().screen, Some(Screen::OpenCopy));
 }
+
+// ---- the focused view for the whole guide
+
+#[test]
+fn the_details_say_how_many_steps_have_the_focused_view_and_a_press_turns_it_on_or_off_for_all_of_them() {
+    let mut h = Harness::new(Screen::Editor);
+    let said = |h: &Harness, start: &str| h.order.iter().filter_map(|id| h.name(*id)).any(|w| w.starts_with(start));
+    assert!(said(&h, "Focused view: 6 of 6 steps with a picture. New steps start with the focused view on."));
+    assert!(h.has(Role::CheckBox, "Focused view"));
+    h.invoke(Role::Button, "Focused view off for every step");
+    assert_eq!(
+        h.status(),
+        "Focused view turned off for 6 steps. They show the whole picture. Undo brings the crops back. New steps will start without it."
+    );
+    assert!(said(&h, "Focused view: 0 of 6 steps with a picture. New steps start with the focused view off."));
+    assert!(!h.has(Role::Button, "Move crop left"), "this step shows its whole picture now, so it has no crop to move");
+    assert!(the_editor(&h).selected_step().unwrap().focus.is_none());
+    h.invoke(Role::Button, "Focused view on for every step");
+    assert_eq!(h.status(), "Focused view turned on for 6 steps. New steps will start with it.");
+    assert!(h.has(Role::Button, "Move crop left"), "and its crop is back");
+    h.invoke(Role::Button, "Undo");
+    assert!(said(&h, "Focused view: 0 of 6 steps"), "one undo took back the whole of turning it on");
+    h.invoke(Role::Button, "Undo");
+    assert!(said(&h, "Focused view: 6 of 6 steps"), "and the whole of turning it off");
+}
+
+#[test]
+fn the_buttons_for_the_whole_guide_keep_the_keyboard_and_keep_a_crop_set_by_hand() {
+    let mut h = Harness::new(Screen::Editor);
+    h.invoke(Role::Button, "Move crop right");
+    let by_hand = crop_of(&h);
+    // With the keyboard on the button, a press that changes nothing says so and leaves the keyboard where it is.
+    h.focus_on(Role::Button, "Focused view on for every step");
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "Every step that can have the focused view already has it.");
+    assert_eq!(h.focused_words().as_deref(), Some("Focused view on for every step"));
+    assert_eq!(crop_of(&h), by_hand, "the crop set by hand is kept");
+    h.focus_on(Role::Button, "Focused view off for every step");
+    h.key(Key::Enter, NO_MODS);
+    h.key(Key::Enter, NO_MODS);
+    assert_eq!(h.status(), "No step has the focused view.");
+    assert_eq!(h.focused_words().as_deref(), Some("Focused view off for every step"));
+}
+
+#[test]
+fn the_buttons_for_the_whole_guide_come_after_the_guide_title_in_the_keyboard_order() {
+    let mut h = Harness::new(Screen::Editor);
+    h.focus_on(Role::TextInput, "Guide title");
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        h.key(Key::Tab, NO_MODS);
+        seen.push(h.focused_words().unwrap_or_default());
+    }
+    assert_eq!(seen, ["Focused view on for every step", "Focused view off for every step", "Title"]);
+}

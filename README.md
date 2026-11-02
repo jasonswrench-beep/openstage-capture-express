@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 807 passed (269 in the core, 200 in the exports, 47 in the
-  Windows crate, 291 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 819 passed (274 in the core, 200 in the exports, 47 in the
+  Windows crate, 298 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -121,6 +121,17 @@ Written and type-checked, not yet run on Windows:
   the same second hid it; a test that does not depend on the clock now catches it). Fifteen more deliberate faults in the emptying
   were each caught (one, the question being reset when the person leaves, is done in two places on purpose, and a test caught it
   only with both removed). Looked at in both colour schemes (`--ask-to-empty`).
+
+- The focused view for a whole guide at once (spec E5, written and tested 2026-11-01; Jason chose it). Under the guide's title in the
+  editor, a line says how many steps with a picture have the focused view ("Focused view: 6 of 6 steps with a picture. New steps start
+  with the focused view on.") and two buttons, "Focused view on for every step" and "Focused view off for every step". On gives the
+  usual crop to every step that has a picture and a click and no crop, keeps a crop set by hand, and leaves a step with no click whole,
+  and says so; off shows every picture whole (undo brings the crops back). Each is one change and one Undo, is always pressable (so
+  the keyboard is never stranded; pressing when nothing would change says so), and also sets the guide's own default for new steps
+  (`focusedView`). A guide made by a capture now records the choice the capture was started with as that default. With the per-step
+  tick and the Settings choice, that makes the spec's three levels. Tested through the window and in the core; nobody has used it by
+  hand, and Narrator and NVDA have not read the new line and buttons. Eleven deliberate faults were each caught, and the editor was drawn
+  by the real program in both colour schemes.
 
 - A copy of a guide as one file, and opening one (spec A8 and P5, written and tested 2026-11-01; Jason said 'Yes, build it'). On the
   Export screen a new section, "A copy as one file", has a tick "Include the original pictures" (off) and a button "Save a copy as one
@@ -277,8 +288,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display,
-the focused view for a whole guide at once (it is per step), options on the
+Not built: M8 and everything else in the spec: capturing a window that has moved to another display, options on the
 Export screen (it offers the formats with their usual options), the language of the program's own words
 (English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
 opens), first-run, WebP, the optional logo on slides, and signing.

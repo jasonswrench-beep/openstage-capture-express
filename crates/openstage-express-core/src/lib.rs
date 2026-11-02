@@ -30,7 +30,7 @@ pub use error::StoreError;
 pub use model::{
     Annotation, AnnotationKind, Button, Click, Control, Guide, Rect, Step, StepImage, StepKind, SCHEMA_VERSION,
 };
-pub use ops::{Document, OpError, Position, StepDraft, Trash, TrashEntry};
+pub use ops::{Document, FocusAll, OpError, Position, StepDraft, Trash, TrashEntry};
 pub use session::Session;
 pub use store::{read_guide, Access, GuideFolder, Opened, SaveReport};
 pub use titles::Language;

@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::focus::{auto_focus, DEFAULT_ZOOM_PERCENT};
 use crate::model::{
     step_number, Annotation, Click, Control, Extra, Guide, Rect, Step, StepImage, StepKind, SCHEMA_VERSION,
 };
@@ -74,6 +75,19 @@ impl Default for Trash {
     fn default() -> Trash {
         Trash::new()
     }
+}
+
+/// What turning the focused view on or off for the whole guide did ([`Document::set_focus_for_all`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FocusAll {
+    /// Steps that got the usual crop (on), or lost their crop (off).
+    pub changed: usize,
+    /// Steps that already had a crop, which was kept (only when turning on).
+    pub kept: usize,
+    /// Steps with a picture but no click to centre on, which stay whole (only when turning on).
+    pub cannot: usize,
+    /// The guide's own default for new steps was changed too.
+    pub default_changed: bool,
 }
 
 /// A guide and its trash: the thing that is edited, saved, and snapshotted for undo.
@@ -370,6 +384,55 @@ impl Document {
             self.guide.focused_view = on;
             self.touch(now);
         }
+    }
+
+    /// Turn the focused view on or off for the whole guide, and make that the guide's default for new steps.
+    ///
+    /// On: every step that has a picture and a click, and no crop yet, gets the usual crop around its click. A crop that is there
+    /// already, such as one the person moved by hand, is kept. A step with a picture but no click has nothing to centre on and stays
+    /// whole. Off: every crop is taken away, so every step shows its whole picture (the click, and so the usual crop, is still known,
+    /// so turning it on again brings the usual crops back). Notes and steps without a picture are not touched.
+    pub fn set_focus_for_all(&mut self, on: bool, now: &str) -> FocusAll {
+        let mut report = FocusAll::default();
+        let mut touched = false;
+        for step in &mut self.guide.steps {
+            let Some(image) = &step.image else { continue };
+            if !on {
+                if step.focus.take().is_some() {
+                    report.changed += 1;
+                    touched = true;
+                }
+                continue;
+            }
+            if step.focus.is_some() {
+                report.kept += 1;
+                continue;
+            }
+            let click = step.click.as_ref().map(|c| (c.x, c.y));
+            match auto_focus(image.width, image.height, click, DEFAULT_ZOOM_PERCENT) {
+                Some(crop) => {
+                    step.focus = Some(crop);
+                    report.changed += 1;
+                    touched = true;
+                }
+                None => report.cannot += 1,
+            }
+        }
+        if self.guide.focused_view != on {
+            self.guide.focused_view = on;
+            report.default_changed = true;
+            touched = true;
+        }
+        if touched {
+            self.touch(now);
+        }
+        report
+    }
+
+    /// How many steps with a picture have a focused view, and how many steps have a picture (a note has none).
+    pub fn focus_counts(&self) -> (usize, usize) {
+        let with_picture = self.guide.steps.iter().filter(|s| s.image.is_some());
+        (with_picture.clone().filter(|s| s.focus.is_some()).count(), with_picture.count())
     }
 
     // ---- marks on a picture
@@ -1181,6 +1244,101 @@ pub(crate) mod tests {
         assert_eq!(d.duplicate_steps(&[], LATER), Ok(Vec::new()));
         assert_eq!(d.duplicate_steps(&ids(&["step-2", "step-99"]), LATER), Err(OpError::NoSuchStep("step-99".into())));
         assert_eq!(d, before);
+    }
+
+    /// Three picture steps (A and B with a click, C without) and a note, all with the whole picture showing.
+    fn picture_steps() -> Document {
+        let mut d = doc();
+        for (title, click) in [("A", Some((100, 100))), ("B", Some((640, 360))), ("C", None)] {
+            let mut draft = StepDraft::with_picture(title, StepImage::new("images/step-0001.png", 1280, 720));
+            draft.click =
+                click.map(|(x, y)| Click { x, y, button: crate::model::Button::Left, extra: Default::default() });
+            d.add_step(draft, Position::End, NOW).unwrap();
+        }
+        let mut note = StepDraft::empty("Note");
+        note.kind = StepKind::Block;
+        d.add_step(note, Position::End, NOW).unwrap();
+        d.guide.focused_view = false;
+        d
+    }
+
+    #[test]
+    fn turning_the_focused_view_on_for_the_guide_gives_each_step_with_a_click_its_usual_crop_and_leaves_the_rest_whole()
+    {
+        let mut d = picture_steps();
+        let report = d.set_focus_for_all(true, LATER);
+        assert_eq!(report, FocusAll { changed: 2, kept: 0, cannot: 1, default_changed: true });
+        let crop = |id: &str| d.guide.step(id).unwrap().focus.clone();
+        assert_eq!(crop("step-1"), auto_focus(1280, 720, Some((100, 100)), DEFAULT_ZOOM_PERCENT));
+        assert_eq!(crop("step-2"), auto_focus(1280, 720, Some((640, 360)), DEFAULT_ZOOM_PERCENT));
+        assert_eq!(crop("step-3"), None, "no click to centre on, so it stays whole");
+        assert_eq!(crop("step-4"), None, "a note has no picture");
+        assert!(d.guide.focused_view, "and new steps start with it");
+        assert_eq!(d.guide.updated_at, LATER);
+        assert_eq!(d.focus_counts(), (2, 3));
+        assert_sound(&d);
+    }
+
+    #[test]
+    fn turning_it_on_keeps_a_crop_the_person_set_by_hand() {
+        let mut d = picture_steps();
+        let by_hand = Rect::new(10, 20, 400, 225);
+        d.set_focus("step-1", Some(by_hand.clone()), NOW).unwrap();
+        let report = d.set_focus_for_all(true, LATER);
+        assert_eq!((report.changed, report.kept, report.cannot), (1, 1, 1));
+        assert_eq!(d.guide.step("step-1").unwrap().focus, Some(by_hand));
+    }
+
+    #[test]
+    fn turning_it_off_for_the_guide_shows_every_picture_whole_and_turning_it_on_again_brings_the_usual_crops_back() {
+        let mut d = picture_steps();
+        d.set_focus_for_all(true, NOW);
+        let usual = d.clone();
+        let report = d.set_focus_for_all(false, LATER);
+        assert_eq!(report, FocusAll { changed: 2, kept: 0, cannot: 0, default_changed: true });
+        assert!(d.guide.steps.iter().all(|s| s.focus.is_none()));
+        assert!(!d.guide.focused_view);
+        d.set_focus_for_all(true, LATER);
+        assert_eq!(d.guide.steps, usual.guide.steps);
+        // A crop moved by hand is not brought back by off and on: off took it away.
+        let mut hand = picture_steps();
+        hand.set_focus("step-1", Some(Rect::new(10, 20, 400, 225)), NOW).unwrap();
+        hand.set_focus_for_all(false, NOW);
+        hand.set_focus_for_all(true, NOW);
+        assert_eq!(
+            hand.guide.step("step-1").unwrap().focus,
+            auto_focus(1280, 720, Some((100, 100)), DEFAULT_ZOOM_PERCENT)
+        );
+    }
+
+    #[test]
+    fn doing_it_again_changes_nothing_not_even_the_time_but_the_default_alone_is_a_change() {
+        let mut d = picture_steps();
+        d.set_focus_for_all(true, NOW);
+        let before = d.clone();
+        let report = d.set_focus_for_all(true, LATER);
+        assert_eq!(report, FocusAll { changed: 0, kept: 2, cannot: 1, default_changed: false });
+        assert_eq!(d, before, "nothing changed, not even the time");
+        // Every crop is there already, but the guide's default for new steps was off.
+        d.guide.focused_view = false;
+        let report = d.set_focus_for_all(true, LATER);
+        assert_eq!((report.changed, report.default_changed), (0, true));
+        assert!(d.guide.focused_view);
+        assert_eq!(d.guide.updated_at, LATER);
+        // Off with nothing to take away.
+        let mut none = picture_steps();
+        let before = none.clone();
+        assert_eq!(none.set_focus_for_all(false, LATER), FocusAll::default());
+        assert_eq!(none, before);
+    }
+
+    #[test]
+    fn the_counts_are_of_steps_with_a_picture() {
+        let mut d = picture_steps();
+        assert_eq!(d.focus_counts(), (0, 3));
+        d.set_focus("step-3", Some(Rect::new(0, 0, 640, 360)), NOW).unwrap();
+        assert_eq!(d.focus_counts(), (1, 3), "a step with a crop counts whether or not it has a click");
+        assert_eq!(doc().focus_counts(), (0, 0));
     }
 
     #[test]
