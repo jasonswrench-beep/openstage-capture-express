@@ -215,6 +215,8 @@ pub struct AppSettings {
     pub export_jpg_quality: u32,
     /// How many steps a preview has. Whether to make a preview is not kept: a preview must never be made by accident.
     pub export_preview_steps: usize,
+    /// Whether the web page, Word, PowerPoint and PDF keep their pictures as JPG (smaller files) instead of PNG.
+    pub export_documents_jpg: bool,
     /// Fields this program does not know, kept and written back.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -248,6 +250,7 @@ impl Default for AppSettings {
             export_picture_width: DEFAULT_IMAGE_WIDTH,
             export_jpg_quality: u32::from(DEFAULT_JPEG_QUALITY),
             export_preview_steps: DEFAULT_PREVIEW_STEPS,
+            export_documents_jpg: false,
             extra: Map::new(),
         }
     }
@@ -585,15 +588,22 @@ mod tests {
         let path = dir.path().join("settings.json");
         let s = AppSettings::default();
         assert_eq!((s.export_picture_width, s.export_jpg_quality, s.export_preview_steps), (1280, 90, 5));
+        assert!(!s.export_documents_jpg, "documents keep PNG pictures until JPG is chosen");
         let changed = AppSettings {
             export_picture_width: 800,
             export_jpg_quality: 77,
             export_preview_steps: 12,
+            export_documents_jpg: true,
             ..AppSettings::default()
         };
         save(&path, &changed).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        for words in ["\"exportPictureWidth\": 800", "\"exportJpgQuality\": 77", "\"exportPreviewSteps\": 12"] {
+        for words in [
+            "\"exportPictureWidth\": 800",
+            "\"exportJpgQuality\": 77",
+            "\"exportPreviewSteps\": 12",
+            "\"exportDocumentsJpg\": true",
+        ] {
             assert!(text.contains(words), "{words} in {text}");
         }
         assert!(!text.to_lowercase().contains("exportpreview\""), "whether to make a preview is never kept: {text}");

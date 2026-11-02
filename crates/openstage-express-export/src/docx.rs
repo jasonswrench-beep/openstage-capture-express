@@ -20,7 +20,7 @@ use crate::office::{
     OfficeError, Rels,
 };
 use crate::pdf::{words, Orientation, PageSize};
-use crate::plan::Plan;
+use crate::plan::{EmbeddedPicture, Plan};
 use crate::zip::{self, ZipEntry};
 use crate::{Export, OutFile};
 
@@ -171,11 +171,12 @@ impl Body {
         }
     }
 
-    fn picture(&mut self, png: &[u8], width: u32, height: u32, alt: &str) {
+    fn picture(&mut self, picture: EmbeddedPicture<'_>, width: u32, height: u32, alt: &str) {
         let n = self.images.len() as u32 + 1;
-        let path = format!("word/media/image{n}.png");
-        let id = self.rels.add("image", &format!("media/image{n}.png"), false);
-        self.images.push(ZipEntry::stored(path, png.to_vec()));
+        let ext = picture.extension;
+        let path = format!("word/media/image{n}.{ext}");
+        let id = self.rels.add("image", &format!("media/image{n}.{ext}"), false);
+        self.images.push(ZipEntry::stored(path, picture.bytes.to_vec()));
         self.next_drawing += 1;
         let drawing = self.next_drawing;
         let (cx, cy) = fit_picture(width, height, self.max_width, self.max_height);
@@ -186,7 +187,7 @@ impl Body {
 <wp:docPr id=\"{drawing}\" name=\"Picture {drawing}\" descr=\"{alt}\"/>\
 <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>\
 <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
-<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{drawing}\" name=\"image{n}.png\" descr=\"{alt}\"/><pic:cNvPicPr/></pic:nvPicPr>\
+<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{drawing}\" name=\"image{n}.{ext}\" descr=\"{alt}\"/><pic:cNvPicPr/></pic:nvPicPr>\
 <pic:blipFill><a:blip r:embed=\"{id}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
 <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\
 </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
@@ -390,7 +391,7 @@ pub fn docx_parts(plan: &Plan, options: &DocxOptions) -> Vec<ZipEntry> {
         ));
         body.description(&step.description, None, step.picture.is_some());
         if let Some(picture) = &step.picture {
-            body.picture(&picture.png, picture.width, picture.height, &step.alt);
+            body.picture(picture.embedded(), picture.width, picture.height, &step.alt);
         }
     }
 
@@ -460,6 +461,7 @@ pub fn export_docx(plan: &Plan, options: &DocxOptions) -> Result<Export, OfficeE
 mod tests {
     use super::*;
     use crate::demo::demo;
+    use crate::images::ImageFormat;
     use crate::office::check::{attributes, texts, well_formed};
     use crate::plan::{plan, ExportOptions};
     use crate::zip::reader::{unzip, Unzipped};
@@ -472,6 +474,81 @@ mod tests {
 
     fn make(options: &DocxOptions) -> Unzipped {
         unzip(&export_docx(&demo_plan(), options).unwrap().files[0].bytes)
+    }
+
+    fn jpg_plan() -> Plan {
+        let d = demo();
+        let options =
+            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+        plan(&d.document.guide, &d.pictures, &BlockText, &options)
+    }
+
+    #[test]
+    fn jpg_pictures_are_jpg_parts_with_a_content_type_and_every_relationship_still_resolves() {
+        let p = jpg_plan();
+        let z = unzip(&export_docx(&p, &DocxOptions::default()).unwrap().files[0].bytes);
+        let media: Vec<&String> = z.names.iter().filter(|n| n.starts_with("word/media/")).collect();
+        assert_eq!(
+            media,
+            [
+                "word/media/image1.jpg",
+                "word/media/image2.jpg",
+                "word/media/image3.jpg",
+                "word/media/image4.jpg",
+                "word/media/image5.jpg"
+            ]
+        );
+        for (n, picture) in p.steps.iter().filter_map(|s| s.picture.as_ref()).enumerate() {
+            let part = z.get(&format!("word/media/image{}.jpg", n + 1)).unwrap();
+            assert_eq!(part, picture.jpg.as_ref().unwrap().as_slice(), "image{} holds the step's JPG", n + 1);
+            assert_eq!(&part[..2], &[0xFF, 0xD8]);
+        }
+        let types = z.text("[Content_Types].xml");
+        assert!(types.contains("<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"), "{types}");
+        let doc = z.text("word/document.xml");
+        let rels = z.text("word/_rels/document.xml.rels");
+        assert_eq!(attributes(&rels, "Relationship", "Target").iter().filter(|t| t.ends_with(".jpg")).count(), 5);
+        assert!(!rels.contains(".png"), "{rels}");
+        assert_eq!(
+            attributes(&doc, "pic:cNvPr", "name"),
+            ["image1.jpg", "image2.jpg", "image3.jpg", "image4.jpg", "image5.jpg"]
+        );
+        let ids = attributes(&rels, "Relationship", "Id");
+        for used in attributes(&doc, "a:blip", "r:embed") {
+            assert!(ids.contains(&used), "{used} is used in the document but not defined in {ids:?}");
+        }
+        for name in z.names.iter().filter(|n| n.ends_with(".xml") || n.ends_with(".rels")) {
+            well_formed(name, &z.text(name));
+        }
+        let png = make(&DocxOptions::default());
+        assert!(png.names.iter().any(|n| n == "word/media/image1.png"), "and the PNG document is as it was");
+    }
+
+    #[test]
+    fn a_picture_kept_as_png_beside_jpg_ones_has_its_own_extension_and_the_package_still_checks() {
+        let mut p = jpg_plan();
+        let picture = p.steps.iter_mut().filter_map(|s| s.picture.as_mut()).nth(2).unwrap();
+        picture.jpg = None;
+        let z = unzip(&export_docx(&p, &DocxOptions::default()).unwrap().files[0].bytes);
+        let media: Vec<&String> = z.names.iter().filter(|n| n.starts_with("word/media/")).collect();
+        assert_eq!(
+            media,
+            [
+                "word/media/image1.jpg",
+                "word/media/image2.jpg",
+                "word/media/image3.png",
+                "word/media/image4.jpg",
+                "word/media/image5.jpg"
+            ]
+        );
+        let rels = z.text("word/_rels/document.xml.rels");
+        for target in attributes(&rels, "Relationship", "Target") {
+            if !target.starts_with("http") {
+                assert!(z.get(&format!("word/{target}")).is_some(), "relationship target word/{target}");
+            }
+        }
+        let types = z.text("[Content_Types].xml");
+        assert!(types.contains("Extension=\"png\"") && types.contains("Extension=\"jpg\""));
     }
 
     fn document(options: &DocxOptions) -> String {
@@ -543,7 +620,7 @@ mod tests {
         let types = z.text("[Content_Types].xml");
         let overrides = attributes(&types, "Override", "PartName");
         for name in z.names.iter().filter(|n| *n != "[Content_Types].xml") {
-            let has_default = name.ends_with(".rels") || name.ends_with(".png");
+            let has_default = name.ends_with(".rels") || name.ends_with(".png") || name.ends_with(".jpg");
             assert!(has_default || overrides.contains(&format!("/{name}")), "{name} has no content type");
         }
         for part in overrides {

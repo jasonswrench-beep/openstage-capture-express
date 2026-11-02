@@ -391,7 +391,8 @@ pub fn pptx_parts(plan: &Plan, options: &PptxOptions) -> Vec<ZipEntry> {
                     shapes.push_str(&text_box(id, "Description", frame, &lines, &lang, 1800));
                     id += 1;
                 }
-                image = Some((format!("ppt/media/image{image_count}.png"), picture.png.clone()));
+                let embedded = picture.embedded();
+                image = Some((format!("ppt/media/image{image_count}.{}", embedded.extension), embedded.bytes.to_vec()));
             }
             _ => {
                 if !all_lines.is_empty() {
@@ -527,6 +528,7 @@ pub fn export_pptx(plan: &Plan, options: &PptxOptions) -> Result<Export, OfficeE
 mod tests {
     use super::*;
     use crate::demo::demo;
+    use crate::images::ImageFormat;
     use crate::office::check::{attributes, texts, well_formed};
     use crate::plan::{plan, ExportOptions};
     use crate::zip::reader::{unzip, Unzipped};
@@ -539,6 +541,80 @@ mod tests {
 
     fn make(options: &PptxOptions) -> Unzipped {
         unzip(&export_pptx(&demo_plan(), options).unwrap().files[0].bytes)
+    }
+
+    fn jpg_plan() -> Plan {
+        let d = demo();
+        let options =
+            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+        plan(&d.document.guide, &d.pictures, &BlockText, &options)
+    }
+
+    /// The target of every picture relationship in the slides' relationship files, in slide order.
+    fn picture_targets(z: &Unzipped) -> Vec<String> {
+        let mut rel_files: Vec<&String> =
+            z.names.iter().filter(|n| n.starts_with("ppt/slides/_rels/") && n.ends_with(".rels")).collect();
+        rel_files.sort_by_key(|n| {
+            n.trim_start_matches("ppt/slides/_rels/slide").trim_end_matches(".xml.rels").parse::<usize>().unwrap()
+        });
+        rel_files
+            .into_iter()
+            .flat_map(|f| attributes(&z.text(f), "Relationship", "Target"))
+            .filter(|t| t.contains("media/"))
+            .collect()
+    }
+
+    #[test]
+    fn jpg_pictures_are_jpg_parts_with_a_content_type_and_each_slide_points_at_its_own() {
+        let p = jpg_plan();
+        let z = unzip(&export_pptx(&p, &PptxOptions::default()).unwrap().files[0].bytes);
+        let media: Vec<&String> = z.names.iter().filter(|n| n.starts_with("ppt/media/")).collect();
+        assert_eq!(
+            media,
+            [
+                "ppt/media/image1.jpg",
+                "ppt/media/image2.jpg",
+                "ppt/media/image3.jpg",
+                "ppt/media/image4.jpg",
+                "ppt/media/image5.jpg"
+            ]
+        );
+        for (n, picture) in p.steps.iter().filter_map(|s| s.picture.as_ref()).enumerate() {
+            let part = z.get(&format!("ppt/media/image{}.jpg", n + 1)).unwrap();
+            assert_eq!(part, picture.jpg.as_ref().unwrap().as_slice(), "image{} holds the step's JPG", n + 1);
+            assert_eq!(&part[..2], &[0xFF, 0xD8]);
+        }
+        assert!(z.text("[Content_Types].xml").contains("<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>"));
+        assert_eq!(
+            picture_targets(&z),
+            [
+                "../media/image1.jpg",
+                "../media/image2.jpg",
+                "../media/image3.jpg",
+                "../media/image4.jpg",
+                "../media/image5.jpg"
+            ]
+        );
+        for name in z.names.iter().filter(|n| n.ends_with(".xml") || n.ends_with(".rels")) {
+            well_formed(name, &z.text(name));
+        }
+        let png = make(&PptxOptions::default());
+        assert!(png.names.iter().any(|n| n == "ppt/media/image1.png"), "the PNG presentation is as it was");
+    }
+
+    #[test]
+    fn a_picture_kept_as_png_beside_jpg_ones_has_its_own_extension_and_the_slide_points_at_it() {
+        let mut p = jpg_plan();
+        let picture = p.steps.iter_mut().filter_map(|s| s.picture.as_mut()).nth(1).unwrap();
+        picture.jpg = None;
+        let z = unzip(&export_pptx(&p, &PptxOptions::default()).unwrap().files[0].bytes);
+        assert!(z.get("ppt/media/image2.png").is_some() && z.get("ppt/media/image2.jpg").is_none());
+        assert!(z.get("ppt/media/image1.jpg").is_some() && z.get("ppt/media/image3.jpg").is_some());
+        let targets = picture_targets(&z);
+        assert_eq!(targets[1], "../media/image2.png");
+        for target in &targets {
+            assert!(z.get(&format!("ppt/media/{}", target.trim_start_matches("../media/"))).is_some(), "{target}");
+        }
     }
 
     fn slide_names(z: &Unzipped) -> Vec<String> {
@@ -633,7 +709,7 @@ mod tests {
         let types = z.text("[Content_Types].xml");
         let overrides = attributes(&types, "Override", "PartName");
         for name in z.names.iter().filter(|n| *n != "[Content_Types].xml") {
-            let has_default = name.ends_with(".rels") || name.ends_with(".png");
+            let has_default = name.ends_with(".rels") || name.ends_with(".png") || name.ends_with(".jpg");
             assert!(has_default || overrides.contains(&format!("/{name}")), "{name} has no content type");
         }
         for part in overrides {

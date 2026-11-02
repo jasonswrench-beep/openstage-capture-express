@@ -260,9 +260,18 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       and the longer names a screen reader says ("Picture width 640 pixels", "JPG quality 100, best picture") feel right with
       Narrator? Is typing into the quality box and the steps box easy by keyboard? Should a preview rename the guide's title in
       the files (it does now, so a preview is never taken for the whole guide) or only the folder?
-- [ ] Decision for you: only Pictures (JPG) uses the JPG quality. The web page, Markdown, JSON, Word, PowerPoint, PDF and GIF keep
-      their pictures as PNG, which loses nothing but makes bigger files. Spec 10.4 would also let the web page and the SCORM export
-      carry JPG (or WebP) pictures. Do you want the web page, Word and PowerPoint to be able to use JPG too?
+- [ ] JPG inside the web page, Word, PowerPoint and PDF (2026-11-01, written and tested; the real PowerPoint opened the JPG
+      presentation and the real PDF engine made a PDF with JPEG pictures, both by script; the real Word was NOT tried, because it was
+      already open on this PC and the check leaves an open Word alone; nobody has used it by hand). On the Export screen, between
+      "How wide the pictures are" and "Quality of the JPG pictures", choose JPG under "Pictures inside the web page, Word,
+      PowerPoint and PDF", choose a quality (90 is the usual), tick those four formats and export. Then export again with PNG.
+      Check: (1) Open the Word file in Word. Does it open without a repair message, are the pictures all there with their alt
+      text, and are they crisp enough? (2) Compare the file sizes of the two runs with a guide of your own. In my two samples of
+      this program's own screens JPG at 90 was 40 to 50 percent of the PNG; the demo guide's flat blocks come out about twice as big
+      as JPG, because PNG is very good at flat colour. If your screens come out bigger as JPG, say so. (3) Zoom a PDF page to 200
+      percent and look at the text in a picture at quality 90 and at 70. (4) In the web page, press a picture: does the larger
+      view open? (5) Quit and reopen the program: is your choice remembered? Question for you: would you like a third choice,
+      "whichever is smaller for each picture" (a picture that is smaller as PNG stays PNG), so JPG can never make a file bigger?
 - [ ] Settings by hand: open Settings from Home, change the colour scheme (does the window change at once, in both schemes, with a
       Windows contrast theme?), the capture mode and key, the language of step titles (do German and French titles read well?), and
       the two folders (the folder dialog again). Then start a capture and check the choices took effect. The choices reach the capture

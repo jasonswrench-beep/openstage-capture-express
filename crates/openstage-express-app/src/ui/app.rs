@@ -248,6 +248,7 @@ impl App {
             settings.export_jpg_quality,
             settings.export_preview_steps,
         );
+        self.export.documents_jpg = settings.export_documents_jpg;
         self.home.set_sort(settings.home_sort);
         self.settings = settings;
         self.settings_path = path;
@@ -278,9 +279,11 @@ impl App {
         if self.export.open_after != self.settings.open_folder_after_export
             || chosen != self.settings.export_formats
             || pictures != kept
+            || self.export.documents_jpg != self.settings.export_documents_jpg
         {
             self.settings.open_folder_after_export = self.export.open_after;
             self.settings.export_formats = chosen;
+            self.settings.export_documents_jpg = self.export.documents_jpg;
             (
                 self.settings.export_picture_width,
                 self.settings.export_jpg_quality,

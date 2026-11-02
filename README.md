@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 855 passed (274 in the core, 212 in the exports, 47 in the
-  Windows crate, 322 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 876 passed (274 in the core, 226 in the exports, 47 in the
+  Windows crate, 329 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -149,11 +149,28 @@ Written and type-checked, not yet run on Windows:
   that is not in use is ignored. Typing in the quality box chooses "Another number", and typing in the steps box ticks the preview.
   The radio buttons show short words ("640", "100 (best picture)") and have longer names for a screen reader ("Picture width 640
   pixels", "JPG quality 100, best picture"). A setting that is not on offer (a hand-edited width, a quality of 9000) is shown as the
-  nearest choice and never costs the other settings. Not built from spec X6, X9 and X10: pictures as JPG or WebP inside the web page,
-  Word, PowerPoint and PDF (they keep PNG), the watermark, and export templates. Tested through the window (every choice by its name
+  nearest choice and never costs the other settings. Not built from spec X6, X9 and X10: WebP pictures, the watermark, and export
+  templates. Tested through the window (every choice by its name
   and by keyboard, exports into real folders, the settings file) and in the export plan and the report; nobody has used it by hand,
   and Narrator and NVDA have not read the new controls. Forty-five deliberate faults were each caught by a test, and the screen was
-  drawn by the real program in both colour schemes. 855 tests in all (274 core, 212 export, 47 Windows, 322 app).
+  drawn by the real program in both colour schemes.
+
+- JPG pictures inside the web page, Word, PowerPoint and PDF (spec X6 and X10 in part, written and tested 2026-11-01; Jason said
+  'Yes, build it'). A fourth section on the Export screen, "Pictures inside the web page, Word, PowerPoint and PDF", has two radio
+  buttons: PNG (every pixel kept, as before and still the choice to begin with) and JPG (smaller files). The JPG quality chosen just
+  below is the quality used. The choice is remembered in the settings. The export plan makes the JPG once, from the scaled picture,
+  beside the PNG; the four documents take whichever is there, so nothing else changes: the folders of pictures, Markdown, JSON and the
+  GIF are byte for byte what they were (a test checks that). The web page and the print page hold `data:image/jpeg`; Word and
+  PowerPoint hold `media/imageN.jpg` with a `jpg` default in their content types. A picture that cannot be made as a JPG (one taller
+  than 65,535 pixels once scaled) stays a PNG in the document, with a warning, and the others are still JPG. JPG is not always
+  smaller: on two screenshots of this program's own screens it came out at 40 to 50 percent of the PNG at quality 90, but the demo
+  guide's flat blocks are tiny as PNG and about twice as big as JPG, and the screen says so. Checked with the real programs: the
+  real PowerPoint opened the JPG presentation without asking to repair it (7 slides, every picture with its alt text), and the real
+  WebView2 engine made a PDF with five JPEG image streams, the tags and the five alt texts kept. Word was already open on this PC, so
+  the Office check skipped it and left it alone: the Word file has been through the package checks only. Nobody has used it by hand,
+  and Narrator and NVDA have not read the new radio buttons. Thirty-one deliberate faults were each caught by a test (one more
+  turned out to guard nothing, because the JPG encoder already keeps a quality between 1 and 100, so that extra guard was removed),
+  and the screen was drawn by the real program in both colour schemes. 876 tests in all (274 core, 226 export, 47 Windows, 329 app).
 
 - A copy of a guide as one file, and opening one (spec A8 and P5, written and tested 2026-11-01; Jason said 'Yes, build it'). On the
   Export screen a new section, "A copy as one file", has a tick "Include the original pictures" (off) and a button "Save a copy as one
@@ -313,7 +330,7 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, options on the
 Export screen for the GIF, PDF, Word and PowerPoint (it offers the formats and the picture width, JPG quality and preview, and the rest at their usual values), the language of the program's own words
 (English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
-opens), first-run, WebP and JPG pictures inside the other formats, the watermark, export templates, the optional logo on slides, and signing.
+opens), first-run, WebP pictures, JPG pictures inside Markdown and JSON, the watermark, export templates, the optional logo on slides, and signing.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
