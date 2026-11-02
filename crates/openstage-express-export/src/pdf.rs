@@ -319,9 +319,11 @@ pub fn print_page(plan: &Plan, options: &PdfOptions) -> String {
         ));
         out.push_str(&markdown_to_html(&step.description));
         if let Some(picture) = &step.picture {
+            let embedded = picture.embedded();
             out.push_str(&format!(
-                "<figure><img src=\"data:image/png;base64,{}\" alt=\"{}\" width=\"{}\" height=\"{}\"></figure>\n",
-                base64_encode(&picture.png),
+                "<figure><img src=\"data:{};base64,{}\" alt=\"{}\" width=\"{}\" height=\"{}\"></figure>\n",
+                embedded.media_type,
+                base64_encode(embedded.bytes),
                 html_escape(&step.alt),
                 picture.width,
                 picture.height
@@ -481,6 +483,27 @@ mod tests {
 
     fn page(options: &PdfOptions) -> String {
         print_page(&demo_plan(), options)
+    }
+
+    #[test]
+    fn jpg_pictures_are_inside_the_print_page_as_jpg_and_the_png_page_has_none() {
+        use crate::encoding::base64_encode;
+        use crate::images::ImageFormat;
+        let d = demo();
+        let options =
+            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+        let p = plan(&d.document.guide, &d.pictures, &BlockText, &options);
+        let jpg_page = print_page(&p, &PdfOptions::default());
+        let png_page = page(&PdfOptions::default());
+        assert_eq!(jpg_page.matches("<img src=\"data:image/jpeg;base64,").count(), 5);
+        assert!(!jpg_page.contains("data:image/png"));
+        assert_eq!(png_page.matches("<img src=\"data:image/png;base64,").count(), 5);
+        assert!(!png_page.contains("data:image/jpeg"));
+        for picture in p.steps.iter().filter_map(|s| s.picture.as_ref()) {
+            let uri = format!("data:image/jpeg;base64,{}", base64_encode(picture.jpg.as_ref().unwrap()));
+            assert!(jpg_page.contains(&uri), "{}", picture.file);
+        }
+        assert!(jpg_page.contains("img-src data:"), "the page's own rules allow pictures inside itself, whatever kind");
     }
 
     const TAGGED_SAMPLE: &str =

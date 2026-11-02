@@ -13,6 +13,8 @@ use openstage_capture_render::TextRenderer;
 use openstage_express_core::render::{render_step, scale_to_width};
 use openstage_express_core::{AnnotationKind, Guide, Step, StepKind};
 
+use crate::images::ImageFormat;
+use crate::jpeg;
 use crate::picture::{encode_png, PictureSource};
 
 /// The picture widths the Export screen offers, in pixels. The usual one is `DEFAULT_IMAGE_WIDTH`.
@@ -32,11 +34,14 @@ pub struct ExportOptions {
     /// Make only the first this many numbered steps, to see the look before waiting for all of it (a preview); `None` is every step.
     /// Substeps count as steps, and a note between two steps stays with the step before it. 0 is taken as 1.
     pub first_steps: Option<usize>,
+    /// How the pictures inside the documents (the web page, Word, PowerPoint and PDF) are stored. PNG keeps every pixel as it is;
+    /// JPG makes much smaller files. The folders of pictures, Markdown, JSON and the animated GIF are not changed by this.
+    pub document_pictures: ImageFormat,
 }
 
 impl Default for ExportOptions {
     fn default() -> ExportOptions {
-        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None }
+        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None, document_pictures: ImageFormat::Png }
     }
 }
 
@@ -73,6 +78,28 @@ pub struct RenderedPicture {
     pub height: u32,
     /// The name it gets in exports that have a folder of pictures, such as `images/step-03.png`.
     pub file: String,
+    /// The same picture as a JPG file, when the options asked for JPG pictures inside documents and it could be made.
+    pub jpg: Option<Vec<u8>>,
+}
+
+/// A picture the way a document keeps it: the bytes, with the file extension and media type that go with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedPicture<'a> {
+    pub bytes: &'a [u8],
+    /// `png` or `jpg`, without the dot.
+    pub extension: &'static str,
+    /// `image/png` or `image/jpeg`.
+    pub media_type: &'static str,
+}
+
+impl RenderedPicture {
+    /// What the web page, Word, PowerPoint and PDF put inside themselves: the JPG if one was made, and the PNG if not.
+    pub fn embedded(&self) -> EmbeddedPicture<'_> {
+        match &self.jpg {
+            Some(jpg) => EmbeddedPicture { bytes: jpg, extension: "jpg", media_type: "image/jpeg" },
+            None => EmbeddedPicture { bytes: &self.png, extension: "png", media_type: "image/png" },
+        }
+    }
 }
 
 /// One step of an export.
@@ -191,11 +218,27 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                     warnings.push(format!("Step {label}: a text mark could not be drawn ({problem})."));
                 }
                 let scaled = scale_to_width(&rendered.canvas, image_width);
+                let jpg = match options.document_pictures {
+                    ImageFormat::Png => None,
+                    ImageFormat::Jpeg { quality } => {
+                        // The encoder keeps a quality between 1 and 100 itself.
+                        match jpeg::encode_bgra(&scaled.bgra, scaled.width, scaled.height, quality) {
+                            Ok(bytes) => Some(bytes),
+                            Err(why) => {
+                                warnings.push(format!(
+                                    "Step {label}: its picture could not be made as a JPG ({why}), so the documents keep it as a PNG."
+                                ));
+                                None
+                            }
+                        }
+                    }
+                };
                 Some(RenderedPicture {
                     png: encode_png(&scaled),
                     width: scaled.width,
                     height: scaled.height,
                     file: format!("images/step-{:0digits$}.png", position + 1),
+                    jpg,
                 })
             }
         });
@@ -571,7 +614,7 @@ mod tests {
         assert!(IMAGE_WIDTH_CHOICES.windows(2).all(|w| w[0] < w[1]), "smallest first");
         let (doc, pictures) = eight_steps();
         for width in IMAGE_WIDTH_CHOICES {
-            let options = ExportOptions { image_width: width, first_steps: Some(1) };
+            let options = ExportOptions { image_width: width, first_steps: Some(1), ..ExportOptions::default() };
             let p = plan(&doc.guide, &pictures, &BlockText, &options);
             let picture = p.steps[0].picture.as_ref().unwrap();
             assert_eq!(picture.width, width);
@@ -585,7 +628,7 @@ mod tests {
     fn a_wild_width_is_kept_between_the_smallest_and_the_largest() {
         let (doc, pictures) = eight_steps();
         let width_for = |asked: u32| {
-            let options = ExportOptions { image_width: asked, first_steps: Some(1) };
+            let options = ExportOptions { image_width: asked, first_steps: Some(1), ..ExportOptions::default() };
             plan(&doc.guide, &pictures, &BlockText, &options).steps[0].picture.as_ref().unwrap().width
         };
         assert_eq!(width_for(0), MIN_IMAGE_WIDTH);
@@ -594,5 +637,155 @@ mod tests {
         assert_eq!(width_for(MAX_IMAGE_WIDTH + 1), MAX_IMAGE_WIDTH);
         assert_eq!(width_for(MAX_IMAGE_WIDTH), MAX_IMAGE_WIDTH);
         assert_eq!(width_for(MIN_IMAGE_WIDTH), MIN_IMAGE_WIDTH);
+    }
+
+    // ---- JPG pictures inside documents
+
+    fn jpeg_options(quality: u8) -> ExportOptions {
+        ExportOptions { document_pictures: ImageFormat::Jpeg { quality }, ..ExportOptions::default() }
+    }
+
+    fn pictures_of(p: &Plan) -> Vec<&RenderedPicture> {
+        p.steps.iter().filter_map(|s| s.picture.as_ref()).collect()
+    }
+
+    #[test]
+    fn pictures_inside_documents_are_png_unless_jpg_is_asked_for() {
+        let d = demo();
+        let p = plan_of(&d.document.guide, &d.pictures);
+        assert_eq!(ExportOptions::default().document_pictures, ImageFormat::Png);
+        let pictures = pictures_of(&p);
+        assert_eq!(pictures.len(), 5);
+        for picture in pictures {
+            assert_eq!(picture.jpg, None, "no JPG is made when it was not asked for");
+            let embedded = picture.embedded();
+            assert_eq!((embedded.extension, embedded.media_type), ("png", "image/png"));
+            assert_eq!(embedded.bytes, picture.png.as_slice());
+        }
+    }
+
+    #[test]
+    fn jpg_inside_documents_adds_a_jpg_of_each_picture_and_leaves_the_png_as_it_was() {
+        use crate::jpeg::decoder::{decode, psnr};
+        let d = demo();
+        let png_plan = plan_of(&d.document.guide, &d.pictures);
+        let jpg_plan = plan(&d.document.guide, &d.pictures, &BlockText, &jpeg_options(90));
+        assert_eq!(jpg_plan.warnings, png_plan.warnings);
+        assert_eq!(jpg_plan.steps.len(), png_plan.steps.len());
+        let (with_png, with_jpg) = (pictures_of(&png_plan), pictures_of(&jpg_plan));
+        assert_eq!(with_jpg.len(), 5);
+        for (png, jpg) in with_png.into_iter().zip(with_jpg) {
+            assert_eq!((jpg.width, jpg.height, &jpg.file), (png.width, png.height, &png.file));
+            assert_eq!(jpg.png, png.png, "the PNG is the same picture it always was");
+            let bytes = jpg.jpg.as_ref().expect("a JPG was made");
+            assert_eq!(&bytes[..2], &[0xFF, 0xD8], "a JPG file starts with its marker");
+            let embedded = jpg.embedded();
+            assert_eq!((embedded.extension, embedded.media_type), ("jpg", "image/jpeg"));
+            assert_eq!(embedded.bytes, bytes.as_slice());
+            let back = decode(bytes);
+            assert_eq!((back.width as u32, back.height as u32), (png.width, png.height));
+            let original = decode_png(&png.png).unwrap();
+            let rgb: Vec<u8> = original.bgra.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0]]).collect();
+            let db = psnr(&rgb, &back.rgb);
+            assert!(db > 30.0, "{}: {db:.1} dB", jpg.file);
+        }
+    }
+
+    #[test]
+    fn a_lower_jpg_quality_makes_smaller_pictures_and_a_wild_quality_is_kept_in_range() {
+        let d = demo();
+        let total = |quality: u8| -> usize {
+            let p = plan(&d.document.guide, &d.pictures, &BlockText, &jpeg_options(quality));
+            pictures_of(&p).iter().map(|x| x.jpg.as_ref().unwrap().len()).sum()
+        };
+        let sizes: Vec<usize> = [100, 90, 70, 50].iter().map(|&q| total(q)).collect();
+        assert!(sizes.windows(2).all(|w| w[0] > w[1]), "100, 90, 70 and 50 get smaller each time: {sizes:?}");
+        assert_eq!(total(0), total(1), "0 is taken as 1");
+        assert_eq!(total(255), total(100), "more than 100 is taken as 100");
+        assert!(total(1) < total(100));
+    }
+
+    /// A picture with a smooth sweep of colour and a little noise, as a photograph or a busy screen has: PNG cannot squeeze it much.
+    fn busy_picture(width: u32, height: u32) -> Picture {
+        let mut seed = 12_345_u32;
+        let mut bgra = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = ((seed >> 24) % 13) as i32 - 6;
+                let level = |base: u32| (base as i32 + noise).clamp(0, 255) as u8;
+                bgra.extend_from_slice(&[level(x * 255 / width), level(y * 255 / height), level(128), 255]);
+            }
+        }
+        Picture::new(width, height, bgra)
+    }
+
+    #[test]
+    fn a_busy_picture_is_a_good_deal_smaller_as_a_jpg_than_as_a_png() {
+        let mut doc = Document::new(Guide::new("g", "Guide", "en", "t"));
+        let mut pictures = MemoryPictures::default();
+        pictures.0.insert("images/busy.png".into(), busy_picture(320, 240));
+        let draft = StepDraft::with_picture("Busy", StepImage::new("images/busy.png", 320, 240));
+        doc.add_step(draft, Position::End, "t").unwrap();
+        let options = ExportOptions { image_width: 320, ..jpeg_options(80) };
+        let p = plan(&doc.guide, &pictures, &BlockText, &options);
+        let picture = p.steps[0].picture.as_ref().unwrap();
+        let jpg = picture.jpg.as_ref().unwrap();
+        assert!(jpg.len() * 2 < picture.png.len(), "JPG {} bytes against PNG {} bytes", jpg.len(), picture.png.len());
+    }
+
+    #[test]
+    fn the_folders_markdown_json_and_the_gif_do_not_change_with_the_pictures_inside_documents() {
+        use crate::gif::{export_gif, GifOptions};
+        use crate::images::{export_images, export_images_as};
+        use crate::json::export_json;
+        use crate::markdown::export_markdown;
+        let d = demo();
+        let (png, jpg) = (plan_of(&d.document.guide, &d.pictures), {
+            plan(&d.document.guide, &d.pictures, &BlockText, &jpeg_options(60))
+        });
+        assert_eq!(export_markdown(&png), export_markdown(&jpg));
+        assert_eq!(export_json(&png), export_json(&jpg));
+        assert_eq!(export_images(&png), export_images(&jpg));
+        assert_eq!(
+            export_images_as(&png, ImageFormat::Jpeg { quality: 80 }),
+            export_images_as(&jpg, ImageFormat::Jpeg { quality: 80 }),
+            "the JPG files take their own quality, not the one for documents"
+        );
+        assert_eq!(
+            export_gif(&png, &GifOptions::default(), &BlockText),
+            export_gif(&jpg, &GifOptions::default(), &BlockText)
+        );
+    }
+
+    #[test]
+    fn a_picture_too_tall_to_be_a_jpg_stays_a_png_with_a_warning_and_the_others_are_jpgs() {
+        let (mut doc, mut pictures) = eight_steps();
+        pictures.0.insert("images/tall.png".into(), Picture::solid(16, 16_384, Rgb(10, 20, 30)));
+        let tall = StepDraft::with_picture("Tall", StepImage::new("images/tall.png", 16, 16_384));
+        doc.add_step(tall, Position::End, "t").unwrap();
+        let options = ExportOptions { image_width: MIN_IMAGE_WIDTH, ..jpeg_options(90) };
+        let p = plan(&doc.guide, &pictures, &BlockText, &options);
+        let last = p.steps.last().unwrap();
+        assert_eq!(last.title, "Tall");
+        let tall = last.picture.as_ref().unwrap();
+        assert_eq!((tall.width, tall.height), (64, 65_536), "four times as big as the original");
+        assert_eq!(tall.jpg, None);
+        assert_eq!(tall.embedded().extension, "png", "the document keeps this one as a PNG");
+        assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
+        assert!(p.warnings[0].starts_with("Step 7: its picture could not be made as a JPG ("), "{:?}", p.warnings);
+        assert!(p.warnings[0].ends_with("so the documents keep it as a PNG."), "{:?}", p.warnings);
+        let others = pictures_of(&p);
+        assert_eq!(others.len(), 9);
+        assert_eq!(others.iter().filter(|x| x.jpg.is_some()).count(), 8, "every other picture is a JPG");
+    }
+
+    #[test]
+    fn a_preview_with_jpg_pictures_makes_only_the_pictures_of_its_steps() {
+        let (doc, pictures) = eight_steps();
+        let options = ExportOptions { first_steps: Some(2), ..jpeg_options(80) };
+        let p = plan(&doc.guide, &pictures, &BlockText, &options);
+        assert_eq!(pictures_of(&p).iter().filter(|x| x.jpg.is_some()).count(), 2);
+        assert_eq!(p.title, "Preview, first 2 of 8 steps - Guide");
     }
 }

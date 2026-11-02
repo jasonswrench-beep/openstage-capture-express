@@ -119,13 +119,14 @@ pub fn app_properties() -> String {
     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\"><Application>OpenStage Capture Express</Application></Properties>".to_string()
 }
 
-/// `[Content_Types].xml` for the given overrides (part name, content type); `png` and the two XML kinds are defaults.
+/// `[Content_Types].xml` for the given overrides (part name, content type); `png`, `jpg` and the two XML kinds are defaults.
 pub fn content_types(overrides: &[(&str, &str)]) -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
 <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
 <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
-<Default Extension=\"png\" ContentType=\"image/png\"/>",
+<Default Extension=\"png\" ContentType=\"image/png\"/>\
+<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>",
     );
     for (part, kind) in overrides {
         out.push_str(&format!("<Override PartName=\"{}\" ContentType=\"{}\"/>", xml_escape(part), xml_escape(kind)));

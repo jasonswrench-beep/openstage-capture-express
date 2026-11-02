@@ -305,6 +305,13 @@ Every export is made from the same plan, so they agree about which steps are in,
   between 64 and 4096), as a PNG. Marks and blur are burned in: a blurred area can never be undone in an export. Pictures are
   named in export order, `images/step-01.png` and so on (not by step id). A picture that cannot be found is left out with a
   warning, and the step stays.
+- **JPG inside documents.** The web page, Word, PowerPoint and PDF hold their pictures inside themselves, as PNG unless the Export
+  screen's "Pictures inside the web page, Word, PowerPoint and PDF" is set to JPG, which uses the JPG quality chosen below it. The
+  JPG is made once from the same scaled picture, beside the PNG, and the web page and the print page carry it as
+  `data:image/jpeg`, Word as `word/media/imageN.jpg` and PowerPoint as `ppt/media/imageN.jpg` (their content types gain a `jpg`
+  default). The folders of pictures, Markdown, JSON and the GIF are never changed by this. A picture that cannot be made as a JPG (a
+  side over 65,535 pixels once scaled) stays a PNG in the document and the export warns. JPG is often about half the size of PNG for
+  an ordinary screenshot and can be larger for a plain screen with big flat areas.
 - **A preview.** An export can be made of only the first N numbered steps (the Export screen's "Try it on a few steps first", 5 to
   begin with), to see how it looks without waiting for a long guide. Substeps count as steps, a content block stays with the step it
   follows, and skipped steps are not counted. The pictures of the steps left out are never read or drawn, and the files are named

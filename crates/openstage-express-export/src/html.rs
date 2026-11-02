@@ -228,9 +228,11 @@ pub fn html_page(plan: &Plan) -> String {
         ));
         out.push_str(&markdown_to_html(&step.description));
         if let Some(picture) = &step.picture {
+            let embedded = picture.embedded();
             out.push_str(&format!(
-                "<figure><button type=\"button\" class=\"zoom\" aria-haspopup=\"dialog\"><img src=\"data:image/png;base64,{}\" alt=\"{}\" width=\"{}\" height=\"{}\"><span class=\"sr\"{fallback_lang}>{}</span></button></figure>\n",
-                base64_encode(&picture.png),
+                "<figure><button type=\"button\" class=\"zoom\" aria-haspopup=\"dialog\"><img src=\"data:{};base64,{}\" alt=\"{}\" width=\"{}\" height=\"{}\"><span class=\"sr\"{fallback_lang}>{}</span></button></figure>\n",
+                embedded.media_type,
+                base64_encode(embedded.bytes),
                 html_escape(&step.alt),
                 picture.width,
                 picture.height,
@@ -269,6 +271,7 @@ pub fn export_html(plan: &Plan) -> Export {
 mod tests {
     use super::*;
     use crate::demo::demo;
+    use crate::images::ImageFormat;
     use crate::plan::{plan, ExportOptions};
     use openstage_capture_render::BlockText;
 
@@ -351,6 +354,51 @@ mod tests {
         assert_eq!(page.matches(" alt=\"").count(), images, "every img has an alt attribute");
         assert!(page.contains("alt=\"The Submit button, with the student&#39;s name blurred\""));
         assert_eq!(with_alt, p.steps.iter().filter(|s| s.picture.is_some()).count());
+    }
+
+    fn jpg_page() -> (Plan, String) {
+        let d = demo();
+        let options =
+            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+        let p = plan(&d.document.guide, &d.pictures, &BlockText, &options);
+        let page = html_page(&p);
+        (p, page)
+    }
+
+    #[test]
+    fn jpg_pictures_are_inside_the_page_as_jpg_and_the_png_page_is_unchanged() {
+        let (p, page) = jpg_page();
+        let pictures: Vec<_> = p.steps.iter().filter_map(|s| s.picture.as_ref()).collect();
+        assert_eq!(pictures.len(), 5);
+        for picture in &pictures {
+            let uri = format!("data:image/jpeg;base64,{}", base64_encode(picture.jpg.as_ref().unwrap()));
+            assert!(page.contains(&format!("<img src=\"{uri}\"")), "{}", picture.file);
+        }
+        assert_eq!(page.matches("<img src=\"data:image/jpeg;base64,").count(), 5);
+        assert!(!page.contains("data:image/png"), "no PNG is left in the page");
+        let (_, png_page) = demo_page();
+        assert_eq!(png_page.matches("<img src=\"data:image/png;base64,").count(), 5);
+        assert!(!png_page.contains("data:image/jpeg"));
+        // Nothing but the pictures differs: the words and the structure are the same.
+        let strip = |text: &str| {
+            let mut out = String::new();
+            let mut rest = text;
+            while let Some(start) = rest.find("<img src=\"data:") {
+                out.push_str(&rest[..start]);
+                let after = &rest[start..];
+                let end = after.find("\" alt=").expect("an alt follows the picture");
+                rest = &after[end..];
+            }
+            out.push_str(rest);
+            out
+        };
+        assert_eq!(strip(&page), strip(&png_page));
+    }
+
+    #[test]
+    fn the_page_may_still_hold_data_pictures_when_they_are_jpg() {
+        let (_, page) = jpg_page();
+        assert!(page.contains("img-src data:"), "the page's own rules allow pictures inside itself, whatever kind");
     }
 
     #[test]

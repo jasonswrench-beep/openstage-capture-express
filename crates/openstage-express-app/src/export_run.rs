@@ -156,22 +156,37 @@ impl Selection {
 pub struct PictureChoices {
     /// How many pixels across every picture is made.
     pub width: u32,
-    /// The quality of the pictures made as JPG files, from 1 to 100.
+    /// The quality of the pictures made as JPG files, and of the JPG pictures inside documents, from 1 to 100.
     pub jpg_quality: u8,
     /// Only the first this many steps (a preview), or all of them.
     pub first_steps: Option<usize>,
+    /// Whether the web page, Word, PowerPoint and PDF keep their pictures as JPG (smaller files) instead of PNG (every pixel as it is).
+    pub documents_jpg: bool,
 }
 
 impl Default for PictureChoices {
     fn default() -> PictureChoices {
-        PictureChoices { width: DEFAULT_IMAGE_WIDTH, jpg_quality: DEFAULT_JPEG_QUALITY, first_steps: None }
+        PictureChoices {
+            width: DEFAULT_IMAGE_WIDTH,
+            jpg_quality: DEFAULT_JPEG_QUALITY,
+            first_steps: None,
+            documents_jpg: false,
+        }
     }
 }
 
 impl PictureChoices {
     /// What the plan of the export is made with.
     pub fn export_options(&self) -> ExportOptions {
-        ExportOptions { image_width: self.width, first_steps: self.first_steps }
+        ExportOptions {
+            image_width: self.width,
+            first_steps: self.first_steps,
+            document_pictures: if self.documents_jpg {
+                ImageFormat::Jpeg { quality: self.jpg_quality }
+            } else {
+                ImageFormat::Png
+            },
+        }
     }
 }
 
@@ -615,7 +630,7 @@ mod tests {
         let d = demo();
         let total = exported_step_count(&d.document.guide);
         assert!(total > 3);
-        let choices = PictureChoices { width: 640, jpg_quality: 50, first_steps: Some(3) };
+        let choices = PictureChoices { width: 640, jpg_quality: 50, first_steps: Some(3), ..Default::default() };
         let the_plan = plan(&d.document.guide, &d.pictures, &BlockText, &choices.export_options());
         let dir = tempfile::tempdir().unwrap();
         let selection = Selection::none_then(&[Format::Images, Format::Jpg, Format::Json]);
@@ -663,7 +678,7 @@ mod tests {
             guide: d.document.guide.clone(),
             pictures: Arc::new(d.pictures),
             selection: Selection::none_then(&[Format::Images]),
-            choices: PictureChoices { width: 800, jpg_quality: 90, first_steps: Some(2) },
+            choices: PictureChoices { width: 800, jpg_quality: 90, first_steps: Some(2), ..Default::default() },
             folder: dir.path().to_path_buf(),
         };
         let report = spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -676,13 +691,109 @@ mod tests {
         }
     }
 
+    /// The bytes of the one file with this ending in the folder of a format in a run.
+    fn the_file(run: &Path, format: Format, ending: &str) -> Vec<u8> {
+        let folder = run.join(format.folder());
+        let name = file_names(&folder)
+            .into_iter()
+            .find(|n| n.ends_with(ending))
+            .unwrap_or_else(|| panic!("no file ending {ending} in {folder:?}: {:?}", file_names(&folder)));
+        std::fs::read(folder.join(name)).unwrap()
+    }
+
+    fn holds(bytes: &[u8], words: &str) -> bool {
+        bytes.windows(words.len()).any(|w| w == words.as_bytes())
+    }
+
+    fn run_with(choices: PictureChoices, formats: &[Format]) -> (tempfile::TempDir, Report) {
+        let d = demo();
+        let dir = tempfile::tempdir().unwrap();
+        let job = Job {
+            guide: d.document.guide.clone(),
+            pictures: Arc::new(d.pictures),
+            selection: Selection::none_then(formats),
+            choices,
+            folder: dir.path().to_path_buf(),
+        };
+        let report = spawn(job).recv_timeout(std::time::Duration::from_secs(120)).unwrap().unwrap();
+        (dir, report)
+    }
+
+    #[test]
+    fn jpg_pictures_inside_documents_reach_the_web_page_word_and_powerpoint_and_not_the_other_formats() {
+        let formats = [Format::Html, Format::Word, Format::PowerPoint, Format::Images, Format::Markdown];
+        let (png_run, png_report) = run_with(PictureChoices::default(), &formats);
+        let jpg_choices = PictureChoices { documents_jpg: true, jpg_quality: 70, ..Default::default() };
+        let (jpg_run, jpg_report) = run_with(jpg_choices, &formats);
+        assert!(png_report.warnings.is_empty() && jpg_report.warnings.is_empty(), "{:?}", jpg_report.warnings);
+        // The usual run keeps PNG inside, as it always has.
+        let page = the_file(png_run.path(), Format::Html, ".html");
+        assert!(holds(&page, "data:image/png;base64,") && !holds(&page, "data:image/jpeg"));
+        assert!(holds(&the_file(png_run.path(), Format::Word, ".docx"), "word/media/image1.png"));
+        assert!(holds(&the_file(png_run.path(), Format::PowerPoint, ".pptx"), "ppt/media/image1.png"));
+        // With JPG chosen, all three hold JPG pictures.
+        let page = the_file(jpg_run.path(), Format::Html, ".html");
+        assert!(holds(&page, "data:image/jpeg;base64,") && !holds(&page, "data:image/png"));
+        let word = the_file(jpg_run.path(), Format::Word, ".docx");
+        assert!(holds(&word, "word/media/image1.jpg") && !holds(&word, "word/media/image1.png"));
+        let slides = the_file(jpg_run.path(), Format::PowerPoint, ".pptx");
+        assert!(holds(&slides, "ppt/media/image1.jpg") && !holds(&slides, "ppt/media/image1.png"));
+        // The folder of pictures and the Markdown folder are the same either way.
+        assert_eq!(file_names(&jpg_run.path().join("images")), file_names(&png_run.path().join("images")));
+        for name in file_names(&png_run.path().join("images")) {
+            assert_eq!(
+                std::fs::read(png_run.path().join("images").join(&name)).unwrap(),
+                std::fs::read(jpg_run.path().join("images").join(&name)).unwrap(),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            the_file(png_run.path(), Format::Markdown, ".md"),
+            the_file(jpg_run.path(), Format::Markdown, ".md")
+        );
+    }
+
+    #[test]
+    fn the_jpg_quality_chosen_decides_the_size_of_the_pictures_inside_documents() {
+        let page_size = |quality: u8| -> usize {
+            let choices = PictureChoices { documents_jpg: true, jpg_quality: quality, ..Default::default() };
+            let (run, _) = run_with(choices, &[Format::Html]);
+            the_file(run.path(), Format::Html, ".html").len()
+        };
+        let (best, usual, smallest) = (page_size(100), page_size(DEFAULT_JPEG_QUALITY), page_size(50));
+        assert!(best > usual && usual > smallest, "{best} {usual} {smallest}");
+    }
+
+    #[test]
+    fn a_preview_with_jpg_pictures_inside_documents_holds_only_its_own_steps() {
+        let choices = PictureChoices { documents_jpg: true, first_steps: Some(2), ..Default::default() };
+        let (run, report) = run_with(choices, &[Format::Html, Format::PowerPoint]);
+        assert!(report.preview.is_some_and(|p| p.is_cut()));
+        let page = the_file(run.path(), Format::Html, ".html");
+        let text = String::from_utf8_lossy(&page);
+        assert_eq!(text.matches("<img src=\"data:image/jpeg;base64,").count(), 2);
+        let slides = the_file(run.path(), Format::PowerPoint, ".pptx");
+        assert!(holds(&slides, "ppt/media/image2.jpg") && !holds(&slides, "ppt/media/image3.jpg"));
+    }
+
     #[test]
     fn the_usual_picture_choices_are_the_usual_width_and_quality_and_every_step() {
         let usual = PictureChoices::default();
         assert_eq!((usual.width, usual.jpg_quality, usual.first_steps), (1280, 90, None));
         assert_eq!(usual.export_options(), ExportOptions::default());
-        let asked = PictureChoices { width: 800, jpg_quality: 40, first_steps: Some(7) };
-        assert_eq!(asked.export_options(), ExportOptions { image_width: 800, first_steps: Some(7) });
+        assert!(!usual.documents_jpg, "documents keep PNG pictures unless JPG is asked for");
+        let asked = PictureChoices { width: 800, jpg_quality: 40, first_steps: Some(7), ..Default::default() };
+        assert_eq!(
+            asked.export_options(),
+            ExportOptions { image_width: 800, first_steps: Some(7), ..ExportOptions::default() },
+            "the JPG quality alone does not turn JPG on inside documents"
+        );
+        let jpg = PictureChoices { jpg_quality: 40, documents_jpg: true, ..Default::default() };
+        assert_eq!(
+            jpg.export_options(),
+            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 40 }, ..ExportOptions::default() },
+            "one quality for the JPG files and the JPG pictures inside documents"
+        );
     }
 
     fn report_with(preview: Option<Preview>) -> Report {

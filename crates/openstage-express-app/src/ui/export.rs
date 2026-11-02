@@ -47,6 +47,8 @@ pub struct ExportState {
     pub copy_originals: bool,
     /// How many pixels across every picture is made; always one of `IMAGE_WIDTH_CHOICES`.
     pub width: u32,
+    /// The web page, Word, PowerPoint and PDF keep their pictures as JPG (smaller files) instead of PNG (every pixel as it is).
+    pub documents_jpg: bool,
     /// The JPG quality last chosen or typed, from 1 to 100. It is what is kept in the settings.
     pub jpg_quality: u8,
     /// "Another number" is the choice for the JPG quality, and the number is what is in `jpg_text`.
@@ -76,6 +78,7 @@ impl ExportState {
             can_pdf,
             copy_originals: false,
             width: DEFAULT_IMAGE_WIDTH,
+            documents_jpg: false,
             jpg_quality: DEFAULT_JPEG_QUALITY,
             jpg_other: false,
             jpg_text: String::new(),
@@ -123,6 +126,7 @@ impl ExportState {
             width: self.width,
             jpg_quality: self.jpg_quality_now()?,
             first_steps: self.first_steps_now()?,
+            documents_jpg: self.documents_jpg,
         })
     }
 }
@@ -213,11 +217,41 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
                 }
             });
             ui.add_space(6.0);
+            widgets::subheading(ui, "Pictures inside the web page, Word, PowerPoint and PDF");
+            ui.label(
+                RichText::new(
+                    "These four hold their pictures inside themselves. PNG keeps every pixel as it is. JPG usually makes the file a good \
+                     deal smaller for ordinary screenshots and loses a little, as set by the quality below; a plain screen with big \
+                     flat areas can be smaller as PNG. The folders of pictures, Markdown, JSON and the GIF are not changed by this.",
+                )
+                .color(p.muted),
+            );
+            ui.horizontal_wrapped(|ui| {
+                let r = choice(
+                    ui,
+                    !state.documents_jpg,
+                    "PNG (every pixel kept)",
+                    "Pictures inside the web page, Word, PowerPoint and PDF: PNG, every pixel kept",
+                );
+                if r.clicked() {
+                    state.documents_jpg = false;
+                }
+                let r = choice(
+                    ui,
+                    state.documents_jpg,
+                    "JPG (smaller files)",
+                    "Pictures inside the web page, Word, PowerPoint and PDF: JPG, smaller files",
+                );
+                if r.clicked() {
+                    state.documents_jpg = true;
+                }
+            });
+            ui.add_space(6.0);
             widgets::subheading(ui, "Quality of the JPG pictures");
             ui.label(
                 RichText::new(
-                    "Only for Pictures (JPG). A lower number makes a smaller file and a rougher picture. The other formats keep their \
-                     pictures as PNG, which loses nothing.",
+                    "For Pictures (JPG), and for the pictures inside the web page, Word, PowerPoint and PDF when JPG is chosen above. A \
+                     lower number makes a smaller file and a rougher picture.",
                 )
                 .color(p.muted),
             );
@@ -402,6 +436,34 @@ mod tests {
         assert_eq!((s.width, s.jpg_quality, s.jpg_other, s.jpg_text.as_str()), (1280, 90, false, "90"));
         assert_eq!((s.preview, s.preview_steps, s.preview_text.as_str()), (false, 5, "5"));
         assert_eq!(s.picture_choices(), Ok(PictureChoices::default()));
+    }
+
+    #[test]
+    fn jpg_inside_documents_is_off_to_begin_with_and_follows_the_choice_with_the_quality_in_use() {
+        use openstage_express_export::images::ImageFormat;
+        let mut s = ExportState::new(PathBuf::from("x"), true);
+        assert!(!s.documents_jpg);
+        assert_eq!(s.picture_choices().unwrap().export_options().document_pictures, ImageFormat::Png);
+        s.documents_jpg = true;
+        let choices = s.picture_choices().unwrap();
+        assert!(choices.documents_jpg);
+        assert_eq!(choices.export_options().document_pictures, ImageFormat::Jpeg { quality: 90 });
+        s.jpg_other = true;
+        s.jpg_text = "40".to_string();
+        assert_eq!(
+            s.picture_choices().unwrap().export_options().document_pictures,
+            ImageFormat::Jpeg { quality: 40 },
+            "the typed quality is the one used inside documents too"
+        );
+        s.jpg_text = "abc".to_string();
+        assert!(s.picture_choices().is_err(), "a quality that is not a number stops it, as it does for the JPG files");
+        s.documents_jpg = false;
+        assert!(s.picture_choices().is_err(), "the box is in use while 'another number' is chosen");
+        s.jpg_other = false;
+        assert_eq!(s.picture_choices().unwrap().export_options().document_pictures, ImageFormat::Png);
+        s.documents_jpg = true;
+        s.set_pictures(800, 70, 3);
+        assert!(s.documents_jpg, "using the saved width, quality and steps leaves the JPG choice alone");
     }
 
     #[test]

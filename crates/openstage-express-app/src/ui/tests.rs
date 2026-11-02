@@ -1163,6 +1163,9 @@ fn is_on(h: &Harness, role: Role, words: &str) -> bool {
 
 const PREVIEW_CHECK: &str = "Make a preview of the first steps only";
 const OTHER_QUALITY: &str = "JPG quality, another number typed in the box";
+const DOCUMENT_PICTURES: &str = "Pictures inside the web page, Word, PowerPoint and PDF";
+const DOCUMENTS_PNG: &str = "Pictures inside the web page, Word, PowerPoint and PDF: PNG, every pixel kept";
+const DOCUMENTS_JPG: &str = "Pictures inside the web page, Word, PowerPoint and PDF: JPG, smaller files";
 const NOT_A_QUALITY: &str = "Type a whole number from 1 to 100 for the quality, such as 80.";
 const NOT_A_COUNT: &str = "Type a whole number from 1 to 9999 for the number of steps, such as 5.";
 
@@ -1220,8 +1223,11 @@ fn the_export_screen_offers_widths_qualities_and_a_preview_each_named_for_what_i
     assert!(!is_on(&h, Role::CheckBox, PREVIEW_CHECK));
     // The words on the screen are short; the names say what they are for.
     h.find(Role::Heading, "How wide the pictures are");
+    h.find(Role::Heading, DOCUMENT_PICTURES);
     h.find(Role::Heading, "Quality of the JPG pictures");
     h.find(Role::Heading, "Try it on a few steps first");
+    assert!(is_on(&h, Role::RadioButton, DOCUMENTS_PNG), "documents keep PNG pictures to begin with");
+    assert!(!is_on(&h, Role::RadioButton, DOCUMENTS_JPG));
     // Nothing is wrong, so no message about a number shows.
     assert!(!h.has(Role::Label, NOT_A_QUALITY) && !h.has(Role::Label, NOT_A_COUNT));
     // They sit between the formats and the folder, in reading order.
@@ -1230,6 +1236,9 @@ fn the_export_screen_offers_widths_qualities_and_a_preview_each_named_for_what_i
         at(Role::CheckBox, "PowerPoint presentation"),
         at(Role::Heading, "How wide the pictures are"),
         at(Role::RadioButton, "Picture width 640 pixels"),
+        at(Role::Heading, DOCUMENT_PICTURES),
+        at(Role::RadioButton, DOCUMENTS_PNG),
+        at(Role::RadioButton, DOCUMENTS_JPG),
         at(Role::Heading, "Quality of the JPG pictures"),
         at(Role::RadioButton, "JPG quality 100, best picture"),
         at(Role::TextInput, "Quality, 1 to 100"),
@@ -1458,6 +1467,83 @@ fn the_picture_choices_are_kept_in_the_settings_and_a_preview_is_not() {
     assert_eq!(again.node(again.find(Role::TextInput, "Quality, 1 to 100")).value(), Some("77"));
     assert_eq!(again.node(again.find(Role::TextInput, "Steps in the preview")).value(), Some("12"));
     assert!(!is_on(&again, Role::CheckBox, PREVIEW_CHECK), "a preview is never on by itself");
+}
+
+#[test]
+fn jpg_inside_documents_is_chosen_with_the_keyboard_and_the_two_choices_exclude_each_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.focus_on(Role::Button, "Back to the guide");
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        h.key(Key::Tab, NO_MODS);
+        seen.extend(h.focused_words());
+    }
+    for name in [DOCUMENTS_PNG, DOCUMENTS_JPG] {
+        assert!(seen.iter().any(|s| s == name), "the keyboard never reached {name:?}: {seen:?}");
+    }
+    h.focus_on(Role::RadioButton, DOCUMENTS_JPG);
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::RadioButton, DOCUMENTS_JPG) && !is_on(&h, Role::RadioButton, DOCUMENTS_PNG));
+    assert_eq!(h.focused_words().as_deref(), Some(DOCUMENTS_JPG), "the keyboard stays where it was");
+    assert!(h.app.export.documents_jpg);
+    h.focus_on(Role::RadioButton, DOCUMENTS_PNG);
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::RadioButton, DOCUMENTS_PNG) && !is_on(&h, Role::RadioButton, DOCUMENTS_JPG));
+    assert!(!h.app.export.documents_jpg);
+}
+
+#[test]
+fn jpg_chosen_on_the_screen_decides_what_the_web_page_and_word_hold_and_png_is_the_way_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::RadioButton, DOCUMENTS_JPG);
+    h.invoke(Role::RadioButton, "JPG quality 70, smaller file");
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 2 formats to "), "{}", h.status());
+    let guide_folder = dir.path().join("How to submit an assignment");
+    let first = files_in(&guide_folder).remove(0);
+    let in_folder = |run: &std::path::Path, format: &str, ending: &str| -> Vec<u8> {
+        let file = files_in(&run.join(format)).into_iter().find(|p| p.to_string_lossy().ends_with(ending)).unwrap();
+        std::fs::read(file).unwrap()
+    };
+    let holds = |bytes: &[u8], words: &str| bytes.windows(words.len()).any(|w| w == words.as_bytes());
+    let page = in_folder(&first, "html", ".html");
+    assert!(holds(&page, "data:image/jpeg;base64,") && !holds(&page, "data:image/png"));
+    let word = in_folder(&first, "word", ".docx");
+    assert!(holds(&word, "word/media/image1.jpg") && !holds(&word, "word/media/image1.png"));
+    // PNG is the way back.
+    std::thread::sleep(Duration::from_millis(1100));
+    h.invoke(Role::RadioButton, DOCUMENTS_PNG);
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    let second = files_in(&guide_folder).remove(1);
+    let page = in_folder(&second, "html", ".html");
+    assert!(holds(&page, "data:image/png;base64,") && !holds(&page, "data:image/jpeg"));
+    assert!(holds(&in_folder(&second, "word", ".docx"), "word/media/image1.png"));
+}
+
+#[test]
+fn jpg_inside_documents_is_kept_in_the_settings_and_comes_back_chosen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut h = picture_harness(dir.path(), AppSettings::default());
+    h.invoke(Role::Button, "Export");
+    assert!(!h.app.export.documents_jpg && !AppSettings::default().export_documents_jpg, "PNG to begin with");
+    h.invoke(Role::RadioButton, DOCUMENTS_JPG);
+    let (kept, note) = crate::settings::load(&path);
+    assert!(note.is_none());
+    assert!(kept.export_documents_jpg, "saved the moment it was chosen");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("\"exportDocumentsJpg\": true"));
+    let mut again = picture_harness(dir.path(), kept);
+    again.invoke(Role::Button, "Export");
+    assert!(is_on(&again, Role::RadioButton, DOCUMENTS_JPG));
+    assert!(!is_on(&again, Role::RadioButton, DOCUMENTS_PNG));
+    again.invoke(Role::RadioButton, DOCUMENTS_PNG);
+    assert!(!crate::settings::load(&path).0.export_documents_jpg, "and saved again when it is put back");
 }
 
 #[test]
