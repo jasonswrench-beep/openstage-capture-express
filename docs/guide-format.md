@@ -301,9 +301,17 @@ Every export is made from the same plan, so they agree about which steps are in,
   on (a substep's number starts with its parent's). A content block (`kind` `block`) is exported but not numbered, and is not in
   any contents list. A step whose parent cannot be found is left out.
 - **The pictures.** Each is the step's original with its marks drawn on, cropped to its `focus`, and scaled to the same width
-  (1280 pixels by default), as a PNG. Marks and blur are burned in: a blurred area can never be undone in an export. Pictures are
+  (1280 pixels by default; the Export screen offers 640, 800, 1024, 1280, 1600 and 1920, and whatever width is asked for is kept
+  between 64 and 4096), as a PNG. Marks and blur are burned in: a blurred area can never be undone in an export. Pictures are
   named in export order, `images/step-01.png` and so on (not by step id). A picture that cannot be found is left out with a
   warning, and the step stays.
+- **A preview.** An export can be made of only the first N numbered steps (the Export screen's "Try it on a few steps first", 5 to
+  begin with), to see how it looks without waiting for a long guide. Substeps count as steps, a content block stays with the step it
+  follows, and skipped steps are not counted. The pictures of the steps left out are never read or drawn, and the files are named
+  from 1 (`step-01`) as in any export. A preview that leaves steps out is marked wherever it is made: its title starts with
+  `Preview, first 5 of 12 steps - ` in every format (so it shows on the cover, in the file's properties and in the file name, where it
+  is first because file names keep only 80 characters of a title), and the run's folder ends with `(preview of 5 steps)`. If the guide has no more steps than were asked for, it is the whole guide and
+  nothing is renamed; the report says so. A one-file copy is never a preview.
 - **The words.** A picture's alt text is the author's `imageDescription`, or the step title if there is none. Words drawn on a
   picture by a `text` mark that are not also in the step's title, description or alt text produce a warning, because a screen
   reader cannot read a picture.
@@ -315,7 +323,7 @@ Every export is made from the same plan, so they agree about which steps are in,
 | HTML | `<title>.html`: one self-contained page (pictures inside it as data, no outside requests, a Content-Security-Policy, headings, a contents list, a skip link, alt text, light and dark colours that pass 4.5 to 1, a print style, pictures that open larger in a dialog). |
 | Markdown | `<title>.md` and `images/step-NN.png`. A step is a heading (`## 1. Title`, one level deeper for a substep), its description as written, and `![alt](images/step-NN.png)`. A content block is a quotation. |
 | JSON | `<title>.json` and `images/step-NN.png`. See below. |
-| Images | `step-NN.png`, or `step-NN.jpg` with a quality from 1 to 100 (the dialog offers 100, 90, 70 and 50, and 90 is the default). Both come from the same lossless picture, so the marks are crisp; the JPG is baseline, full colour resolution (no chroma subsampling, so text edges stay sharp), written by Express itself. A JPG is smaller than the PNG only for photograph-like pictures: for ordinary screenshots the PNG is usually smaller as well as sharper. |
+| Images | `step-NN.png`, or `step-NN.jpg` with a quality from 1 to 100 (the Export screen offers 100, 90, 70 and 50, or any whole number from 1 to 100 typed in a box, and 90 is the default; only this export uses it, and the others keep their pictures as PNG). Both come from the same lossless picture, so the marks are crisp; the JPG is baseline, full colour resolution (no chroma subsampling, so text edges stay sharp), written by Express itself. A JPG is smaller than the PNG only for photograph-like pictures: for ordinary screenshots the PNG is usually smaller as well as sharper. |
 | GIF | `<title>.gif`: one frame per step (a step with no picture is a card with its title), the same width, shorter pictures centred on a background colour, each frame 1, 2, 3, 5 or 8 seconds (3 by default), looping unless turned off, with an optional title card and progress bar. Width between 320 and 1920 (800 by default). A GIF cannot be made accessible. |
 | PDF | `<title>.pdf`, made by the WebView2 engine on Windows. See below. |
 | Word | `<title>.docx`, written by Express as Office Open XML. See below. |

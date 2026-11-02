@@ -127,7 +127,12 @@ mod tests {
         // The Submit step is cropped to (0, 240) 853 by 480 round the click, and exporting at 853 across leaves it unscaled,
         // so the picture's pixels line up with the original's. The blurred name box is (280, 380) 500 by 40 in the original,
         // which is (280, 140) in the crop. Its blocks are a third of the shorter side, 13 pixels.
-        let p = plan(&d.document.guide, &d.pictures, &BlockText, &ExportOptions { image_width: 853 });
+        let p = plan(
+            &d.document.guide,
+            &d.pictures,
+            &BlockText,
+            &ExportOptions { image_width: 853, ..ExportOptions::default() },
+        );
         let export = export_images(&p);
         let exported = decode_png(&export.files.last().unwrap().bytes).unwrap();
         assert_eq!((exported.width, exported.height), (853, 480));
@@ -152,7 +157,12 @@ mod tests {
     #[test]
     fn the_blur_survives_a_jpg_too() {
         let d = demo();
-        let p = plan(&d.document.guide, &d.pictures, &BlockText, &ExportOptions { image_width: 853 });
+        let p = plan(
+            &d.document.guide,
+            &d.pictures,
+            &BlockText,
+            &ExportOptions { image_width: 853, ..ExportOptions::default() },
+        );
         let jpg = decode(&export_images_as(&p, ImageFormat::Jpeg { quality: 90 }).files.last().unwrap().bytes);
         // Inside the first blurred block the colour is flat, and a JPG at this quality keeps it flat to within a few levels.
         let at = |x: usize, y: usize| &jpg.rgb[(y * jpg.width + x) * 3..(y * jpg.width + x) * 3 + 3];

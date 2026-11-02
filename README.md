@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 819 passed (274 in the core, 200 in the exports, 47 in the
-  Windows crate, 298 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 855 passed (274 in the core, 212 in the exports, 47 in the
+  Windows crate, 322 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -132,6 +132,28 @@ Written and type-checked, not yet run on Windows:
   tick and the Settings choice, that makes the spec's three levels. Tested through the window and in the core; nobody has used it by
   hand, and Narrator and NVDA have not read the new line and buttons. Eleven deliberate faults were each caught, and the editor was drawn
   by the real program in both colour schemes.
+
+- Picture choices on the Export screen (spec X6 in part and the "preview first N steps" of 10.1, written and tested 2026-11-01; Jason
+  said 'Yes, build it'). Between the formats and the folder there are three new sections. "How wide the pictures are": 640, 800, 1024,
+  1280 (the usual), 1600 or 1920 pixels, for every format (the width is kept between 64 and 4096 whatever is asked). "Quality of the
+  JPG pictures": 100, 90 (the usual), 70, 50 or another whole number from 1 to 100 typed in a box; only Pictures (JPG) uses it, and
+  the other formats keep their pictures as PNG. "Try it on a few steps first": a tick, "Make a preview of the first steps only", and a
+  box for how many (5 to begin with). A preview makes only the first N numbered steps (substeps count, a note stays with the step
+  before it, skipped steps are not counted) and never reads or draws the pictures of the rest, so a long guide shows its look in a
+  moment. It cannot be mistaken for the whole guide: the title starts with "Preview, first 5 of 12 steps - " in every format (at the
+  front, because file names keep only 80 characters of a title), the run's folder ends with "(preview of 5 steps)", and the report
+  says "It is a preview, not the whole guide". A preview asked for with as many steps as the guide has (or more) is the whole guide,
+  is not renamed, and the report says that. Width, quality and number of steps are remembered in the settings; whether to make a
+  preview is not, so a preview is never made by accident. What is typed in a box is read when Export is pressed, whatever the
+  keyboard or a screen reader's "press" did, and a box that holds something that is not a number stops the export and says why; a box
+  that is not in use is ignored. Typing in the quality box chooses "Another number", and typing in the steps box ticks the preview.
+  The radio buttons show short words ("640", "100 (best picture)") and have longer names for a screen reader ("Picture width 640
+  pixels", "JPG quality 100, best picture"). A setting that is not on offer (a hand-edited width, a quality of 9000) is shown as the
+  nearest choice and never costs the other settings. Not built from spec X6, X9 and X10: pictures as JPG or WebP inside the web page,
+  Word, PowerPoint and PDF (they keep PNG), the watermark, and export templates. Tested through the window (every choice by its name
+  and by keyboard, exports into real folders, the settings file) and in the export plan and the report; nobody has used it by hand,
+  and Narrator and NVDA have not read the new controls. Forty-five deliberate faults were each caught by a test, and the screen was
+  drawn by the real program in both colour schemes. 855 tests in all (274 core, 212 export, 47 Windows, 322 app).
 
 - A copy of a guide as one file, and opening one (spec A8 and P5, written and tested 2026-11-01; Jason said 'Yes, build it'). On the
   Export screen a new section, "A copy as one file", has a tick "Include the original pictures" (off) and a button "Save a copy as one
@@ -289,9 +311,9 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   checking function has (against the real doubled titles).
 
 Not built: M8 and everything else in the spec: capturing a window that has moved to another display, options on the
-Export screen (it offers the formats with their usual options), the language of the program's own words
+Export screen for the GIF, PDF, Word and PowerPoint (it offers the formats and the picture width, JPG quality and preview, and the rest at their usual values), the language of the program's own words
 (English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
-opens), first-run, WebP, the optional logo on slides, and signing.
+opens), first-run, WebP and JPG pictures inside the other formats, the watermark, export templates, the optional logo on slides, and signing.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own

@@ -11,20 +11,57 @@ use std::collections::{HashMap, HashSet};
 
 use openstage_capture_render::TextRenderer;
 use openstage_express_core::render::{render_step, scale_to_width};
-use openstage_express_core::{AnnotationKind, Guide, StepKind};
+use openstage_express_core::{AnnotationKind, Guide, Step, StepKind};
 
 use crate::picture::{encode_png, PictureSource};
+
+/// The picture widths the Export screen offers, in pixels. The usual one is `DEFAULT_IMAGE_WIDTH`.
+pub const IMAGE_WIDTH_CHOICES: [u32; 6] = [640, 800, 1024, 1280, 1600, 1920];
+pub const DEFAULT_IMAGE_WIDTH: u32 = 1280;
+/// Whatever width is asked for is kept between these, so a wild number cannot ask for a picture too small to read or too big to make.
+pub const MIN_IMAGE_WIDTH: u32 = 64;
+pub const MAX_IMAGE_WIDTH: u32 = 4096;
+/// How many steps a preview has when nothing else is chosen (spec 10.1).
+pub const DEFAULT_PREVIEW_STEPS: usize = 5;
 
 /// How a guide is turned into pictures and words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportOptions {
     /// Every picture is scaled to this many pixels across (the height follows).
     pub image_width: u32,
+    /// Make only the first this many numbered steps, to see the look before waiting for all of it (a preview); `None` is every step.
+    /// Substeps count as steps, and a note between two steps stays with the step before it. 0 is taken as 1.
+    pub first_steps: Option<usize>,
 }
 
 impl Default for ExportOptions {
     fn default() -> ExportOptions {
-        ExportOptions { image_width: 1280 }
+        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None }
+    }
+}
+
+/// What a preview holds. It is there whenever a preview was asked for, even when the guide is short enough to be in it whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Preview {
+    /// How many numbered steps are in the export.
+    pub shown: usize,
+    /// How many numbered steps the whole guide has (skipped steps are not counted).
+    pub total: usize,
+}
+
+impl Preview {
+    /// Whether steps were left out.
+    pub fn is_cut(&self) -> bool {
+        self.shown < self.total
+    }
+
+    /// For the front of the guide's title: `Preview, first 5 of 12 steps`.
+    pub fn words(&self) -> String {
+        if self.shown == 1 {
+            format!("Preview, first step of {}", self.total)
+        } else {
+            format!("Preview, first {} of {} steps", self.shown, self.total)
+        }
     }
 }
 
@@ -57,26 +94,31 @@ pub struct PlannedStep {
 /// Everything an export is made from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
+    /// The guide's title; for a preview that leaves steps out it starts with `Preview, first 5 of 12 steps - `, so a file made from
+    /// it can never be taken for the whole guide. It is at the front because file names keep only the first 80 characters of a title.
     pub title: String,
     pub description: String,
     pub language: String,
     pub steps: Vec<PlannedStep>,
     pub warnings: Vec<String>,
+    /// Set when a preview was asked for.
+    pub preview: Option<Preview>,
 }
 
 fn normalised(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
-/// Work out what an export contains. A step whose picture cannot be found is still exported, without a picture, and the
-/// plan says so in its warnings.
-pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer, options: &ExportOptions) -> Plan {
-    // Which steps are in, and their numbers and depths.
+/// A step that is in an export, with its depth and its number (a content block has none).
+type Included<'a> = Vec<(&'a Step, usize, Option<String>)>;
+
+/// Which steps are in an export, in order, with their numbers and depths. Skipped steps and everything under them are left out.
+fn included_steps(guide: &Guide) -> Included<'_> {
     let mut skipped_ids: HashSet<&str> = HashSet::new();
     let mut counters: HashMap<Option<&str>, u32> = HashMap::new();
     let mut numbers: HashMap<&str, Option<String>> = HashMap::new();
     let mut depths: HashMap<&str, usize> = HashMap::new();
-    let mut included: Vec<(&openstage_express_core::Step, usize, Option<String>)> = Vec::new();
+    let mut included: Included<'_> = Vec::new();
     for step in &guide.steps {
         let parent = step.parent.as_deref();
         if step.skipped || parent.is_some_and(|p| skipped_ids.contains(p) || !depths.contains_key(p)) {
@@ -98,6 +140,32 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
         numbers.insert(&step.id, number.clone());
         included.push((step, depth, number));
     }
+    included
+}
+
+/// How many numbered steps an export of `guide` has (skipped steps and notes are not counted). This is what a preview counts from.
+pub fn exported_step_count(guide: &Guide) -> usize {
+    included_steps(guide).iter().filter(|(_, _, number)| number.is_some()).count()
+}
+
+/// Work out what an export contains. A step whose picture cannot be found is still exported, without a picture, and the
+/// plan says so in its warnings.
+pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer, options: &ExportOptions) -> Plan {
+    let mut included = included_steps(guide);
+    let total = included.iter().filter(|(_, _, number)| number.is_some()).count();
+    let preview = options.first_steps.map(|asked| {
+        let keep = asked.max(1);
+        let mut seen = 0;
+        let cut = included.iter().position(|(_, _, number)| {
+            seen += usize::from(number.is_some());
+            seen > keep
+        });
+        if let Some(cut) = cut {
+            included.truncate(cut);
+        }
+        Preview { shown: keep.min(total), total }
+    });
+    let image_width = options.image_width.clamp(MIN_IMAGE_WIDTH, MAX_IMAGE_WIDTH);
 
     let digits = included.len().to_string().len().max(2);
     let mut warnings = Vec::new();
@@ -122,7 +190,7 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                 for problem in &rendered.report.text_errors {
                     warnings.push(format!("Step {label}: a text mark could not be drawn ({problem})."));
                 }
-                let scaled = scale_to_width(&rendered.canvas, options.image_width);
+                let scaled = scale_to_width(&rendered.canvas, image_width);
                 Some(RenderedPicture {
                     png: encode_png(&scaled),
                     width: scaled.width,
@@ -155,13 +223,11 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
             picture,
         });
     }
-    Plan {
-        title: guide.title.clone(),
-        description: guide.description.clone(),
-        language: guide.language.clone(),
-        steps,
-        warnings,
-    }
+    let title = match preview {
+        Some(p) if p.is_cut() => format!("{} - {}", p.words(), guide.title),
+        _ => guide.title.clone(),
+    };
+    Plan { title, description: guide.description.clone(), language: guide.language.clone(), steps, warnings, preview }
 }
 
 #[cfg(test)]
@@ -331,5 +397,202 @@ mod tests {
     fn the_same_guide_always_plans_to_the_same_bytes() {
         let d = demo();
         assert_eq!(plan_of(&d.document.guide, &d.pictures), plan_of(&d.document.guide, &d.pictures));
+    }
+
+    use openstage_capture_render::{Picture, Rgb};
+    use openstage_express_core::{Document, Position};
+
+    fn add(
+        doc: &mut Document,
+        pictures: &mut MemoryPictures,
+        title: &str,
+        position: Position<'_>,
+        block: bool,
+    ) -> String {
+        let draft = if block {
+            let mut draft = StepDraft::empty(title);
+            draft.kind = StepKind::Block;
+            draft
+        } else {
+            let file = format!("images/step-{:04}.png", pictures.0.len() + 1);
+            pictures.0.insert(file.clone(), Picture::solid(64, 48, Rgb(40, 80, 120)));
+            StepDraft::with_picture(title, StepImage::new(&file, 64, 48))
+        };
+        doc.add_step(draft, position, "t").unwrap()
+    }
+
+    /// A, B with two substeps, a tip, then C, D, E and F: eight numbered steps (substeps count) and one note, in this order:
+    /// 1 A, 2 B, 2.1 B1, 2.2 B2, the tip, 3 C, 4 D, 5 E, 6 F.
+    fn eight_steps() -> (Document, MemoryPictures) {
+        let mut doc = Document::new(Guide::new("g", "Guide", "en", "t"));
+        let mut pictures = MemoryPictures::default();
+        add(&mut doc, &mut pictures, "A", Position::End, false);
+        let b = add(&mut doc, &mut pictures, "B", Position::End, false);
+        add(&mut doc, &mut pictures, "B1", Position::ChildOf(&b), false);
+        add(&mut doc, &mut pictures, "B2", Position::ChildOf(&b), false);
+        add(&mut doc, &mut pictures, "Tip", Position::End, true);
+        for title in ["C", "D", "E", "F"] {
+            add(&mut doc, &mut pictures, title, Position::End, false);
+        }
+        (doc, pictures)
+    }
+
+    fn preview_of(doc: &Document, pictures: &MemoryPictures, first: Option<usize>) -> Plan {
+        plan(&doc.guide, pictures, &BlockText, &ExportOptions { first_steps: first, ..ExportOptions::default() })
+    }
+
+    fn titles(p: &Plan) -> Vec<&str> {
+        p.steps.iter().map(|s| s.title.as_str()).collect()
+    }
+
+    #[test]
+    fn a_preview_keeps_the_first_numbered_steps_and_substeps_count() {
+        let (doc, pictures) = eight_steps();
+        let whole = preview_of(&doc, &pictures, None);
+        assert_eq!(titles(&whole), ["A", "B", "B1", "B2", "Tip", "C", "D", "E", "F"]);
+        assert_eq!(whole.preview, None, "nothing was asked for");
+        assert_eq!(whole.title, "Guide");
+        let three = preview_of(&doc, &pictures, Some(3));
+        assert_eq!(titles(&three), ["A", "B", "B1"]);
+        assert_eq!(three.steps[2].number.as_deref(), Some("2.1"), "a substep is a step, and keeps its number");
+        assert_eq!(three.preview, Some(Preview { shown: 3, total: 8 }));
+        assert_eq!(three.title, "Preview, first 3 of 8 steps - Guide");
+        assert_eq!(three.description, whole.description, "only the title says it is a preview");
+        let one = preview_of(&doc, &pictures, Some(1));
+        assert_eq!(titles(&one), ["A"]);
+        assert_eq!(one.title, "Preview, first step of 8 - Guide");
+    }
+
+    #[test]
+    fn a_note_after_the_last_step_of_a_preview_stays_and_a_note_after_the_cut_goes() {
+        let (doc, pictures) = eight_steps();
+        let four = preview_of(&doc, &pictures, Some(4));
+        assert_eq!(titles(&four), ["A", "B", "B1", "B2", "Tip"], "the tip follows B2 and is not under C");
+        let five = preview_of(&doc, &pictures, Some(5));
+        assert_eq!(titles(&five), ["A", "B", "B1", "B2", "Tip", "C"]);
+        assert_eq!(five.preview.map(|p| p.shown), Some(5));
+    }
+
+    #[test]
+    fn a_preview_as_long_as_the_guide_is_the_whole_guide_and_does_not_rename_it() {
+        let (doc, pictures) = eight_steps();
+        let whole = preview_of(&doc, &pictures, None);
+        for asked in [8, 9, 5000] {
+            let p = preview_of(&doc, &pictures, Some(asked));
+            assert_eq!(p.steps, whole.steps, "{asked}");
+            assert_eq!(p.title, "Guide", "{asked}");
+            let preview = p.preview.unwrap();
+            assert_eq!((preview.shown, preview.total, preview.is_cut()), (8, 8, false), "{asked}");
+        }
+        assert!(preview_of(&doc, &pictures, Some(7)).preview.unwrap().is_cut());
+    }
+
+    #[test]
+    fn asking_for_no_steps_gives_one_step() {
+        let (doc, pictures) = eight_steps();
+        let p = preview_of(&doc, &pictures, Some(0));
+        assert_eq!(titles(&p), ["A"]);
+        assert_eq!(p.preview, Some(Preview { shown: 1, total: 8 }));
+    }
+
+    #[test]
+    fn skipped_steps_are_not_counted_in_a_preview() {
+        let (mut doc, pictures) = eight_steps();
+        let b = doc.guide.steps.iter().find(|s| s.title == "B").unwrap().id.clone();
+        doc.set_skipped(&b, true, "t").unwrap();
+        assert_eq!(exported_step_count(&doc.guide), 5, "A, C, D, E and F");
+        let two = preview_of(&doc, &pictures, Some(2));
+        assert_eq!(titles(&two), ["A", "Tip", "C"]);
+        assert_eq!(two.preview, Some(Preview { shown: 2, total: 5 }));
+        assert_eq!(two.title, "Preview, first 2 of 5 steps - Guide");
+    }
+
+    #[test]
+    fn the_count_of_steps_in_an_export_leaves_out_notes_and_counts_substeps() {
+        let (doc, _) = eight_steps();
+        assert_eq!(exported_step_count(&doc.guide), 8);
+        assert_eq!(exported_step_count(&Guide::new("g", "T", "en", "t")), 0);
+    }
+
+    #[test]
+    fn the_pictures_of_steps_left_out_of_a_preview_are_never_read() {
+        struct Asked<'a>(&'a MemoryPictures, std::cell::RefCell<Vec<String>>);
+        impl PictureSource for Asked<'_> {
+            fn picture(&self, logical: &str) -> Option<Picture> {
+                self.1.borrow_mut().push(logical.to_string());
+                self.0.picture(logical)
+            }
+        }
+        let (doc, pictures) = eight_steps();
+        let asked = Asked(&pictures, Default::default());
+        let options = ExportOptions { first_steps: Some(2), ..ExportOptions::default() };
+        let p = plan(&doc.guide, &asked, &BlockText, &options);
+        assert_eq!(p.steps.iter().filter(|s| s.picture.is_some()).count(), 2);
+        assert_eq!(
+            asked.1.borrow().len(),
+            2,
+            "only the two steps in the preview had their pictures read: {:?}",
+            asked.1
+        );
+    }
+
+    #[test]
+    fn the_files_of_a_preview_are_named_from_one() {
+        let (doc, pictures) = eight_steps();
+        let p = preview_of(&doc, &pictures, Some(3));
+        let files: Vec<&str> = p.steps.iter().filter_map(|s| s.picture.as_ref().map(|x| x.file.as_str())).collect();
+        assert_eq!(files, ["images/step-01.png", "images/step-02.png", "images/step-03.png"]);
+    }
+
+    #[test]
+    fn the_words_for_a_preview_are_singular_or_plural() {
+        assert_eq!(Preview { shown: 1, total: 4 }.words(), "Preview, first step of 4");
+        assert_eq!(Preview { shown: 5, total: 12 }.words(), "Preview, first 5 of 12 steps");
+    }
+
+    #[test]
+    fn the_mark_of_a_preview_is_still_in_the_file_name_when_the_title_is_long() {
+        let (mut doc, pictures) = eight_steps();
+        doc.guide.title =
+            "A very long title for a guide about handing in work on the course site, step by step, for new students"
+                .to_string();
+        let p = preview_of(&doc, &pictures, Some(3));
+        let name = openstage_express_core::fsutil::sanitise_folder_name(&p.title);
+        assert!(name.starts_with("Preview, first 3 of 8 steps - A very long title"), "{name}");
+        assert!(name.chars().count() <= 80, "file names keep 80 characters of a title, so the mark has to be first");
+    }
+
+    #[test]
+    fn every_width_on_offer_is_the_width_of_the_pictures_and_the_usual_one_is_on_offer() {
+        assert_eq!(IMAGE_WIDTH_CHOICES, [640, 800, 1024, 1280, 1600, 1920]);
+        assert_eq!((MIN_IMAGE_WIDTH, MAX_IMAGE_WIDTH, DEFAULT_PREVIEW_STEPS), (64, 4096, 5));
+        assert!(IMAGE_WIDTH_CHOICES.contains(&DEFAULT_IMAGE_WIDTH));
+        assert_eq!(ExportOptions::default().image_width, DEFAULT_IMAGE_WIDTH);
+        assert!(IMAGE_WIDTH_CHOICES.windows(2).all(|w| w[0] < w[1]), "smallest first");
+        let (doc, pictures) = eight_steps();
+        for width in IMAGE_WIDTH_CHOICES {
+            let options = ExportOptions { image_width: width, first_steps: Some(1) };
+            let p = plan(&doc.guide, &pictures, &BlockText, &options);
+            let picture = p.steps[0].picture.as_ref().unwrap();
+            assert_eq!(picture.width, width);
+            assert_eq!(picture.height, width * 48 / 64, "the height follows");
+            let decoded = decode_png(&picture.png).unwrap();
+            assert_eq!(decoded.width, width);
+        }
+    }
+
+    #[test]
+    fn a_wild_width_is_kept_between_the_smallest_and_the_largest() {
+        let (doc, pictures) = eight_steps();
+        let width_for = |asked: u32| {
+            let options = ExportOptions { image_width: asked, first_steps: Some(1) };
+            plan(&doc.guide, &pictures, &BlockText, &options).steps[0].picture.as_ref().unwrap().width
+        };
+        assert_eq!(width_for(0), MIN_IMAGE_WIDTH);
+        assert_eq!(width_for(1), MIN_IMAGE_WIDTH);
+        assert_eq!(width_for(u32::MAX), MAX_IMAGE_WIDTH);
+        assert_eq!(width_for(MAX_IMAGE_WIDTH + 1), MAX_IMAGE_WIDTH);
+        assert_eq!(width_for(MAX_IMAGE_WIDTH), MAX_IMAGE_WIDTH);
+        assert_eq!(width_for(MIN_IMAGE_WIDTH), MIN_IMAGE_WIDTH);
     }
 }

@@ -244,8 +244,25 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 - [ ] The Export screen by hand: open a guide you captured, press Export, choose a few formats, press `Choose folder...` (Windows' own
       folder dialog: has never been opened by a person; does it appear in front, start in the right place, and work with the keyboard
       and Narrator?), press Export. Does the window stay usable while a PDF is made? Is the new folder opened? Open each file.
-- [ ] The export options (GIF speed and size, JPG quality, PDF paper and margins, Word and PowerPoint choices) exist in the code and
-      are tested, but the Export screen offers only the formats, with the default options. Say which options you want on the screen.
+- [ ] The export options (GIF speed and size, PDF paper and margins, Word and PowerPoint choices) exist in the code and are tested,
+      but the Export screen still offers only the formats with those options at their usual values. (The picture width, the JPG
+      quality and a preview of the first steps are on the screen now: see the next item.) Say which of the others you want on the
+      screen.
+- [ ] The picture choices on the Export screen (2026-11-01, written and tested, never used by hand). Open a guide of eight or more
+      steps that you captured, press Export, and between the formats and the folder you should see "How wide the pictures are"
+      (six widths, 1280 the usual), "Quality of the JPG pictures" (100, 90, 70, 50 and another number in a box) and "Try it on a
+      few steps first" (a tick and a box, 5 to begin with). Choose width 640, tick Pictures (JPG), choose quality 50, tick the
+      preview and type 3, and export. Check: the status line and the report say it is a preview; the new folder is called
+      "... (preview of 3 steps)"; there are three pictures, 640 across; the web page, Word, PowerPoint and PDF files (if you also
+      choose them) have "Preview, first 3 of N steps - " before the guide's title. Then export again at quality 100 with the preview
+      unticked: the folder has no "preview" in its name and every step is there. Questions for you: is a JPG at quality 50 good
+      enough for text in your screenshots (compare it with 100)? Do the short words on the screen ("640", "100 (best picture)")
+      and the longer names a screen reader says ("Picture width 640 pixels", "JPG quality 100, best picture") feel right with
+      Narrator? Is typing into the quality box and the steps box easy by keyboard? Should a preview rename the guide's title in
+      the files (it does now, so a preview is never taken for the whole guide) or only the folder?
+- [ ] Decision for you: only Pictures (JPG) uses the JPG quality. The web page, Markdown, JSON, Word, PowerPoint, PDF and GIF keep
+      their pictures as PNG, which loses nothing but makes bigger files. Spec 10.4 would also let the web page and the SCORM export
+      carry JPG (or WebP) pictures. Do you want the web page, Word and PowerPoint to be able to use JPG too?
 - [ ] Settings by hand: open Settings from Home, change the colour scheme (does the window change at once, in both schemes, with a
       Windows contrast theme?), the capture mode and key, the language of step titles (do German and French titles read well?), and
       the two folders (the folder dialog again). Then start a capture and check the choices took effect. The choices reach the capture

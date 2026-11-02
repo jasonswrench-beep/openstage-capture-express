@@ -12,6 +12,8 @@ use openstage_express_core::cues::Cue;
 use openstage_express_core::fsutil::write_atomic;
 use openstage_express_core::hotkey::HotkeySet;
 use openstage_express_core::Language;
+use openstage_express_export::images::DEFAULT_JPEG_QUALITY;
+use openstage_express_export::plan::{DEFAULT_IMAGE_WIDTH, DEFAULT_PREVIEW_STEPS};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -207,6 +209,12 @@ pub struct AppSettings {
     pub exports_folder: Option<String>,
     /// The formats last chosen on the Export screen, by folder name (`html`, `pdf`, ...).
     pub export_formats: Vec<String>,
+    /// How many pixels across the exported pictures are (one of the widths on the Export screen).
+    pub export_picture_width: u32,
+    /// The quality of exported JPG pictures, 1 to 100 (a number outside that is kept to it, not a reason to lose the other settings).
+    pub export_jpg_quality: u32,
+    /// How many steps a preview has. Whether to make a preview is not kept: a preview must never be made by accident.
+    pub export_preview_steps: usize,
     /// Fields this program does not know, kept and written back.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -237,6 +245,9 @@ impl Default for AppSettings {
             guides_folder: None,
             exports_folder: None,
             export_formats: vec!["html".to_string(), "pdf".to_string()],
+            export_picture_width: DEFAULT_IMAGE_WIDTH,
+            export_jpg_quality: u32::from(DEFAULT_JPEG_QUALITY),
+            export_preview_steps: DEFAULT_PREVIEW_STEPS,
             extra: Map::new(),
         }
     }
@@ -566,6 +577,44 @@ mod tests {
         assert!(steps.wants(Cue::Step) && !steps.wants(Cue::Start));
         let problems = SoundSettings { problem: true, ..all_off };
         assert!(problems.wants(Cue::Error) && !problems.wants(Cue::Step));
+    }
+
+    #[test]
+    fn the_picture_choices_start_as_the_usual_and_survive_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = AppSettings::default();
+        assert_eq!((s.export_picture_width, s.export_jpg_quality, s.export_preview_steps), (1280, 90, 5));
+        let changed = AppSettings {
+            export_picture_width: 800,
+            export_jpg_quality: 77,
+            export_preview_steps: 12,
+            ..AppSettings::default()
+        };
+        save(&path, &changed).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        for words in ["\"exportPictureWidth\": 800", "\"exportJpgQuality\": 77", "\"exportPreviewSteps\": 12"] {
+            assert!(text.contains(words), "{words} in {text}");
+        }
+        assert!(!text.to_lowercase().contains("exportpreview\""), "whether to make a preview is never kept: {text}");
+        let (back, note) = load(&path);
+        assert_eq!(back, changed);
+        assert!(note.is_none());
+    }
+
+    #[test]
+    fn wild_picture_numbers_in_the_file_do_not_cost_the_other_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            br#"{"showCursor": false, "exportPictureWidth": 7, "exportJpgQuality": 5000, "exportPreviewSteps": 0}"#,
+        )
+        .unwrap();
+        let (s, note) = load(&path);
+        assert!(note.is_none(), "{note:?}");
+        assert!(!s.show_cursor, "the other settings are kept");
+        assert_eq!((s.export_picture_width, s.export_jpg_quality, s.export_preview_steps), (7, 5000, 0));
     }
 
     #[test]
