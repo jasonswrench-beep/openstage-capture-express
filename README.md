@@ -36,8 +36,8 @@ Run on Windows, and working:
 
 - `BUILD EXPRESS.bat`, `TEST EXPRESS.bat`, `EXPORT DEMO.bat` and `OPEN EXPRESS.bat` ran on 2026-10-31 and 2026-11-01 on Jason's
   Windows 11 x64 PC (build 26200, Core i9-13900K), pinned to the efficiency cores, started from a shell with no keyboard
-  attached rather than double-clicked. The last full run of the tests: 876 passed (274 in the core, 226 in the exports, 47 in the
-  Windows crate, 329 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
+  attached rather than double-clicked. The last full run of the tests: 886 passed (274 in the core, 231 in the exports, 47 in the
+  Windows crate, 334 in the app), and the rule checks said PASS. The tests use real files: guide folders were created, saved,
   locked, crashed and reopened in temporary folders.
 - Capture (M6) was run for real on 2026-11-01 through the program behind `TEST EXPRESS CLICKS.bat` (`openstage-capture-express
   test-clicks`, a debug build, started from a shell). It opened a test window of known controls in a second process and, with
@@ -171,6 +171,23 @@ Written and type-checked, not yet run on Windows:
   and Narrator and NVDA have not read the new radio buttons. Thirty-one deliberate faults were each caught by a test (one more
   turned out to guard nothing, because the JPG encoder already keeps a quality between 1 and 100, so that extra guard was removed),
   and the screen was drawn by the real program in both colour schemes. 876 tests in all (274 core, 226 export, 47 Windows, 329 app).
+  (It began with two radio buttons; the entry below adds a third.)
+
+- Whichever is smaller for each picture (a third choice under "Pictures inside the web page, Word, PowerPoint and PDF", written and
+  tested 2026-11-02; Jason said 'Yes, build it'). For each picture the plan makes the JPG at the quality chosen below and keeps it
+  only when its file is strictly smaller than the PNG; otherwise the picture stays an exact PNG, and a tie keeps the PNG. So a
+  document can hold both kinds, and it is never bigger than the PNG choice or the JPG choice would have made it. The choice is kept
+  in the settings as `exportDocumentPictures` (`png`, `jpg` or `smaller`; a word this program does not know means `png` and costs no
+  other setting). It replaces the earlier yes/no `exportDocumentsJpg`, which only ever existed in local builds: a settings file that
+  still has it goes back to PNG once, and the old line is kept as an unknown field. A picture that cannot be made as a JPG still
+  warns and stays a PNG. The folders of pictures, Markdown, JSON and the GIF are not changed by it (a test checks that). Checked with
+  the real programs on the example guide with two of its screens swapped for busy pictures: the plan chose JPG, PNG, JPG, PNG, PNG;
+  the real PowerPoint opened the deck without asking to repair it and passed all 7 checks (7 slides, alt text on every picture); the
+  real WebView2 engine made a PDF with 5 pictures, 2 of them JPEG, and 5 alt texts; the Word package holds `image1.jpg`,
+  `image2.png`, `image3.jpg`, `image4.png`, `image5.png` and the web page 2 JPEG and 3 PNG pictures. The real Word was NOT tried, because it was
+  already open on this PC and the check leaves an open Word alone. Nobody has used it by hand, and Narrator and NVDA have not read
+  the new radio button. Twenty-three deliberate faults were each caught by a test, and fmt, clippy and the rule checks are clean.
+  886 tests in all (274 core, 231 export, 47 Windows, 334 app).
 
 - A copy of a guide as one file, and opening one (spec A8 and P5, written and tested 2026-11-01; Jason said 'Yes, build it'). On the
   Export screen a new section, "A copy as one file", has a tick "Include the original pictures" (off) and a button "Save a copy as one

@@ -461,8 +461,8 @@ pub fn export_docx(plan: &Plan, options: &DocxOptions) -> Result<Export, OfficeE
 mod tests {
     use super::*;
     use crate::demo::demo;
-    use crate::images::ImageFormat;
     use crate::office::check::{attributes, texts, well_formed};
+    use crate::plan::DocumentPictures;
     use crate::plan::{plan, ExportOptions};
     use crate::zip::reader::{unzip, Unzipped};
     use openstage_capture_render::BlockText;
@@ -479,7 +479,7 @@ mod tests {
     fn jpg_plan() -> Plan {
         let d = demo();
         let options =
-            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+            ExportOptions { document_pictures: DocumentPictures::Jpg { quality: 80 }, ..ExportOptions::default() };
         plan(&d.document.guide, &d.pictures, &BlockText, &options)
     }
 

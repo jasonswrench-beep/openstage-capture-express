@@ -311,7 +311,11 @@ Every export is made from the same plan, so they agree about which steps are in,
   `data:image/jpeg`, Word as `word/media/imageN.jpg` and PowerPoint as `ppt/media/imageN.jpg` (their content types gain a `jpg`
   default). The folders of pictures, Markdown, JSON and the GIF are never changed by this. A picture that cannot be made as a JPG (a
   side over 65,535 pixels once scaled) stays a PNG in the document and the export warns. JPG is often about half the size of PNG for
-  an ordinary screenshot and can be larger for a plain screen with big flat areas.
+  an ordinary screenshot and can be larger for a plain screen with big flat areas. The third choice, "Whichever is smaller for each
+  picture", makes the JPG of every picture and keeps it only when its file is strictly smaller than the PNG (the same size keeps the
+  PNG); the other pictures stay exact PNGs, so a document can hold both kinds, and it is never bigger than the PNG choice or the JPG
+  choice would have made it. It is kept in the settings as `exportDocumentPictures`: `png`, `jpg` or `smaller` (a word this program
+  does not know means `png`).
 - **A preview.** An export can be made of only the first N numbered steps (the Export screen's "Try it on a few steps first", 5 to
   begin with), to see how it looks without waiting for a long guide. Substeps count as steps, a content block stays with the step it
   follows, and skipped steps are not counted. The pictures of the steps left out are never read or drawn, and the files are named

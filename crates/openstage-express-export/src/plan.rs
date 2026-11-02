@@ -13,7 +13,6 @@ use openstage_capture_render::TextRenderer;
 use openstage_express_core::render::{render_step, scale_to_width};
 use openstage_express_core::{AnnotationKind, Guide, Step, StepKind};
 
-use crate::images::ImageFormat;
 use crate::jpeg;
 use crate::picture::{encode_png, PictureSource};
 
@@ -26,6 +25,20 @@ pub const MAX_IMAGE_WIDTH: u32 = 4096;
 /// How many steps a preview has when nothing else is chosen (spec 10.1).
 pub const DEFAULT_PREVIEW_STEPS: usize = 5;
 
+/// How the pictures inside the documents (the web page, Word, PowerPoint and PDF) are stored. The folders of pictures, Markdown,
+/// JSON and the animated GIF are not changed by this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentPictures {
+    /// Every pixel as it is.
+    Png,
+    /// Every picture as a JPG, which is usually a good deal smaller for ordinary screenshots. The quality runs from 1 (smallest file)
+    /// to 100 (best picture); a number outside that is moved to the nearest end.
+    Jpg { quality: u8 },
+    /// Each picture as the JPG when that is smaller than the PNG, and as the PNG when it is not. A plain screen with big flat areas
+    /// is smaller as a PNG, and then it also loses nothing. When the two are the same size the PNG is kept.
+    Smaller { quality: u8 },
+}
+
 /// How a guide is turned into pictures and words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportOptions {
@@ -34,14 +47,13 @@ pub struct ExportOptions {
     /// Make only the first this many numbered steps, to see the look before waiting for all of it (a preview); `None` is every step.
     /// Substeps count as steps, and a note between two steps stays with the step before it. 0 is taken as 1.
     pub first_steps: Option<usize>,
-    /// How the pictures inside the documents (the web page, Word, PowerPoint and PDF) are stored. PNG keeps every pixel as it is;
-    /// JPG makes much smaller files. The folders of pictures, Markdown, JSON and the animated GIF are not changed by this.
-    pub document_pictures: ImageFormat,
+    /// How the pictures inside the documents are stored.
+    pub document_pictures: DocumentPictures,
 }
 
 impl Default for ExportOptions {
     fn default() -> ExportOptions {
-        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None, document_pictures: ImageFormat::Png }
+        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None, document_pictures: DocumentPictures::Png }
     }
 }
 
@@ -170,6 +182,16 @@ fn included_steps(guide: &Guide) -> Included<'_> {
     included
 }
 
+/// The JPG a document should use for one picture, if any: never for `Png`, the JPG there is for `Jpg`, and for `Smaller` only when the
+/// JPG is strictly smaller than the PNG, so a tie keeps the PNG, which loses nothing.
+fn kept_for_documents(choice: DocumentPictures, png_len: usize, jpg: Option<Vec<u8>>) -> Option<Vec<u8>> {
+    match choice {
+        DocumentPictures::Png => None,
+        DocumentPictures::Jpg { .. } => jpg,
+        DocumentPictures::Smaller { .. } => jpg.filter(|bytes| bytes.len() < png_len),
+    }
+}
+
 /// How many numbered steps an export of `guide` has (skipped steps and notes are not counted). This is what a preview counts from.
 pub fn exported_step_count(guide: &Guide) -> usize {
     included_steps(guide).iter().filter(|(_, _, number)| number.is_some()).count()
@@ -218,9 +240,10 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                     warnings.push(format!("Step {label}: a text mark could not be drawn ({problem})."));
                 }
                 let scaled = scale_to_width(&rendered.canvas, image_width);
+                let png = encode_png(&scaled);
                 let jpg = match options.document_pictures {
-                    ImageFormat::Png => None,
-                    ImageFormat::Jpeg { quality } => {
+                    DocumentPictures::Png => None,
+                    DocumentPictures::Jpg { quality } | DocumentPictures::Smaller { quality } => {
                         // The encoder keeps a quality between 1 and 100 itself.
                         match jpeg::encode_bgra(&scaled.bgra, scaled.width, scaled.height, quality) {
                             Ok(bytes) => Some(bytes),
@@ -233,8 +256,9 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                         }
                     }
                 };
+                let jpg = kept_for_documents(options.document_pictures, png.len(), jpg);
                 Some(RenderedPicture {
-                    png: encode_png(&scaled),
+                    png,
                     width: scaled.width,
                     height: scaled.height,
                     file: format!("images/step-{:0digits$}.png", position + 1),
@@ -276,7 +300,7 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::demo::demo;
+    use crate::demo::{busy_picture, busy_then_plain, demo};
     use crate::picture::{decode_png, MemoryPictures};
     use openstage_capture_render::BlockText;
     use openstage_express_core::{Annotation, Guide, Step, StepDraft, StepImage};
@@ -642,7 +666,11 @@ mod tests {
     // ---- JPG pictures inside documents
 
     fn jpeg_options(quality: u8) -> ExportOptions {
-        ExportOptions { document_pictures: ImageFormat::Jpeg { quality }, ..ExportOptions::default() }
+        ExportOptions { document_pictures: DocumentPictures::Jpg { quality }, ..ExportOptions::default() }
+    }
+
+    fn smaller_options(quality: u8) -> ExportOptions {
+        ExportOptions { document_pictures: DocumentPictures::Smaller { quality }, ..ExportOptions::default() }
     }
 
     fn pictures_of(p: &Plan) -> Vec<&RenderedPicture> {
@@ -653,7 +681,7 @@ mod tests {
     fn pictures_inside_documents_are_png_unless_jpg_is_asked_for() {
         let d = demo();
         let p = plan_of(&d.document.guide, &d.pictures);
-        assert_eq!(ExportOptions::default().document_pictures, ImageFormat::Png);
+        assert_eq!(ExportOptions::default().document_pictures, DocumentPictures::Png);
         let pictures = pictures_of(&p);
         assert_eq!(pictures.len(), 5);
         for picture in pictures {
@@ -705,21 +733,6 @@ mod tests {
         assert!(total(1) < total(100));
     }
 
-    /// A picture with a smooth sweep of colour and a little noise, as a photograph or a busy screen has: PNG cannot squeeze it much.
-    fn busy_picture(width: u32, height: u32) -> Picture {
-        let mut seed = 12_345_u32;
-        let mut bgra = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let noise = ((seed >> 24) % 13) as i32 - 6;
-                let level = |base: u32| (base as i32 + noise).clamp(0, 255) as u8;
-                bgra.extend_from_slice(&[level(x * 255 / width), level(y * 255 / height), level(128), 255]);
-            }
-        }
-        Picture::new(width, height, bgra)
-    }
-
     #[test]
     fn a_busy_picture_is_a_good_deal_smaller_as_a_jpg_than_as_a_png() {
         let mut doc = Document::new(Guide::new("g", "Guide", "en", "t"));
@@ -737,7 +750,7 @@ mod tests {
     #[test]
     fn the_folders_markdown_json_and_the_gif_do_not_change_with_the_pictures_inside_documents() {
         use crate::gif::{export_gif, GifOptions};
-        use crate::images::{export_images, export_images_as};
+        use crate::images::{export_images, export_images_as, ImageFormat};
         use crate::json::export_json;
         use crate::markdown::export_markdown;
         let d = demo();
@@ -756,6 +769,99 @@ mod tests {
             export_gif(&png, &GifOptions::default(), &BlockText),
             export_gif(&jpg, &GifOptions::default(), &BlockText)
         );
+        // The same goes for taking whichever is smaller.
+        let smaller = plan(&d.document.guide, &d.pictures, &BlockText, &smaller_options(60));
+        assert_eq!(export_markdown(&png), export_markdown(&smaller));
+        assert_eq!(export_json(&png), export_json(&smaller));
+        assert_eq!(export_images(&png), export_images(&smaller));
+        assert_eq!(
+            export_images_as(&png, ImageFormat::Jpeg { quality: 80 }),
+            export_images_as(&smaller, ImageFormat::Jpeg { quality: 80 })
+        );
+        assert_eq!(
+            export_gif(&png, &GifOptions::default(), &BlockText),
+            export_gif(&smaller, &GifOptions::default(), &BlockText)
+        );
+    }
+
+    #[test]
+    fn smaller_takes_the_jpg_of_a_busy_picture_and_keeps_the_png_of_a_plain_one() {
+        let d = busy_then_plain();
+        let width = |options: ExportOptions| ExportOptions { image_width: 320, ..options };
+        let every_jpg = plan(&d.document.guide, &d.pictures, &BlockText, &width(jpeg_options(80)));
+        let chosen = plan(&d.document.guide, &d.pictures, &BlockText, &width(smaller_options(80)));
+        let (every, chosen_pictures) = (pictures_of(&every_jpg), pictures_of(&chosen));
+        let (busy, plain) = (every[0], every[1]);
+        // The two pictures really are the two kinds, or the rest would prove nothing.
+        assert!(
+            busy.jpg.as_ref().unwrap().len() < busy.png.len(),
+            "busy: {} against {}",
+            busy.jpg.as_ref().unwrap().len(),
+            busy.png.len()
+        );
+        assert!(
+            plain.png.len() < plain.jpg.as_ref().unwrap().len(),
+            "plain: {} against {}",
+            plain.png.len(),
+            plain.jpg.as_ref().unwrap().len()
+        );
+
+        let (took_jpg, kept_png) = (chosen_pictures[0], chosen_pictures[1]);
+        assert_eq!(took_jpg.jpg, busy.jpg, "the busy picture is the very JPG that every-JPG makes");
+        assert_eq!(took_jpg.embedded().extension, "jpg");
+        assert_eq!(kept_png.jpg, None);
+        let embedded = kept_png.embedded();
+        assert_eq!((embedded.extension, embedded.media_type), ("png", "image/png"));
+        assert_eq!(embedded.bytes, kept_png.png.as_slice());
+        assert_eq!((took_jpg.png.as_slice(), kept_png.png.as_slice()), (busy.png.as_slice(), plain.png.as_slice()));
+        assert!(
+            chosen.warnings.is_empty(),
+            "a picture kept as a PNG because it is smaller is not a problem: {:?}",
+            chosen.warnings
+        );
+    }
+
+    #[test]
+    fn smaller_is_never_bigger_than_the_png_or_the_jpg_and_is_not_a_reason_for_a_warning() {
+        let d = demo();
+        let png = plan_of(&d.document.guide, &d.pictures);
+        let jpg = plan(&d.document.guide, &d.pictures, &BlockText, &jpeg_options(90));
+        let smaller = plan(&d.document.guide, &d.pictures, &BlockText, &smaller_options(90));
+        assert_eq!(smaller.warnings, png.warnings);
+        let (png, jpg, smaller) = (pictures_of(&png), pictures_of(&jpg), pictures_of(&smaller));
+        assert_eq!((png.len(), jpg.len(), smaller.len()), (5, 5, 5));
+        for ((png, jpg), smaller) in png.into_iter().zip(jpg).zip(smaller) {
+            let (png_len, jpg_len) = (png.png.len(), jpg.jpg.as_ref().unwrap().len());
+            assert_eq!(smaller.embedded().bytes.len(), png_len.min(jpg_len), "{}", smaller.file);
+            assert_eq!(smaller.png, png.png);
+        }
+    }
+
+    #[test]
+    fn smaller_keeps_the_jpg_only_when_it_is_strictly_smaller() {
+        let jpg = || Some(vec![0_u8; 100]);
+        let smaller = DocumentPictures::Smaller { quality: 90 };
+        assert_eq!(kept_for_documents(smaller, 101, jpg()), jpg());
+        assert_eq!(kept_for_documents(smaller, 100, jpg()), None, "the same size keeps the PNG");
+        assert_eq!(kept_for_documents(smaller, 99, jpg()), None);
+        assert_eq!(kept_for_documents(smaller, 1_000, None), None, "a picture that could not be made as a JPG");
+        let every = DocumentPictures::Jpg { quality: 90 };
+        assert_eq!(kept_for_documents(every, 1, jpg()), jpg(), "JPG takes the JPG even when it is the bigger file");
+        assert_eq!(kept_for_documents(every, 1_000, None), None);
+        assert_eq!(kept_for_documents(DocumentPictures::Png, 1_000, jpg()), None, "PNG never takes a JPG");
+    }
+
+    #[test]
+    fn a_picture_too_tall_to_be_a_jpg_still_gets_its_warning_when_the_smaller_one_is_asked_for() {
+        let (mut doc, mut pictures) = eight_steps();
+        pictures.0.insert("images/tall.png".into(), Picture::solid(16, 16_384, Rgb(10, 20, 30)));
+        let tall = StepDraft::with_picture("Tall", StepImage::new("images/tall.png", 16, 16_384));
+        doc.add_step(tall, Position::End, "t").unwrap();
+        let options = ExportOptions { image_width: MIN_IMAGE_WIDTH, ..smaller_options(90) };
+        let p = plan(&doc.guide, &pictures, &BlockText, &options);
+        assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
+        assert!(p.warnings[0].starts_with("Step 7: its picture could not be made as a JPG ("), "{:?}", p.warnings);
+        assert_eq!(p.steps.last().unwrap().picture.as_ref().unwrap().embedded().extension, "png");
     }
 
     #[test]

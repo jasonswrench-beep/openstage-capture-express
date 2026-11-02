@@ -270,8 +270,18 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       this program's own screens JPG at 90 was 40 to 50 percent of the PNG; the demo guide's flat blocks come out about twice as big
       as JPG, because PNG is very good at flat colour. If your screens come out bigger as JPG, say so. (3) Zoom a PDF page to 200
       percent and look at the text in a picture at quality 90 and at 70. (4) In the web page, press a picture: does the larger
-      view open? (5) Quit and reopen the program: is your choice remembered? Question for you: would you like a third choice,
-      "whichever is smaller for each picture" (a picture that is smaller as PNG stays PNG), so JPG can never make a file bigger?
+      view open? (5) Quit and reopen the program: is your choice remembered?
+- [ ] "Whichever is smaller for each picture" (2026-11-02, written and tested; you said 'Yes, build it'). It is the third choice
+      under "Pictures inside the web page, Word, PowerPoint and PDF". For each picture it makes the JPG (at the quality below) and
+      keeps it only when that file is smaller than the PNG; otherwise the picture stays an exact PNG. Check: (1) Export a guide of
+      your own as the web page and Word three times, with PNG, JPG and "whichever is smaller", and compare the three file sizes.
+      The smaller choice should never be bigger than either of the other two. (2) Open the Word file made with the smaller choice:
+      do the pictures all show, with no repair message, even though some are PNG and some JPG? (Rename the .docx to .zip and look
+      in word\media: the busy screens should be .jpg and the plain ones .png.) (3) Choose it, quit and reopen the program: is it
+      still chosen? (4) With a keyboard alone, Tab to the three choices and press Space on each; with Narrator or NVDA (only when
+      you say so), does each one say what it is a choice of, for example "Pictures inside the web page, Word, PowerPoint and
+      PDF: whichever is smaller for each picture, PNG or JPG"? Question for you: is the shown label "Whichever is smaller for each
+      picture" clear, or would you rather it said "Smallest file"?
 - [ ] Settings by hand: open Settings from Home, change the colour scheme (does the window change at once, in both schemes, with a
       Windows contrast theme?), the capture mode and key, the language of step titles (do German and French titles read well?), and
       the two folders (the folder dialog again). Then start a capture and check the choices took effect. The choices reach the capture

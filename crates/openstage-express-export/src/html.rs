@@ -271,7 +271,7 @@ pub fn export_html(plan: &Plan) -> Export {
 mod tests {
     use super::*;
     use crate::demo::demo;
-    use crate::images::ImageFormat;
+    use crate::plan::DocumentPictures;
     use crate::plan::{plan, ExportOptions};
     use openstage_capture_render::BlockText;
 
@@ -359,7 +359,7 @@ mod tests {
     fn jpg_page() -> (Plan, String) {
         let d = demo();
         let options =
-            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+            ExportOptions { document_pictures: DocumentPictures::Jpg { quality: 80 }, ..ExportOptions::default() };
         let p = plan(&d.document.guide, &d.pictures, &BlockText, &options);
         let page = html_page(&p);
         (p, page)
