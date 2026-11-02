@@ -152,7 +152,13 @@ submit an assignment") to open from the card under "Your guides".
       copy on another PC, and try a zip that is not a copy (it should say so, in words, and make nothing). Narrator and NVDA: the
       Export section, the Open a copy screen and its messages should be read. Does the default (marks drawn in, skipped steps left
       out) match what you would want to send someone?
-- [ ] Not built in the editor yet: the focused view for a whole guide at once (it is set on each step), and cutting the picture.
+- [ ] The focused view for a whole guide (on a guide you can spare, with a few steps): under the guide's title the line says how many
+      steps have the focused view; press "Focused view off for every step" (every picture should show whole, and the frame over the
+      picture goes), then "on" (the usual crops come back). Move one step's crop by hand and press "on" again: your crop should be kept.
+      Is it right that "on" only fills in steps that have none, and that "off" throws away hand-set crops (Undo brings them back)?
+      Capture a new guide with "Start new steps with a close-up of the click" off in Settings and look at the line: it should say
+      new steps start with it off. Narrator and NVDA: the line and the two buttons, and the status line after each press, should be read.
+- [ ] Not built in the editor yet: cutting the picture.
 - [ ] Rename and delete guides from Home, on guides you can spare (copy a guide's folder to a spare guides folder first, and set
       Settings, Folders to it): Rename opens a box with the name, Enter saves, Escape cancels; Delete asks first with Keep it ready,
       then the guide leaves the list and its folder is in `Trash` beside the guides; Trash lists it and Restore brings it back and it

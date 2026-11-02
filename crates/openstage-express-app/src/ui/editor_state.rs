@@ -751,6 +751,56 @@ impl EditorState {
         })
     }
 
+    // ---- the focused view for the whole guide
+
+    /// How many of the steps with a picture have a focused view, and what new steps start with, in words.
+    pub fn focus_summary(&self) -> String {
+        let (focused, pictures) = self.session.doc().focus_counts();
+        let default = if self.session.doc().guide.focused_view { "on" } else { "off" };
+        format!(
+            "Focused view: {focused} of {} with a picture. New steps start with the focused view {default}.",
+            steps_words(pictures)
+        )
+    }
+
+    /// Turn the focused view on or off for every step of the guide, as one change. On gives the usual crop to the steps that have none
+    /// and keeps a crop that was set by hand; off shows every picture whole. It is also what new steps start with.
+    pub fn set_focused_for_all(&mut self, on: bool) -> Said {
+        self.commit_pending();
+        let now = utc_now_iso();
+        let report = self.session.apply(|d| Ok(d.set_focus_for_all(on, &now))).ok()?;
+        self.crop_drag = None;
+        let mut words = if on {
+            if report.changed > 0 {
+                let mut words = format!("Focused view turned on for {}.", steps_words(report.changed));
+                if report.kept > 0 {
+                    words.push_str(&format!(" {} already had a crop, which was kept.", steps_words(report.kept)));
+                }
+                words
+            } else {
+                "Every step that can have the focused view already has it.".to_string()
+            }
+        } else if report.changed > 0 {
+            format!(
+                "Focused view turned off for {}. They show the whole picture. Undo brings the crops back.",
+                steps_words(report.changed)
+            )
+        } else {
+            "No step has the focused view.".to_string()
+        };
+        if report.cannot > 0 {
+            words.push_str(&if report.cannot == 1 {
+                " 1 step has no click to centre on, so it stays whole.".to_string()
+            } else {
+                format!(" {} steps have no click to centre on, so they stay whole.", report.cannot)
+            });
+        }
+        if report.default_changed {
+            words.push_str(if on { " New steps will start with it." } else { " New steps will start without it." });
+        }
+        Some(words)
+    }
+
     // ---- moving and zooming the focused crop
 
     /// The selected step's crop as the picture shows it: one being dragged with the mouse is shown where it is now.
@@ -1459,6 +1509,81 @@ mod tests {
         assert_eq!(e.chosen_count(), 2, "the choice is kept");
         assert_eq!(e.chosen_ids(), [ids[0].clone(), ids[1].clone()]);
         assert!(e.can_undo());
+    }
+
+    #[test]
+    fn the_summary_counts_the_steps_with_a_picture_that_have_the_focused_view_and_says_what_new_steps_start_with() {
+        let mut e = editor();
+        assert_eq!(
+            e.focus_summary(),
+            "Focused view: 6 of 6 steps with a picture. New steps start with the focused view on."
+        );
+        e.set_focused_for_all(false);
+        assert_eq!(
+            e.focus_summary(),
+            "Focused view: 0 of 6 steps with a picture. New steps start with the focused view off."
+        );
+    }
+
+    #[test]
+    fn turning_the_focused_view_off_and_on_for_the_whole_guide_says_what_it_did_and_each_is_one_undo() {
+        let mut e = editor();
+        let said = e.set_focused_for_all(false).unwrap();
+        assert_eq!(
+            said,
+            "Focused view turned off for 6 steps. They show the whole picture. Undo brings the crops back. New steps will start without it."
+        );
+        assert!(!e.is_focused(), "the open step shows its whole picture too");
+        assert_eq!(e.set_focused_for_all(false).as_deref(), Some("No step has the focused view."));
+        let said = e.set_focused_for_all(true).unwrap();
+        assert_eq!(said, "Focused view turned on for 6 steps. New steps will start with it.");
+        assert!(e.is_focused());
+        e.undo();
+        assert_eq!(
+            e.focus_summary(),
+            "Focused view: 0 of 6 steps with a picture. New steps start with the focused view off."
+        );
+        e.undo();
+        assert_eq!(
+            e.focus_summary(),
+            "Focused view: 6 of 6 steps with a picture. New steps start with the focused view on."
+        );
+        assert!(e.is_focused(), "one undo took back the whole of each change");
+    }
+
+    #[test]
+    fn a_crop_by_hand_is_kept_when_the_focused_view_is_turned_on_and_steps_without_a_click_are_said() {
+        let mut e = editor();
+        let ids: Vec<String> = e.rows().into_iter().map(|r| r.id).collect();
+        // The first step's crop is moved by hand; the second has no click and no crop; the third has a click but no crop.
+        e.move_crop(1, 0);
+        let by_hand = e.selected_step().unwrap().focus.clone();
+        e.session
+            .apply(|d| {
+                for (id, click_gone) in [(&ids[1], true), (&ids[2], false)] {
+                    let step = d.guide.steps.iter_mut().find(|s| s.id == *id).unwrap();
+                    step.focus = None;
+                    if click_gone {
+                        step.click = None;
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+        let said = e.set_focused_for_all(true).unwrap();
+        assert_eq!(
+            said,
+            "Focused view turned on for 1 step. 4 steps already had a crop, which was kept. 1 step has no click to centre on, so it stays whole."
+        );
+        let focus = |id: &str| e.doc().guide.step(id).unwrap().focus.clone();
+        assert_eq!(focus(&ids[0]), by_hand, "the crop moved by hand is kept");
+        assert_eq!(focus(&ids[1]), None, "no click, so it stays whole");
+        assert!(focus(&ids[2]).is_some(), "the usual crop was given");
+        let again = e.set_focused_for_all(true).unwrap();
+        assert_eq!(
+            again,
+            "Every step that can have the focused view already has it. 1 step has no click to centre on, so it stays whole."
+        );
     }
 
     #[test]

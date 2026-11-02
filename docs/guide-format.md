@@ -53,7 +53,7 @@ How to submit an assignment.osguide/
 | `id`, `title`, `createdAt`, `updatedAt`, `nextStepNumber` | Required. |
 | `description` | Optional, default empty. |
 | `language` | Optional, default `en`. The language of the step titles and the exports. |
-| `focusedView` | Optional, default `true`. The default for new steps. Each step's own `focus` decides what it shows. |
+| `focusedView` | Optional, default `true`. The default for new steps: a capture sets it to what the capture was started with, and the editor's "Focused view on for every step" and "off for every step" set it with every step. Each step's own `focus` decides what it shows. |
 | `nextStepNumber` | The number the next new step gets. It only ever goes up, so **a step id is never used twice**, even after a delete, an undo or emptying the trash. It must be above the number of every step in the guide. |
 | `steps` | All the steps, in reading order, as one flat list. |
 
@@ -172,6 +172,13 @@ In the editor, marks are added with a default size (round the click if the step 
 automatic crop: the picture's own shape, 150 percent closer, centred on the click and moved to stay inside the picture (no click,
 no automatic crop). The person can then move it (drag with Space held) or zoom it (never closer than eight times). A crop is always
 kept inside the picture, at least 8 pixels each way. Exports scale every crop to the same width, so a guide's pictures all line up.
+
+The focused view is chosen at three levels: for one step (its `focus`), for the whole guide at once, and as the default for new steps
+(`focusedView`, and the setting "Start new steps with a close-up of the click"). Turning it **on for the whole guide** gives the usual
+crop to every step that has a picture and a click and no crop yet, keeps any crop a person already set (by moving or zooming it), and
+leaves a step with a picture but no click whole (there is nothing to centre on); turning it **off** removes every crop, so every picture
+shows whole, and turning it on again brings back the usual crops (a hand-set crop is not remembered). Either sets `focusedView` too.
+Notes and steps without a picture are never touched.
 
 ## `trash/trash.json`
 

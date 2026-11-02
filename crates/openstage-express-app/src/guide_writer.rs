@@ -44,7 +44,9 @@ impl GuideWriter {
     /// Make a new guide folder inside `parent`. The folder is named from `title` and never replaces one that exists.
     pub fn create(parent: &Path, title: &str, language: &str, marks: MarkOptions) -> Result<GuideWriter, String> {
         let now = utc_now_iso();
-        let guide = Guide::new(&new_guide_id(&now), title, language, &now);
+        let mut guide = Guide::new(&new_guide_id(&now), title, language, &now);
+        // What new steps start with is what was chosen for this capture, and the guide keeps it as its own default.
+        guide.focused_view = marks.focused_view;
         let doc = Document::new(guide);
         let folder = GuideFolder::create(parent, &doc).map_err(|e| e.to_string())?;
         Ok(GuideWriter { folder, session: Session::new(doc), marks })
@@ -155,6 +157,18 @@ mod tests {
         let opened = GuideFolder::open(&path, &|_| false).unwrap();
         assert_eq!(opened.doc.guide.steps.len(), 2);
         assert!(opened.problems.is_empty(), "{:?}", opened.problems);
+    }
+
+    #[test]
+    fn the_guide_keeps_what_new_steps_were_started_with_as_its_own_default_for_the_focused_view() {
+        let dir = tempfile::tempdir().unwrap();
+        let on = GuideWriter::create(dir.path(), "On", "en", MarkOptions::default()).unwrap();
+        assert!(on.doc().guide.focused_view);
+        let off_options = MarkOptions { focused_view: false, ..MarkOptions::default() };
+        let mut off = GuideWriter::create(dir.path(), "Off", "en", off_options).unwrap();
+        assert!(!off.doc().guide.focused_view);
+        let id = off.add(&captured("Click \"Save\"", 1)).unwrap();
+        assert!(off.doc().guide.step(&id).unwrap().focus.is_none(), "and so a step is made without a crop");
     }
 
     #[test]
