@@ -1166,6 +1166,8 @@ const OTHER_QUALITY: &str = "JPG quality, another number typed in the box";
 const DOCUMENT_PICTURES: &str = "Pictures inside the web page, Word, PowerPoint and PDF";
 const DOCUMENTS_PNG: &str = "Pictures inside the web page, Word, PowerPoint and PDF: PNG, every pixel kept";
 const DOCUMENTS_JPG: &str = "Pictures inside the web page, Word, PowerPoint and PDF: JPG, smaller files";
+const DOCUMENTS_SMALLER: &str =
+    "Pictures inside the web page, Word, PowerPoint and PDF: whichever is smaller for each picture, PNG or JPG";
 const NOT_A_QUALITY: &str = "Type a whole number from 1 to 100 for the quality, such as 80.";
 const NOT_A_COUNT: &str = "Type a whole number from 1 to 9999 for the number of steps, such as 5.";
 
@@ -1227,7 +1229,7 @@ fn the_export_screen_offers_widths_qualities_and_a_preview_each_named_for_what_i
     h.find(Role::Heading, "Quality of the JPG pictures");
     h.find(Role::Heading, "Try it on a few steps first");
     assert!(is_on(&h, Role::RadioButton, DOCUMENTS_PNG), "documents keep PNG pictures to begin with");
-    assert!(!is_on(&h, Role::RadioButton, DOCUMENTS_JPG));
+    assert!(!is_on(&h, Role::RadioButton, DOCUMENTS_JPG) && !is_on(&h, Role::RadioButton, DOCUMENTS_SMALLER));
     // Nothing is wrong, so no message about a number shows.
     assert!(!h.has(Role::Label, NOT_A_QUALITY) && !h.has(Role::Label, NOT_A_COUNT));
     // They sit between the formats and the folder, in reading order.
@@ -1239,6 +1241,7 @@ fn the_export_screen_offers_widths_qualities_and_a_preview_each_named_for_what_i
         at(Role::Heading, DOCUMENT_PICTURES),
         at(Role::RadioButton, DOCUMENTS_PNG),
         at(Role::RadioButton, DOCUMENTS_JPG),
+        at(Role::RadioButton, DOCUMENTS_SMALLER),
         at(Role::Heading, "Quality of the JPG pictures"),
         at(Role::RadioButton, "JPG quality 100, best picture"),
         at(Role::TextInput, "Quality, 1 to 100"),
@@ -1470,7 +1473,7 @@ fn the_picture_choices_are_kept_in_the_settings_and_a_preview_is_not() {
 }
 
 #[test]
-fn jpg_inside_documents_is_chosen_with_the_keyboard_and_the_two_choices_exclude_each_other() {
+fn the_pictures_inside_documents_are_chosen_with_the_keyboard_and_the_three_choices_exclude_each_other() {
     let dir = tempfile::tempdir().unwrap();
     let (mut h, _) = export_harness(dir.path(), None);
     h.invoke(Role::Button, "Export");
@@ -1480,18 +1483,24 @@ fn jpg_inside_documents_is_chosen_with_the_keyboard_and_the_two_choices_exclude_
         h.key(Key::Tab, NO_MODS);
         seen.extend(h.focused_words());
     }
-    for name in [DOCUMENTS_PNG, DOCUMENTS_JPG] {
+    for name in [DOCUMENTS_PNG, DOCUMENTS_JPG, DOCUMENTS_SMALLER] {
         assert!(seen.iter().any(|s| s == name), "the keyboard never reached {name:?}: {seen:?}");
     }
-    h.focus_on(Role::RadioButton, DOCUMENTS_JPG);
-    h.key(Key::Space, NO_MODS);
-    assert!(is_on(&h, Role::RadioButton, DOCUMENTS_JPG) && !is_on(&h, Role::RadioButton, DOCUMENTS_PNG));
-    assert_eq!(h.focused_words().as_deref(), Some(DOCUMENTS_JPG), "the keyboard stays where it was");
-    assert!(h.app.export.documents_jpg);
-    h.focus_on(Role::RadioButton, DOCUMENTS_PNG);
-    h.key(Key::Space, NO_MODS);
-    assert!(is_on(&h, Role::RadioButton, DOCUMENTS_PNG) && !is_on(&h, Role::RadioButton, DOCUMENTS_JPG));
-    assert!(!h.app.export.documents_jpg);
+    let all = [
+        (DOCUMENTS_PNG, DocumentPicturesChoice::Png),
+        (DOCUMENTS_JPG, DocumentPicturesChoice::Jpg),
+        (DOCUMENTS_SMALLER, DocumentPicturesChoice::Smaller),
+    ];
+    // Each one in turn, from the keyboard: it alone is on, the keyboard stays where it was, and the screen holds what was chosen.
+    for (name, choice) in [all[1], all[2], all[0], all[2], all[1]] {
+        h.focus_on(Role::RadioButton, name);
+        h.key(Key::Space, NO_MODS);
+        for (other, _) in all {
+            assert_eq!(is_on(&h, Role::RadioButton, other), other == name, "{other:?} after choosing {name:?}");
+        }
+        assert_eq!(h.focused_words().as_deref(), Some(name), "the keyboard stays where it was");
+        assert_eq!(h.app.export.documents, choice);
+    }
 }
 
 #[test]
@@ -1527,23 +1536,56 @@ fn jpg_chosen_on_the_screen_decides_what_the_web_page_and_word_hold_and_png_is_t
 }
 
 #[test]
+fn whichever_is_smaller_chosen_on_the_screen_reaches_the_export_and_keeps_the_flat_example_screens_as_png() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::RadioButton, DOCUMENTS_SMALLER);
+    assert_eq!(h.app.export.documents, DocumentPicturesChoice::Smaller);
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 2 formats to "), "{}", h.status());
+    let first = files_in(&dir.path().join("How to submit an assignment")).remove(0);
+    let page = {
+        let file = files_in(&first.join("html")).into_iter().find(|p| p.to_string_lossy().ends_with(".html")).unwrap();
+        std::fs::read(file).unwrap()
+    };
+    let holds = |bytes: &[u8], words: &str| bytes.windows(words.len()).any(|w| w == words.as_bytes());
+    // The example guide's screens are big flat areas, which are smaller as PNG, so nothing is turned into a JPG; the mixed case, with
+    // a busy picture that is, is tried in export_run.rs.
+    assert!(holds(&page, "data:image/png;base64,") && !holds(&page, "data:image/jpeg"));
+}
+
+#[test]
 fn jpg_inside_documents_is_kept_in_the_settings_and_comes_back_chosen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("settings.json");
     let mut h = picture_harness(dir.path(), AppSettings::default());
     h.invoke(Role::Button, "Export");
-    assert!(!h.app.export.documents_jpg && !AppSettings::default().export_documents_jpg, "PNG to begin with");
+    let png = DocumentPicturesChoice::Png;
+    assert!(
+        h.app.export.documents == png && AppSettings::default().export_document_pictures == png,
+        "PNG to begin with"
+    );
     h.invoke(Role::RadioButton, DOCUMENTS_JPG);
     let (kept, note) = crate::settings::load(&path);
     assert!(note.is_none());
-    assert!(kept.export_documents_jpg, "saved the moment it was chosen");
-    assert!(std::fs::read_to_string(&path).unwrap().contains("\"exportDocumentsJpg\": true"));
+    assert_eq!(kept.export_document_pictures, DocumentPicturesChoice::Jpg, "saved the moment it was chosen");
+    assert!(std::fs::read_to_string(&path).unwrap().contains("\"exportDocumentPictures\": \"jpg\""));
     let mut again = picture_harness(dir.path(), kept);
     again.invoke(Role::Button, "Export");
     assert!(is_on(&again, Role::RadioButton, DOCUMENTS_JPG));
-    assert!(!is_on(&again, Role::RadioButton, DOCUMENTS_PNG));
-    again.invoke(Role::RadioButton, DOCUMENTS_PNG);
-    assert!(!crate::settings::load(&path).0.export_documents_jpg, "and saved again when it is put back");
+    assert!(!is_on(&again, Role::RadioButton, DOCUMENTS_PNG) && !is_on(&again, Role::RadioButton, DOCUMENTS_SMALLER));
+    // Whichever is smaller is kept and comes back too.
+    again.invoke(Role::RadioButton, DOCUMENTS_SMALLER);
+    let (kept, _) = crate::settings::load(&path);
+    assert_eq!(kept.export_document_pictures, DocumentPicturesChoice::Smaller);
+    let mut third = picture_harness(dir.path(), kept);
+    third.invoke(Role::Button, "Export");
+    assert!(is_on(&third, Role::RadioButton, DOCUMENTS_SMALLER));
+    assert!(!is_on(&third, Role::RadioButton, DOCUMENTS_JPG) && !is_on(&third, Role::RadioButton, DOCUMENTS_PNG));
+    third.invoke(Role::RadioButton, DOCUMENTS_PNG);
+    assert_eq!(crate::settings::load(&path).0.export_document_pictures, png, "and saved again when it is put back");
 }
 
 #[test]
@@ -1567,7 +1609,7 @@ fn a_setting_that_is_not_on_offer_is_shown_as_the_nearest_choice_that_is() {
 
 // ---- the Settings screen
 
-use crate::settings::{AppSettings, Appearance, KeyChoice, ModeChoice};
+use crate::settings::{AppSettings, Appearance, DocumentPicturesChoice, KeyChoice, ModeChoice};
 
 /// A window that saves its settings in `dir`, with the folder dialog answering `chosen`.
 fn settings_harness(dir: &std::path::Path, chosen: Option<PathBuf>) -> Harness {

@@ -149,6 +149,21 @@ impl HomeSort {
     }
 }
 
+/// How the web page, Word, PowerPoint and PDF keep their pictures. A value in the settings file that this program does not know means
+/// PNG, never a settings file that cannot be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentPicturesChoice {
+    /// Every picture as a JPG (smaller files for ordinary screenshots, a little lost).
+    Jpg,
+    /// Each picture as the JPG when that is smaller and as the PNG when it is not.
+    Smaller,
+    /// Every pixel as it is. Last in the list, because serde takes any other value to be this one.
+    #[default]
+    #[serde(other)]
+    Png,
+}
+
 /// Which cue sounds are on (spec 8.9: all off to begin with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -215,8 +230,8 @@ pub struct AppSettings {
     pub export_jpg_quality: u32,
     /// How many steps a preview has. Whether to make a preview is not kept: a preview must never be made by accident.
     pub export_preview_steps: usize,
-    /// Whether the web page, Word, PowerPoint and PDF keep their pictures as JPG (smaller files) instead of PNG.
-    pub export_documents_jpg: bool,
+    /// How the web page, Word, PowerPoint and PDF keep their pictures: PNG, JPG, or whichever is smaller for each picture.
+    pub export_document_pictures: DocumentPicturesChoice,
     /// Fields this program does not know, kept and written back.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -250,7 +265,7 @@ impl Default for AppSettings {
             export_picture_width: DEFAULT_IMAGE_WIDTH,
             export_jpg_quality: u32::from(DEFAULT_JPEG_QUALITY),
             export_preview_steps: DEFAULT_PREVIEW_STEPS,
-            export_documents_jpg: false,
+            export_document_pictures: DocumentPicturesChoice::Png,
             extra: Map::new(),
         }
     }
@@ -588,12 +603,16 @@ mod tests {
         let path = dir.path().join("settings.json");
         let s = AppSettings::default();
         assert_eq!((s.export_picture_width, s.export_jpg_quality, s.export_preview_steps), (1280, 90, 5));
-        assert!(!s.export_documents_jpg, "documents keep PNG pictures until JPG is chosen");
+        assert_eq!(
+            s.export_document_pictures,
+            DocumentPicturesChoice::Png,
+            "documents keep PNG pictures until JPG is chosen"
+        );
         let changed = AppSettings {
             export_picture_width: 800,
             export_jpg_quality: 77,
             export_preview_steps: 12,
-            export_documents_jpg: true,
+            export_document_pictures: DocumentPicturesChoice::Jpg,
             ..AppSettings::default()
         };
         save(&path, &changed).unwrap();
@@ -602,7 +621,7 @@ mod tests {
             "\"exportPictureWidth\": 800",
             "\"exportJpgQuality\": 77",
             "\"exportPreviewSteps\": 12",
-            "\"exportDocumentsJpg\": true",
+            "\"exportDocumentPictures\": \"jpg\"",
         ] {
             assert!(text.contains(words), "{words} in {text}");
         }
@@ -610,6 +629,34 @@ mod tests {
         let (back, note) = load(&path);
         assert_eq!(back, changed);
         assert!(note.is_none());
+    }
+
+    #[test]
+    fn each_choice_for_the_pictures_inside_documents_is_kept_under_its_own_word() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for (choice, word) in [
+            (DocumentPicturesChoice::Png, "png"),
+            (DocumentPicturesChoice::Jpg, "jpg"),
+            (DocumentPicturesChoice::Smaller, "smaller"),
+        ] {
+            let settings = AppSettings { export_document_pictures: choice, ..AppSettings::default() };
+            save(&path, &settings).unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(text.contains(&format!("\"exportDocumentPictures\": \"{word}\"")), "{word} in {text}");
+            assert_eq!(load(&path).0.export_document_pictures, choice);
+        }
+    }
+
+    #[test]
+    fn a_word_for_the_pictures_inside_documents_that_this_program_does_not_know_means_png_and_costs_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, br#"{"showCursor": false, "exportDocumentPictures": "webp"}"#).unwrap();
+        let (s, note) = load(&path);
+        assert!(note.is_none(), "{note:?}");
+        assert!(!s.show_cursor, "the other settings are kept");
+        assert_eq!(s.export_document_pictures, DocumentPicturesChoice::Png);
     }
 
     #[test]

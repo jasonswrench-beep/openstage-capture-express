@@ -17,10 +17,14 @@ use openstage_express_export::json::export_json;
 use openstage_express_export::markdown::export_markdown;
 use openstage_express_export::pdf::{export_pdf, PdfOptions, PdfRenderer};
 use openstage_express_export::picture::PictureSource;
-use openstage_express_export::plan::{plan as make_plan, ExportOptions, Plan, Preview, DEFAULT_IMAGE_WIDTH};
+use openstage_express_export::plan::{
+    plan as make_plan, DocumentPictures, ExportOptions, Plan, Preview, DEFAULT_IMAGE_WIDTH,
+};
 use openstage_express_export::pptx::{export_pptx, PptxOptions};
 use openstage_express_export::share::{make_copy, CopyOptions};
 use openstage_express_export::{Export, OutFile};
+
+use crate::settings::DocumentPicturesChoice;
 
 /// One kind of export the person can choose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -160,8 +164,9 @@ pub struct PictureChoices {
     pub jpg_quality: u8,
     /// Only the first this many steps (a preview), or all of them.
     pub first_steps: Option<usize>,
-    /// Whether the web page, Word, PowerPoint and PDF keep their pictures as JPG (smaller files) instead of PNG (every pixel as it is).
-    pub documents_jpg: bool,
+    /// How the web page, Word, PowerPoint and PDF keep their pictures: PNG (every pixel as it is), JPG (smaller files), or whichever is
+    /// smaller for each picture.
+    pub documents: DocumentPicturesChoice,
 }
 
 impl Default for PictureChoices {
@@ -170,7 +175,7 @@ impl Default for PictureChoices {
             width: DEFAULT_IMAGE_WIDTH,
             jpg_quality: DEFAULT_JPEG_QUALITY,
             first_steps: None,
-            documents_jpg: false,
+            documents: DocumentPicturesChoice::Png,
         }
     }
 }
@@ -178,13 +183,14 @@ impl Default for PictureChoices {
 impl PictureChoices {
     /// What the plan of the export is made with.
     pub fn export_options(&self) -> ExportOptions {
+        let quality = self.jpg_quality;
         ExportOptions {
             image_width: self.width,
             first_steps: self.first_steps,
-            document_pictures: if self.documents_jpg {
-                ImageFormat::Jpeg { quality: self.jpg_quality }
-            } else {
-                ImageFormat::Png
+            document_pictures: match self.documents {
+                DocumentPicturesChoice::Png => DocumentPictures::Png,
+                DocumentPicturesChoice::Jpg => DocumentPictures::Jpg { quality },
+                DocumentPicturesChoice::Smaller => DocumentPictures::Smaller { quality },
             },
         }
     }
@@ -444,7 +450,7 @@ pub fn spawn_copy(job: CopyJob) -> Receiver<Result<CopyReport, String>> {
 mod tests {
     use super::*;
     use openstage_capture_render::BlockText;
-    use openstage_express_export::demo::demo;
+    use openstage_express_export::demo::{busy_then_plain, demo, Demo};
     use openstage_express_export::pdf::{PrintPage, RenderError};
     use openstage_express_export::plan::{plan, ExportOptions};
 
@@ -706,7 +712,10 @@ mod tests {
     }
 
     fn run_with(choices: PictureChoices, formats: &[Format]) -> (tempfile::TempDir, Report) {
-        let d = demo();
+        run_guide(demo(), choices, formats)
+    }
+
+    fn run_guide(d: Demo, choices: PictureChoices, formats: &[Format]) -> (tempfile::TempDir, Report) {
         let dir = tempfile::tempdir().unwrap();
         let job = Job {
             guide: d.document.guide.clone(),
@@ -723,7 +732,8 @@ mod tests {
     fn jpg_pictures_inside_documents_reach_the_web_page_word_and_powerpoint_and_not_the_other_formats() {
         let formats = [Format::Html, Format::Word, Format::PowerPoint, Format::Images, Format::Markdown];
         let (png_run, png_report) = run_with(PictureChoices::default(), &formats);
-        let jpg_choices = PictureChoices { documents_jpg: true, jpg_quality: 70, ..Default::default() };
+        let jpg_choices =
+            PictureChoices { documents: DocumentPicturesChoice::Jpg, jpg_quality: 70, ..Default::default() };
         let (jpg_run, jpg_report) = run_with(jpg_choices, &formats);
         assert!(png_report.warnings.is_empty() && jpg_report.warnings.is_empty(), "{:?}", jpg_report.warnings);
         // The usual run keeps PNG inside, as it always has.
@@ -756,7 +766,8 @@ mod tests {
     #[test]
     fn the_jpg_quality_chosen_decides_the_size_of_the_pictures_inside_documents() {
         let page_size = |quality: u8| -> usize {
-            let choices = PictureChoices { documents_jpg: true, jpg_quality: quality, ..Default::default() };
+            let choices =
+                PictureChoices { documents: DocumentPicturesChoice::Jpg, jpg_quality: quality, ..Default::default() };
             let (run, _) = run_with(choices, &[Format::Html]);
             the_file(run.path(), Format::Html, ".html").len()
         };
@@ -766,7 +777,8 @@ mod tests {
 
     #[test]
     fn a_preview_with_jpg_pictures_inside_documents_holds_only_its_own_steps() {
-        let choices = PictureChoices { documents_jpg: true, first_steps: Some(2), ..Default::default() };
+        let choices =
+            PictureChoices { documents: DocumentPicturesChoice::Jpg, first_steps: Some(2), ..Default::default() };
         let (run, report) = run_with(choices, &[Format::Html, Format::PowerPoint]);
         assert!(report.preview.is_some_and(|p| p.is_cut()));
         let page = the_file(run.path(), Format::Html, ".html");
@@ -781,19 +793,49 @@ mod tests {
         let usual = PictureChoices::default();
         assert_eq!((usual.width, usual.jpg_quality, usual.first_steps), (1280, 90, None));
         assert_eq!(usual.export_options(), ExportOptions::default());
-        assert!(!usual.documents_jpg, "documents keep PNG pictures unless JPG is asked for");
+        assert_eq!(usual.documents, DocumentPicturesChoice::Png, "documents keep PNG pictures unless JPG is asked for");
         let asked = PictureChoices { width: 800, jpg_quality: 40, first_steps: Some(7), ..Default::default() };
         assert_eq!(
             asked.export_options(),
             ExportOptions { image_width: 800, first_steps: Some(7), ..ExportOptions::default() },
             "the JPG quality alone does not turn JPG on inside documents"
         );
-        let jpg = PictureChoices { jpg_quality: 40, documents_jpg: true, ..Default::default() };
+        let jpg = PictureChoices { jpg_quality: 40, documents: DocumentPicturesChoice::Jpg, ..Default::default() };
         assert_eq!(
             jpg.export_options(),
-            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 40 }, ..ExportOptions::default() },
+            ExportOptions { document_pictures: DocumentPictures::Jpg { quality: 40 }, ..ExportOptions::default() },
             "one quality for the JPG files and the JPG pictures inside documents"
         );
+        let smaller =
+            PictureChoices { jpg_quality: 40, documents: DocumentPicturesChoice::Smaller, ..Default::default() };
+        assert_eq!(
+            smaller.export_options(),
+            ExportOptions { document_pictures: DocumentPictures::Smaller { quality: 40 }, ..ExportOptions::default() },
+            "whichever is smaller takes the same quality for its JPG"
+        );
+    }
+
+    #[test]
+    fn whichever_is_smaller_gives_each_picture_the_format_that_is_smaller_in_the_web_page_word_and_powerpoint() {
+        let formats = [Format::Html, Format::Word, Format::PowerPoint, Format::Images];
+        let choices = PictureChoices { width: 320, documents: DocumentPicturesChoice::Smaller, ..Default::default() };
+        let (run, report) = run_guide(busy_then_plain(), choices, &formats);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        // The busy picture is the first, the plain one the second.
+        let page = the_file(run.path(), Format::Html, ".html");
+        let text = String::from_utf8_lossy(&page);
+        assert_eq!(text.matches("<img src=\"data:image/jpeg;base64,").count(), 1, "one JPG in the page");
+        assert_eq!(text.matches("<img src=\"data:image/png;base64,").count(), 1, "and one PNG");
+        assert!(
+            text.find("data:image/jpeg").unwrap() < text.find("data:image/png").unwrap(),
+            "the JPG is the first, busy, picture"
+        );
+        let word = the_file(run.path(), Format::Word, ".docx");
+        assert!(holds(&word, "word/media/image1.jpg") && holds(&word, "word/media/image2.png"));
+        let slides = the_file(run.path(), Format::PowerPoint, ".pptx");
+        assert!(holds(&slides, "ppt/media/image1.jpg") && holds(&slides, "ppt/media/image2.png"));
+        // The folder of pictures is PNG either way.
+        assert_eq!(file_names(&run.path().join("images")), ["step-01.png", "step-02.png"]);
     }
 
     fn report_with(preview: Option<Preview>) -> Report {

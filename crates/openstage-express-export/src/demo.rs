@@ -282,9 +282,54 @@ pub fn demo() -> Demo {
     Demo { document: doc, pictures }
 }
 
+/// A busy picture: a smooth sweep of colour with a little noise, as a photograph or a crowded screen has. A PNG cannot squeeze it much,
+/// and a JPG makes it a good deal smaller. The same every time.
+pub fn busy_picture(width: u32, height: u32) -> Picture {
+    let mut seed = 12_345_u32;
+    let mut bgra = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = ((seed >> 24) % 13) as i32 - 6;
+            let level = |base: u32| (base as i32 + noise).clamp(0, 255) as u8;
+            bgra.extend_from_slice(&[level(x * 255 / width), level(y * 255 / height), level(128), 255]);
+        }
+    }
+    Picture::new(width, height, bgra)
+}
+
+/// A guide of two steps with pictures 320 by 240 pixels: "Busy", whose picture is smaller as a JPG, and "Plain", one flat colour,
+/// whose picture is smaller as a PNG. For trying what happens when a guide holds both kinds.
+pub fn busy_then_plain() -> Demo {
+    let mut doc = Document::new(Guide::new("g-mixed", "Busy then plain", "en", NOW));
+    let mut pictures = MemoryPictures::default();
+    pictures.0.insert("images/busy.png".to_string(), busy_picture(320, 240));
+    pictures.0.insert("images/plain.png".to_string(), Picture::solid(320, 240, Rgb(30, 90, 160)));
+    for (title, file) in [("Busy", "images/busy.png"), ("Plain", "images/plain.png")] {
+        let draft = StepDraft::with_picture(title, StepImage::new(file, 320, 240));
+        doc.add_step(draft, Position::End, NOW).expect("the steps are well formed");
+    }
+    Demo { document: doc, pictures }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_busy_then_plain_guide_is_sound_and_the_same_every_time() {
+        let (a, b) = (busy_then_plain(), busy_then_plain());
+        assert!(a.document.guide.problems().is_empty(), "{:?}", a.document.guide.problems());
+        assert_eq!(a.document.guide.steps.len(), 2);
+        assert!(a
+            .document
+            .guide
+            .steps
+            .iter()
+            .all(|s| s.image.as_ref().is_some_and(|i| a.pictures.0.contains_key(&i.file))));
+        assert_eq!(a.document, b.document);
+        assert_eq!(a.pictures.0, b.pictures.0);
+    }
 
     #[test]
     fn the_demo_guide_is_sound_and_has_what_the_exports_need_to_show_off() {

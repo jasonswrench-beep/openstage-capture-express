@@ -488,10 +488,10 @@ mod tests {
     #[test]
     fn jpg_pictures_are_inside_the_print_page_as_jpg_and_the_png_page_has_none() {
         use crate::encoding::base64_encode;
-        use crate::images::ImageFormat;
+        use crate::plan::DocumentPictures;
         let d = demo();
         let options =
-            ExportOptions { document_pictures: ImageFormat::Jpeg { quality: 80 }, ..ExportOptions::default() };
+            ExportOptions { document_pictures: DocumentPictures::Jpg { quality: 80 }, ..ExportOptions::default() };
         let p = plan(&d.document.guide, &d.pictures, &BlockText, &options);
         let jpg_page = print_page(&p, &PdfOptions::default());
         let png_page = page(&PdfOptions::default());
