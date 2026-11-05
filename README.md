@@ -461,7 +461,7 @@ For developers, in a shell: `cargo fmt --all -- --check`, `cargo clippy --worksp
 
 `assets/icon` holds the icon pack Jason supplied on 2026-10-31: a navy tile with an indigo viewfinder and a rounded lowercase e.
 It replaces the earlier capital E icon, which is no longer used. The SVG's title text contains an em dash; the file is kept
-exactly as supplied. The pack's `README.txt` says it was checked without a vector drawing program or Windows themselves, so how the `.ico`
+exactly as supplied. The pack's `README.txt` says it was checked without a vector drawing program or Windows itself, so how the `.ico`
 looks in Windows, and how the e reads at 16 pixels, are still to be checked by eye.
 
 ## Licence

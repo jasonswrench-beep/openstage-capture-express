@@ -311,7 +311,7 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 - [ ] Open the PDF from `EXPORT DEMO.bat` (the `pdf` folder) in a desktop PDF reader and in Edge. It has been looked at only as pictures drawn
       by Windows' own PDF renderer and read back with a separate program (pypdf), on this PC. Check the type, that the contents
       entries are links that jump to their step, that the pictures are sharp, and that "Page 1 of 4" sits at the bottom right.
-- [ ] Run an accessibility checker you use on the PDF (a desktop PDF program's Accessibility Check, or PAC). The PDF is tagged (language, headings,
+- [ ] Run an accessibility checker you use on the PDF (a desktop PDF accessibility checker or a PDF/UA validator). The PDF is tagged (language, headings,
       lists, links, alt text, bookmarks) but no checker has been run. Expect the page numbers to be reported as untagged content: the
       engine draws them in the margin and does not tag them (the export warns about this).
 - [ ] Read the PDF with a screen reader (NVDA or Narrator in a desktop PDF reader or Edge): headings, the contents links, and the picture
