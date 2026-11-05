@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The JSON export (spec section 7.4): a flat file for other programs, with the pictures in a folder beside it.
 //!
-//! It is not the guide's own file (`guide.json`), which is for Express. Field names follow ones already in public use
-//! by step-guide programs for the same meanings (`indexString`, `parentId`, `screenshotRelativePath`), so a program that reads one can
-//! read this with little change. That is a convenience, not a promise of compatibility.
+//! It is not the guide's own file (`guide.json`), which is for Express. Field names are plain, descriptive ones
+//! (`indexString`, `parentId`, `screenshotRelativePath`), so another program can read this with little work. That is a convenience,
+//! not a promise of compatibility.
 //!
 //! What is left out on purpose: the text typed into a field (it appears only as the step's title), the click position,
 //! the control and the program (they are for editing), and anything private.
