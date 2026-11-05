@@ -1,5 +1,7 @@
 # OpenStage Capture Express
 
+[Roadmap & Feature Requests](https://app.productbridge.io/widget/784db895-cb64-45f4-9bde-4645df4aa083?tab=roadmap)
+
 Free, open-source Windows program that turns what a person does on screen into a clean step-by-step guide: a picture for each
 step with a marker where the click was, a title already written (such as `Click "Save"`), light editing, and export. It is meant
 to be as easy to use as a step-guide program, with no account and no network. Licence: Apache-2.0. Written in Rust.
