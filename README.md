@@ -4,7 +4,7 @@
 
 Free, open-source Windows program that turns what a person does on screen into a clean step-by-step guide: a picture for each
 step with a marker where the click was, a title already written (such as `Click "Save"`), light editing, and export. It is meant
-to be as easy to use as a step-guide program, with no account and no network. Licence: Apache-2.0. Written in Rust.
+to be straightforward to use, with no account and no network. Licence: Apache-2.0. Written in Rust.
 
 It is a sibling of OpenStage Capture (the recorder inside OpenStage Author) and reuses its design and code, but it is its own
 small program with its own window.
@@ -403,8 +403,7 @@ logged key by key, descriptions are plain text with a small Markdown subset, the
 English, German and French, and the link to OpenStage Author, REA and signing stay later decisions. Anything the spec proposed that
 the program does not yet do is still to build, not to ask about again. (Changing the hotkeys and the cue sounds were the first of
 those to be built after that decision.)
-a step-guide program is installed on Jason's computer (`C:\Program Files\a step-guide program`) and is the reference program; its behaviour may be looked at
-there, but never its code, templates, strings or artwork.
+Use an original design and implementation.
 
 ## Layout on every computer
 
@@ -451,7 +450,7 @@ TESTING-TODO.md                 what only a person can check
   whole guide there is no such button: it is moved to a `Trash` folder and the person deletes it in Explorer). An
   export never replaces a file that is already there.
 - The format is the source of truth: change `docs/guide-format.md` in the same commit as any code that reads or writes it.
-- a step-guide program is commercial. Use facts and behaviour only, never its code, templates, strings, artwork or file format.
+- Use original code, templates, strings, artwork and file formats.
 - Anything Jason runs is a double-clickable `.bat`. Never say something works that has only compiled.
 
 For developers, in a shell: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,

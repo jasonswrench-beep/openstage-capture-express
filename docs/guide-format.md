@@ -370,7 +370,7 @@ ships with Windows 11; Express does not copy any of it. If it is not installed, 
 
 ### The JSON export
 
-Not the guide's own file: a flatter one for other programs. Field names follow the ones a step-guide program documents publicly for the same
+Not the guide's own file: a flatter one for other programs. Field names describe the same
 meanings, as a convenience and not a promise of compatibility. `exportVersion` changes when a field is renamed or removed.
 
 ```json

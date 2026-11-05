@@ -20,8 +20,8 @@ milestones are built; tick an item (and say on which PC and when) once it has be
 - [ ] Have a German speaker and a French speaker read the titles in `crates/openstage-express-core/src/titles.rs`. The spec proposed
       most of them; the ones for a middle click, for "here" with any verb but Click, and for "Type here" are this program's own
       proposals.
-- [ ] Compare with a step-guide program on the same program (a step-guide program is installed on Jason's PC): does it say Select for dropdowns and radio
-      buttons, Click for check boxes, and Type for a field you type in? Only its behaviour may be compared, never its code.
+- [ ] Check the generated wording in a sample program. Does it say Select for dropdowns and radio
+      buttons, Click for check boxes, and Type for a field you type in?
 - [ ] Say whether these choices, where the spec is silent, are right (they are listed in the comment at the top of
       `builder.rs`): a plain click waits half a second in case it becomes a double-click; Escape ends a typing step like Enter and
       Tab; typing without a click first still makes a Type step, named from the focused field; any click, even one that is not
@@ -40,7 +40,7 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       "stop without typing Y" branches were tried through a shell; the download itself (about 70 MB from GitHub with Git) has not been
       run. It may ask for a GitHub sign-in if the repository is private.
 - [ ] The automatic focused view is 150 percent closer, centred on the click. Does that feel right on your programs? (The
-      percentage is a constant, `DEFAULT_ZOOM_PERCENT` in `focus.rs`; a step-guide program's manual does not give its own number.)
+      percentage is a constant, `DEFAULT_ZOOM_PERCENT` in `focus.rs`.)
 
 ## Milestone M4 (exports)
 
