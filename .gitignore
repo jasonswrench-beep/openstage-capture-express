@@ -14,3 +14,12 @@ clicks-test-output/
 pack-log.txt
 dist/
 installer-log.txt
+
+# Local AI-assistant files and credentials: never commit these
+.claude/
+CLAUDE.local.md
+.env
+.env.*
+*.pem
+*.key
+!.env.example
