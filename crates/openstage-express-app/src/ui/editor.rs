@@ -1,81 +1,184 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The Editor screen (spec sections 4.2 and 9): the steps list on the left, the step's picture in the middle, its details on the
 //! right. Every control has a name and a keyboard route, the picture has its words, and what happens is said in the status line.
+//! The navy bar above (Back to guides, Undo, Redo, Export) and the menus are the window's (`shell.rs`); every command here is in a
+//! menu too (`commands.rs`), and [`run`] does it the same way wherever it was chosen.
 //!
 //! Keys: Ctrl+Z and Ctrl+Y undo and redo (while a text box has the keyboard they belong to the box); Alt+Up and Alt+Down move
 //! the step; Ctrl+Shift+Up and Ctrl+Shift+Down choose the step before or after; Ctrl+Shift+Delete deletes the step; F2 goes to
 //! the title; Up and Down in the list choose a step. To choose several steps: Ctrl+click adds or takes out one, Shift+click or
-//! Shift+Up and Shift+Down chooses a run, Ctrl+A or the button chooses every step; the buttons at the right then skip or delete them
-//! all together (and move them up or down, with Alt+Up and Alt+Down or the buttons, or duplicate them), and one undo takes the
-//! change back. Deleted steps are kept with the guide: the Deleted steps button, there once
-//! something is deleted, opens the list where each can be put back.
+//! Shift+Up and Shift+Down chooses a run, Ctrl+A or Choose all steps chooses every step; the buttons at the right then skip or
+//! delete them all together (and move them up or down, with Alt+Up and Alt+Down or the buttons, or duplicate them), and one undo
+//! takes the change back. Deleted steps are kept with the guide: the Deleted steps button, there once something is deleted, opens
+//! the list where each can be put back.
 
 use eframe::egui::{self, Key, Modifiers, RichText};
 
 use openstage_express_core::marks::{self, Tool, COLOURS, WIDTHS};
 use openstage_express_core::model::AnnotationKind;
 
+use super::commands::{self, Command};
 use super::editor_state::EditorState;
+use super::icon::{self, UiIcon};
+use super::menubar::{self, Entry, Line};
+use super::shell;
 use super::widgets::{self, palette, Status};
 
 /// Whether the person left the editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Leave {
     Stay,
-    ToHome,
-    ToExport,
     /// To the list of deleted steps, where each can be put back.
     ToDeleted,
+}
+
+/// Whether one of the editor's commands can be used now, and whether it is ticked; `None` for a command that is not the editor's.
+pub fn command_state(state: &EditorState, command: Command) -> Option<(bool, bool)> {
+    let chosen = state.chosen_count();
+    let one = chosen == 1 && state.selected_step().is_some();
+    let rows = state.rows().len();
+    let has_steps = !state.doc().guide.steps.is_empty();
+    Some(match command {
+        Command::Undo => (state.can_undo(), false),
+        Command::Redo => (state.can_redo(), false),
+        Command::ChooseAll => (rows > 1 && chosen < rows, false),
+        Command::ChooseOne => (chosen > 1, false),
+        Command::DeletedSteps => (state.deleted_count() > 0, false),
+        Command::AddStep => (true, false),
+        Command::DuplicateStep | Command::DeleteStep | Command::MoveUp | Command::MoveDown => (chosen >= 1, false),
+        Command::PreviousStep | Command::NextStep => (rows > 1, false),
+        Command::EditTitle => (one, false),
+        Command::SkipInExport => (state.selected_step().is_some(), state.selected_step().is_some_and(|s| s.skipped)),
+        Command::FocusedView => (one && state.can_focus(), state.is_focused()),
+        Command::AddMark(_) => (one && state.picture_size().is_some(), false),
+        Command::DeleteMark => (one && state.selected_mark().is_some(), false),
+        Command::FocusedAllOn | Command::FocusedAllOff => (has_steps, false),
+        _ => return None,
+    })
+}
+
+/// Do one of the editor's commands, from a menu, the command search or a button, and say what was done. Returns where to go,
+/// for the commands that leave the editor.
+pub fn run(state: &mut EditorState, status: &mut Status, command: Command) -> Leave {
+    if command_state(state, command).is_some_and(|(usable, _)| !usable) {
+        return Leave::Stay;
+    }
+    match command {
+        Command::Undo => status.say_opt(state.undo()),
+        Command::Redo => status.say_opt(state.redo()),
+        Command::ChooseAll => {
+            status.say_opt(state.choose_all());
+            state.focus_row_next = true;
+        }
+        Command::ChooseOne => {
+            status.say_opt(state.choose_only_selected());
+            state.focus_row_next = true;
+        }
+        Command::DeletedSteps => {
+            state.commit_pending();
+            return Leave::ToDeleted;
+        }
+        Command::AddStep => status.say_opt(state.add_step()),
+        Command::DuplicateStep => status.say_opt(state.duplicate_selected()),
+        Command::DeleteStep => {
+            status.say_opt(if state.chosen_count() > 1 { state.delete_chosen() } else { state.delete_selected() });
+            state.focus_row_next = true;
+        }
+        Command::MoveUp => status.say_opt(state.move_selected(-1)),
+        Command::MoveDown => status.say_opt(state.move_selected(1)),
+        Command::PreviousStep | Command::NextStep => {
+            if let Some(id) = state.neighbour(if command == Command::PreviousStep { -1 } else { 1 }) {
+                state.select(&id);
+                state.focus_row_next = true;
+                status.say_opt(state.selected_row().map(|r| r.label()));
+            }
+        }
+        Command::EditTitle => state.focus_title_next = true,
+        Command::SkipInExport => {
+            if state.chosen_count() > 1 {
+                let rows = state.rows();
+                let ids = state.chosen_ids();
+                let all_skipped = rows.iter().filter(|r| ids.contains(&r.id)).all(|r| r.skipped);
+                status.say_opt(state.skip_chosen(!all_skipped));
+            } else {
+                let skipped = state.selected_step().is_some_and(|s| s.skipped);
+                status.say_opt(state.set_skipped(!skipped));
+            }
+        }
+        Command::FocusedView => {
+            let on = state.is_focused();
+            status.say_opt(state.set_focused(!on));
+        }
+        Command::AddMark(tool) => status.say_opt(state.add_mark(tool)),
+        Command::DeleteMark => status.say_opt(state.delete_mark()),
+        Command::FocusedAllOn => status.say_opt(state.set_focused_for_all(true)),
+        Command::FocusedAllOff => status.say_opt(state.set_focused_for_all(false)),
+        _ => {}
+    }
+    Leave::Stay
+}
+
+/// A menu of the editor's commands, as they stand now.
+fn menu_lines(state: &EditorState, plan: &[Option<Command>]) -> Vec<Line<Command>> {
+    plan.iter()
+        .map(|item| match item {
+            None => Line::Separator,
+            Some(command) => {
+                let (enabled, ticked) = command_state(state, *command).unwrap_or((true, false));
+                Line::Item(Entry {
+                    command: *command,
+                    words: command.words(),
+                    icon: Some(command.icon()),
+                    keys: command.keys().map(str::to_string),
+                    enabled,
+                    kind: command.kind(),
+                    ticked,
+                })
+            }
+        })
+        .collect()
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) -> Leave {
     let mut leave = Leave::Stay;
     keys(ui.ctx(), state, status);
-
-    egui::Panel::top("editor-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to guides").clicked() {
-                state.commit_pending();
-                leave = Leave::ToHome;
-            }
-            if widgets::button_enabled(ui, state.can_undo(), "Undo").clicked() {
-                status.say_opt(state.undo());
-            }
-            if widgets::button_enabled(ui, state.can_redo(), "Redo").clicked() {
-                status.say_opt(state.redo());
-            }
-            let has_steps = !state.doc().guide.steps.is_empty();
-            if widgets::button_enabled(ui, has_steps, "Export").clicked() {
-                state.commit_pending();
-                leave = Leave::ToExport;
-            }
-            widgets::heading(ui, &state.doc().guide.title.clone());
-        });
-    });
+    let p = palette(ui);
 
     // The panels are a fixed share of the window, not draggable: a drag handle is a control with no keyboard route. The steps
     // come first, then the picture, then the details, which is the order a screen reader reads them in.
     let left = (ui.available_width() * 0.26).clamp(240.0, 340.0);
     let mut to_deleted = false;
-    egui::Panel::left("editor-steps").resizable(false).exact_size(left).show(ui, |ui| {
-        steps_list(ui, state, status, &mut to_deleted);
+    let mut chosen: Option<Command> = None;
+    let steps_frame =
+        egui::Frame::new().fill(p.surface).inner_margin(egui::Margin { left: 12, right: 10, top: 8, bottom: 8 });
+    egui::Panel::left("editor-steps").resizable(false).exact_size(left).frame(steps_frame).show(ui, |ui| {
+        steps_list(ui, state, status, &mut to_deleted, &mut chosen);
     });
+
+    egui::CentralPanel::default().frame(egui::Frame::new().fill(p.page)).show(ui, |ui| {
+        let area = ui.available_rect_before_wrap();
+        ui.painter().vline(area.min.x, area.y_range(), egui::Stroke::new(1.0, p.divider));
+        let details_width = (area.width() * 0.42).clamp(280.0, 400.0).min(area.width() * 0.6);
+        let picture_area =
+            egui::Rect::from_min_max(area.min, egui::pos2(area.max.x - details_width, area.max.y)).shrink(12.0);
+        let details_area = egui::Rect::from_min_max(egui::pos2(area.max.x - details_width, area.min.y), area.max);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(picture_area), |ui| picture(ui, state, status));
+        ui.painter().rect_filled(details_area, 0.0, p.surface);
+        ui.painter().vline(details_area.min.x, area.y_range(), egui::Stroke::new(1.0, p.divider));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(details_area.shrink2(egui::vec2(12.0, 8.0))), |ui| {
+            details(ui, state, status, &mut chosen)
+        });
+    });
+    if let Some(command) = chosen {
+        let went = run(state, status, command);
+        if went != Leave::Stay {
+            leave = went;
+        }
+    }
     if to_deleted {
         state.commit_pending();
         leave = Leave::ToDeleted;
     }
-
-    egui::CentralPanel::default().show(ui, |ui| {
-        let area = ui.available_rect_before_wrap();
-        let details_width = (area.width() * 0.42).clamp(280.0, 400.0).min(area.width() * 0.6);
-        let picture_area =
-            egui::Rect::from_min_max(area.min, egui::pos2(area.max.x - details_width - 10.0, area.max.y));
-        let details_area = egui::Rect::from_min_max(egui::pos2(area.max.x - details_width, area.min.y), area.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(picture_area), |ui| picture(ui, state, status));
-        let border = palette(ui).border;
-        ui.painter().vline(details_area.min.x - 6.0, area.y_range(), egui::Stroke::new(1.0, border));
-        ui.scope_builder(egui::UiBuilder::new().max_rect(details_area), |ui| details(ui, state, status));
-    });
     leave
 }
 
@@ -135,15 +238,39 @@ enum Choice {
     All,
 }
 
-fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, to_deleted: &mut bool) {
-    widgets::subheading(ui, "Steps");
+fn steps_list(
+    ui: &mut egui::Ui,
+    state: &mut EditorState,
+    status: &mut Status,
+    to_deleted: &mut bool,
+    chosen_command: &mut Option<Command>,
+) {
+    // The pane's heading, with its Add button and its "..." menu (the suite's panes all have the two).
+    // Laid out left to right after a space, so the Tab key meets Add before "..." as the eye does.
+    ui.horizontal(|ui| {
+        widgets::subheading(ui, "Steps");
+        let room = ui.available_width() - 136.0;
+        ui.add_space(room.max(4.0));
+        let add = ui.add(egui::Button::new((icon::atom(UiIcon::Plus, 16.0), "Add".to_string())));
+        ui.ctx().accesskit_node_builder(add.id, |node| node.set_label("Add a step".to_string()));
+        let add = add.on_hover_text("Add a step");
+        widgets::ring(ui, &add);
+        if add.clicked() {
+            status.say_opt(state.add_step());
+        }
+        let more = menu_lines(state, &commands::STEPS_MORE);
+        if let Some(command) = menubar::menu_button(ui, "steps-more", UiIcon::Ellipsis, "", "More for the steps", &more)
+        {
+            *chosen_command = Some(command);
+        }
+    });
     let rows = state.rows();
     let selected = state.selected_id().map(str::to_string);
     let take_keyboard = std::mem::take(&mut state.focus_row_next);
     let mut choice: Option<Choice> = None;
     let mut keyboard_on_selected = false;
-    // Room for the buttons and the hint under the list: another line when there are deleted steps to open.
-    let below = if state.deleted_count() > 0 { 170.0 } else { 130.0 };
+    // Room for the hint under the list, and for the Deleted steps button when there are deleted steps to open.
+    let below = if state.deleted_count() > 0 { 92.0 } else { 40.0 };
     egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - below).show(ui, |ui| {
         for row in &rows {
             let is_selected = selected.as_deref() == Some(row.id.as_str());
@@ -218,28 +345,12 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, t
         }
     }
     ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
-        if widgets::button(ui, "Add a step").clicked() {
-            status.say_opt(state.add_step());
-        }
-        if widgets::button_enabled(ui, state.chosen_count() == 1, "Duplicate step").clicked() {
-            status.say_opt(state.duplicate_selected());
-        }
-        if widgets::button_enabled(ui, state.chosen_count() == 1, "Delete step").clicked() {
-            status.say_opt(state.delete_selected());
-            state.focus_row_next = true;
-        }
-        let can_choose_more = rows.len() > 1 && state.chosen_count() < rows.len();
-        if widgets::button_enabled(ui, can_choose_more, "Choose all steps").clicked() {
-            status.say_opt(state.choose_all());
-            state.focus_row_next = true;
-        }
-        // Only when there is something deleted, so a guide that has lost nothing has no extra control to stop at.
-        let deleted = state.deleted_count();
-        if deleted > 0 && widgets::button(ui, &format!("Deleted steps ({deleted})")).clicked() {
-            *to_deleted = true;
-        }
-    });
+    // Only when there is something deleted, so a guide that has lost nothing has no extra control to stop at.
+    let deleted = state.deleted_count();
+    if deleted > 0 && widgets::icon_button(ui, UiIcon::ArchiveRestore, &format!("Deleted steps ({deleted})")).clicked()
+    {
+        *to_deleted = true;
+    }
     if rows.len() > 1 {
         ui.label(RichText::new("Ctrl+click or Shift+click chooses several.").size(13.5).color(palette(ui).muted));
     }
@@ -248,7 +359,6 @@ fn steps_list(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, t
 /// What can be done to several chosen steps at once, in place of the details of one.
 fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
-    widgets::subheading(ui, "Several steps chosen");
     let ids = state.chosen_ids();
     ui.label(RichText::new(format!("{} steps are chosen:", ids.len())).color(p.text));
     let rows = state.rows();
@@ -294,7 +404,28 @@ fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Statu
     );
 }
 
-fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, chosen: &mut Option<Command>) {
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        shell::section(ui, "guide", UiIcon::BookOpen, "Guide", true, |ui| guide_section(ui, state, status));
+        if state.selected_step().is_none() {
+            widgets::subheading(ui, "Step details");
+            let p = palette(ui);
+            ui.label(RichText::new("No step is chosen. Add a step, or choose one from the list.").color(p.muted));
+            return;
+        }
+        if state.chosen_count() > 1 {
+            shell::section(ui, "several", UiIcon::ListChecks, "Several steps chosen", true, |ui| {
+                several_chosen(ui, state, status)
+            });
+            return;
+        }
+        shell::section(ui, "step", UiIcon::FileText, "Step details", true, |ui| step_section(ui, state, status));
+        shell::section(ui, "marks", UiIcon::Shapes, "Marks", true, |ui| marks_panel(ui, state, status, chosen));
+    });
+}
+
+/// The guide as a whole: its title, and the focused view for every step.
+fn guide_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
     let label = ui.label("Guide title");
     let guide_title = ui
@@ -313,24 +444,19 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     ui.add_space(4.0);
     ui.label(RichText::new(state.focus_summary()).size(13.5).color(p.muted));
     ui.horizontal_wrapped(|ui| {
-        if widgets::button(ui, "Focused view on for every step").clicked() {
+        if widgets::icon_button(ui, UiIcon::ZoomIn, "Focused view on for every step").clicked() {
             status.say_opt(state.set_focused_for_all(true));
         }
-        if widgets::button(ui, "Focused view off for every step").clicked() {
+        if widgets::icon_button(ui, UiIcon::ZoomOut, "Focused view off for every step").clicked() {
             status.say_opt(state.set_focused_for_all(false));
         }
     });
-    ui.add_space(6.0);
-    widgets::subheading(ui, "Step details");
-    if state.selected_step().is_none() {
-        ui.label(RichText::new("No step is chosen. Add a step, or choose one from the list.").color(p.muted));
-        return;
-    }
-    if state.chosen_count() > 1 {
-        several_chosen(ui, state, status);
-        return;
-    }
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+}
+
+/// The chosen step: its words, its picture's description, the focused view, skipping it, and moving it.
+fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+    let p = palette(ui);
+    {
         let label = ui.label("Title");
         let title = ui
             .add(egui::TextEdit::singleline(&mut state.buffer.title).desired_width(f32::INFINITY))
@@ -385,6 +511,7 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         if !can_focus {
             ui.label(RichText::new("Needs a picture with a click in it.").size(13.5).color(p.muted));
         }
+        // The crop's own buttons come right under the box that turns it on.
         if state.is_focused() {
             crop_panel(ui, state, status);
         }
@@ -398,18 +525,15 @@ fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
 
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if widgets::button(ui, "Move step up").clicked() {
+            if widgets::icon_button(ui, UiIcon::ArrowUp, "Move step up").clicked() {
                 status.say_opt(state.move_selected(-1));
             }
-            if widgets::button(ui, "Move step down").clicked() {
+            if widgets::icon_button(ui, UiIcon::ArrowDown, "Move step down").clicked() {
                 status.say_opt(state.move_selected(1));
             }
         });
         ui.label(RichText::new("Alt+Up and Alt+Down do the same.").size(13.5).color(p.muted));
-
-        ui.add_space(10.0);
-        marks_panel(ui, state, status);
-    });
+    }
 }
 
 /// Where the focused crop is, in words, and buttons to move and zoom it. Like the buttons that move a step they are always pressable,
@@ -448,20 +572,17 @@ fn crop_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
 
 /// The marks of the selected step: buttons to add each kind, the list of marks, and what can be done to the chosen one. All of it
 /// works by keyboard; dragging on the picture is a convenience on top.
-fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
+fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, chosen: &mut Option<Command>) {
     let p = palette(ui);
-    widgets::subheading(ui, "Marks");
     let Some((_, picture_h)) = state.picture_size() else {
         ui.label(RichText::new("Marks need a picture.").size(13.5).color(p.muted));
         return;
     };
-    ui.horizontal_wrapped(|ui| {
-        for tool in Tool::ALL {
-            if widgets::button(ui, &format!("Add {}", tool.name())).clicked() {
-                status.say_opt(state.add_mark(tool));
-            }
-        }
-    });
+    // The nine kinds of mark are one menu (and the Marks menu at the top), not nine buttons.
+    let add = menu_lines(state, &commands::ADD_MARK);
+    if let Some(command) = menubar::menu_button(ui, "add-mark", UiIcon::Plus, "Add a mark", "Add a mark", &add) {
+        *chosen = Some(command);
+    }
     // Drawing with the mouse is a convenience on top of the buttons, so its ten choices are folded away behind one heading: a person
     // using the keyboard passes one stop, not ten.
     let draw_header = egui::CollapsingHeader::new(RichText::new("Draw a shape with the mouse").size(15.0))
@@ -622,10 +743,11 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) 
         });
     }
     ui.add_space(4.0);
-    if widgets::button(ui, "Delete mark").clicked() {
+    if widgets::icon_button(ui, UiIcon::Trash, "Delete mark").clicked() {
         status.say_opt(state.delete_mark());
     }
     let _ = picture_h;
+    let _ = Tool::ALL;
 }
 
 /// The picture is drawn whole, with the focused crop (if the step has one) shown as a frame over it. Marks can be picked up and
@@ -671,7 +793,7 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         painter.rect_stroke(
             egui::Rect::from_min_max(tl, br),
             0.0,
-            egui::Stroke::new(2.0, p.focus),
+            egui::Stroke::new(2.0, p.overlay),
             egui::StrokeKind::Inside,
         );
     }
@@ -680,12 +802,12 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         let b = marks::bounds(&mark, picture_h);
         let outline =
             egui::Rect::from_min_max(to_screen(b.x, b.y), to_screen(b.x + b.width, b.y + b.height)).expand(2.0);
-        painter.rect_stroke(outline, 0.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Outside);
+        painter.rect_stroke(outline, 0.0, egui::Stroke::new(2.0, p.overlay), egui::StrokeKind::Outside);
         for (_, (hx, hy)) in marks::handles(&mark, picture_h) {
             let at = to_screen(hx, hy);
             let square = egui::Rect::from_center_size(at, egui::vec2(9.0, 9.0));
             painter.rect_filled(square, 1.0, egui::Color32::WHITE);
-            painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Inside);
+            painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.overlay), egui::StrokeKind::Inside);
         }
     }
     // With several steps chosen the picture is only shown: the marks belong to one step.

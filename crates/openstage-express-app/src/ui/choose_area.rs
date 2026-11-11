@@ -221,13 +221,13 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
         painter.rect_stroke(
             egui::Rect::from_min_max(tl, br),
             0.0,
-            egui::Stroke::new(2.0, p.focus),
+            egui::Stroke::new(2.0, p.overlay),
             egui::StrokeKind::Inside,
         );
         for (hx, hy) in state.editor.handle_points() {
             let square = egui::Rect::from_center_size(at(hx, hy), egui::vec2(10.0, 10.0));
             painter.rect_filled(square, 1.0, egui::Color32::WHITE);
-            painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.focus), egui::StrokeKind::Inside);
+            painter.rect_stroke(square, 1.0, egui::Stroke::new(2.0, p.overlay), egui::StrokeKind::Inside);
         }
         // The mouse: press to pick the rectangle, a handle or empty picture, move to drag, let go to keep.
         let (pos, pressed, down, released) = ui.input(|i| {

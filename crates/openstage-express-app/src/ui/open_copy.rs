@@ -41,15 +41,10 @@ pub enum OpenCopyAction {
 
 pub fn show(ui: &mut egui::Ui, state: &mut OpenCopyState) -> OpenCopyAction {
     let mut action = OpenCopyAction::None;
-    egui::Panel::top("open-copy-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to guides").clicked() {
-                action = OpenCopyAction::Back;
-            }
-            widgets::heading(ui, "Open a copy");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(ui, "open-copy-top", "Back to guides", "Open a copy", false) {
+        action = OpenCopyAction::Back;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         ui.label(
             RichText::new(

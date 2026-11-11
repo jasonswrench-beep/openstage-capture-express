@@ -29,15 +29,10 @@ pub enum TrashAction {
 
 pub fn show(ui: &mut egui::Ui, state: &TrashState) -> TrashAction {
     let mut action = TrashAction::None;
-    egui::Panel::top("trash-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to guides").clicked() {
-                action = TrashAction::Back;
-            }
-            widgets::heading(ui, "Trash");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(ui, "trash-top", "Back to guides", "Trash", false) {
+        action = TrashAction::Back;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         ui.label(
             RichText::new(

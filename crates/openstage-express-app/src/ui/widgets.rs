@@ -5,6 +5,7 @@
 use eframe::egui::{self, accesskit, CornerRadius, Response, RichText, Stroke, StrokeKind, Ui};
 
 use super::fonts::bold_family;
+use super::icon::{self, UiIcon};
 use super::theme::{Palette, DARK, LIGHT};
 
 /// The palette of the scheme the window is using now.
@@ -57,9 +58,74 @@ pub fn button_enabled(ui: &mut Ui, enabled: bool, text: &str) -> Response {
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     let p = palette(ui);
     let label = RichText::new(text).color(p.on_accent).family(bold_family());
-    let response = ui.add(egui::Button::new(label).fill(p.accent_fill).min_size(egui::vec2(180.0, 44.0)));
+    let response = ui.add(
+        egui::Button::new(label)
+            .fill(p.accent_fill)
+            .stroke(Stroke::new(1.0, p.accent_fill))
+            .min_size(egui::vec2(160.0, 40.0)),
+    );
     ring(ui, &response);
     response
+}
+
+/// The one main button of a screen, with an icon before its words.
+pub fn primary_icon_button(ui: &mut Ui, icon_name: UiIcon, text: &str) -> Response {
+    let p = palette(ui);
+    let label = RichText::new(text).color(p.on_accent).family(bold_family());
+    let button = egui::Button::new((icon::atom(icon_name, 18.0), label))
+        .fill(p.accent_fill)
+        .stroke(Stroke::new(1.0, p.accent_fill))
+        .min_size(egui::vec2(140.0, 40.0));
+    let response = ui
+        .scope(|ui| {
+            // The icon takes the words' colour, so the words' colour on a filled button is set for every state.
+            let v = ui.visuals_mut();
+            v.widgets.inactive.fg_stroke = Stroke::new(1.5, p.on_accent);
+            v.widgets.hovered.fg_stroke = Stroke::new(1.5, p.on_accent);
+            v.widgets.active.fg_stroke = Stroke::new(1.5, p.on_accent);
+            v.widgets.hovered.weak_bg_fill = p.accent_hover;
+            ui.add(button)
+        })
+        .inner;
+    ring(ui, &response);
+    response
+}
+
+/// A first-level heading in a colour of its own (the capture bar's, on navy).
+pub fn heading_in(ui: &mut Ui, text: &str, colour: egui::Color32) -> Response {
+    let response = ui.label(RichText::new(text).heading().color(colour));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(accesskit::Role::Heading);
+        node.set_level(1);
+        node.set_label(text.to_string());
+    });
+    response
+}
+
+/// An ordinary button with an icon before its words (the icon takes the words' colour).
+pub fn icon_button(ui: &mut Ui, icon_name: UiIcon, text: &str) -> Response {
+    let response = ui.add(egui::Button::new((icon::atom(icon_name, 16.0), text.to_string())));
+    ring(ui, &response);
+    response
+}
+
+/// A button with an icon and short words (`Rename`) whose name for a screen reader says what it is for (`Rename How to sign in`).
+pub fn icon_button_named(ui: &mut Ui, icon_name: UiIcon, text: &str, name: &str) -> Response {
+    let response = ui.add(egui::Button::new((icon::atom(icon_name, 16.0), text.to_string())));
+    let name = name.to_string();
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+    ring(ui, &response);
+    response
+}
+
+/// A white panel with a thin edge and rounded corners, for a group of things on the page (the suite's card).
+pub fn card_frame(ui: &Ui) -> egui::Frame {
+    let p = palette(ui);
+    egui::Frame::new()
+        .fill(p.surface)
+        .stroke(Stroke::new(1.0, p.divider))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(egui::Margin::same(16))
 }
 
 /// One row of a list of choices (the steps list): left-aligned, indented by `indent`, filled in indigo when chosen. It is a
@@ -138,11 +204,13 @@ pub fn card(ui: &mut Ui, title: &str, trailing: &str, name: &str, most: f32) -> 
     let width = ui.available_width().min(most);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 56.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        let fill = if response.hovered() { p.raised_hover } else { p.raised };
-        ui.painter().rect(rect, CornerRadius::same(8), fill, Stroke::new(1.0, p.border), StrokeKind::Inside);
+        let (fill, edge) = if response.hovered() { (p.subtle, p.accent) } else { (p.surface, p.border) };
+        ui.painter().rect(rect, CornerRadius::same(10), fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+        let at = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), egui::vec2(20.0, 20.0));
+        icon::paint(ui.painter(), at, UiIcon::BookOpen, p.accent);
         let painter = ui.painter().with_clip_rect(rect.shrink2(egui::vec2(6.0, 0.0)));
         painter.text(
-            egui::pos2(rect.left() + 16.0, rect.center().y),
+            egui::pos2(rect.left() + 48.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             title,
             egui::FontId::new(18.0, bold_family()),

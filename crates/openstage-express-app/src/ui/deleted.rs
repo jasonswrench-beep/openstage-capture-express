@@ -58,19 +58,16 @@ impl DeletedView {
 pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> DeletedAction {
     let mut action = DeletedAction::None;
     let go_to = view.keyboard.take();
-    egui::Panel::top("deleted-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let back = widgets::button(ui, "Back to the steps");
-            if back.clicked() {
-                action = DeletedAction::Back;
-            }
-            if go_to.is_some() && rows.is_empty() {
-                back.request_focus();
-            }
-            widgets::heading(ui, "Deleted steps");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(
+        ui,
+        "deleted-top",
+        "Back to the steps",
+        "Deleted steps",
+        go_to.is_some() && rows.is_empty(),
+    ) {
+        action = DeletedAction::Back;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         if view.asking && !rows.is_empty() {
             widgets::subheading(ui, "Empty the trash for good?");

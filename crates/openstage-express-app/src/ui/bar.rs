@@ -6,6 +6,7 @@
 
 use eframe::egui::{self, RichText};
 
+use super::icon::UiIcon;
 use super::widgets::{self, palette};
 use crate::target::TargetKind;
 
@@ -88,9 +89,24 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
         d.insert_temp(last_phase_id, view.phase);
         before != Some(view.phase)
     });
-    egui::CentralPanel::default().show(ui, |ui| {
-        let headline = widgets::heading(ui, &view.headline());
-        let _ = headline;
+    // The suite's navy strip along the top, with what the capture is doing: a red dot while it captures, the pause sign while it is
+    // paused (each with its words, never the colour alone).
+    let strip = egui::Frame::new().fill(p.shell).inner_margin(egui::Margin { left: 16, right: 16, top: 6, bottom: 6 });
+    egui::Panel::top("bar-strip").frame(strip).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let (at, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            match view.phase {
+                BarPhase::Capturing => {
+                    ui.painter().circle_filled(at.center(), 7.0, egui::Color32::from_rgb(0xE5, 0x48, 0x4D));
+                }
+                BarPhase::Paused => super::icon::paint(ui.painter(), at, UiIcon::Pause, p.on_shell),
+                BarPhase::Ready | BarPhase::Saving => super::icon::paint(ui.painter(), at, UiIcon::Camera, p.brand),
+            }
+            widgets::heading_in(ui, &view.headline(), p.on_shell);
+        });
+    });
+    let page = egui::Frame::new().fill(p.page).inner_margin(egui::Margin { left: 16, right: 16, top: 10, bottom: 8 });
+    egui::CentralPanel::default().frame(page).show(ui, |ui| {
         if view.phase == BarPhase::Ready {
             ui.label(RichText::new(format!("Captures {}.", view.what)).color(p.muted));
         }
@@ -114,7 +130,7 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
                 TargetKind::Area => Some(("Draw the area...", BarAction::ChooseArea)),
             };
             if let Some((words, choice)) = choose {
-                if widgets::button(ui, words).clicked() {
+                if widgets::icon_button(ui, target_icon(view.target), words).clicked() {
                     action = choice;
                 }
             }
@@ -123,7 +139,7 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
         ui.horizontal(|ui| match view.phase {
             BarPhase::Ready => {
                 let start = if view.can_start {
-                    widgets::primary_button(ui, "Start")
+                    widgets::primary_icon_button(ui, UiIcon::CircleDot, "Start")
                 } else {
                     widgets::button_enabled(ui, false, "Start")
                 };
@@ -133,34 +149,34 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
                 if start.clicked() {
                     action = BarAction::Start;
                 }
-                if widgets::button(ui, "Cancel").clicked() {
+                if widgets::icon_button(ui, UiIcon::X, "Cancel").clicked() {
                     action = BarAction::Cancel;
                 }
             }
             BarPhase::Capturing => {
-                let pause = widgets::button(ui, "Pause");
+                let pause = widgets::icon_button(ui, UiIcon::Pause, "Pause");
                 if phase_changed {
                     pause.request_focus();
                 }
                 if pause.clicked() {
                     action = BarAction::Pause;
                 }
-                if widgets::button(ui, "Capture now").clicked() {
+                if widgets::icon_button(ui, UiIcon::Camera, "Capture now").clicked() {
                     action = BarAction::CaptureNow;
                 }
-                if widgets::primary_button(ui, "Finish").clicked() {
+                if widgets::primary_icon_button(ui, UiIcon::CircleStop, "Finish").clicked() {
                     action = BarAction::Finish;
                 }
             }
             BarPhase::Paused => {
-                let resume = widgets::primary_button(ui, "Resume");
+                let resume = widgets::primary_icon_button(ui, UiIcon::Play, "Resume");
                 if phase_changed {
                     resume.request_focus();
                 }
                 if resume.clicked() {
                     action = BarAction::Resume;
                 }
-                if widgets::button(ui, "Finish").clicked() {
+                if widgets::icon_button(ui, UiIcon::CircleStop, "Finish").clicked() {
                     action = BarAction::Finish;
                 }
             }
@@ -174,6 +190,15 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
         }
     });
     action
+}
+
+/// The icon of each thing that can be captured.
+fn target_icon(kind: TargetKind) -> UiIcon {
+    match kind {
+        TargetKind::Screen => UiIcon::Monitor,
+        TargetKind::Window => UiIcon::AppWindow,
+        TargetKind::Area => UiIcon::Scan,
+    }
 }
 
 #[cfg(test)]

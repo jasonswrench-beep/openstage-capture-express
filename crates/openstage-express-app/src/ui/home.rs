@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! The Home screen (spec section 4.2): the title, the Start button, a search box and the list of guides. The list holds the guides
-//! found in the guides folder, newest first; when there are none it holds one example guide, made up for trying the editor, and
-//! the screen says so.
+//! The Home screen (spec section 4.2): a search box and the list of guides, under the window's navy bar (where Start capturing is)
+//! and its menus (Open a copy, the Trash, Settings and About are there). The list holds the guides found in the guides folder,
+//! newest first; when there are none it holds one example guide, made up for trying the editor, and the screen says so.
 
 use std::path::PathBuf;
 
@@ -11,6 +11,7 @@ use openstage_express_export::demo::demo;
 use crate::library::Entry;
 use crate::settings::HomeSort;
 
+use super::icon::UiIcon;
 use super::rows::{step_count, steps_words};
 use super::widgets::{self, palette};
 
@@ -201,53 +202,45 @@ pub enum Action {
 }
 
 /// What a card takes of the width and what is left for the Rename and Delete buttons beside it.
-const BUTTONS_WIDTH: f32 = 220.0;
+const BUTTONS_WIDTH: f32 = 240.0;
+
+/// The widest the list of guides gets, so a wide window does not stretch the cards across it.
+const MOST_WIDTH: f32 = 960.0;
 
 pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
     let mut action = Action::None;
-    egui::CentralPanel::default().show(ui, |ui| {
+    let page = egui::Frame::new().fill(palette(ui).page).inner_margin(egui::Margin {
+        left: 24,
+        right: 24,
+        top: 18,
+        bottom: 8,
+    });
+    egui::CentralPanel::default().frame(page).show(ui, |ui| {
         let p = palette(ui);
-        widgets::heading(ui, "OpenStage Capture Express");
-        ui.label(RichText::new("Step-by-step guides from what you do on screen.").color(p.muted));
-        ui.add_space(10.0);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.set_max_width(ui.available_width().min(MOST_WIDTH));
+        widgets::heading(ui, "Your guides");
+        ui.label(RichText::new("Step-by-step guides from what you do on screen. Start capturing is at the top right.").color(p.muted));
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
-            if widgets::primary_button(ui, "Start capturing").clicked() {
-                action = Action::StartCapturing;
-            }
-            ui.add_space(24.0);
             let label = ui.label("Search");
             let search = ui
-                .add(egui::TextEdit::singleline(&mut state.search).hint_text("Search your guides").desired_width(280.0))
+                .add(egui::TextEdit::singleline(&mut state.search).hint_text("Search your guides").desired_width(300.0))
                 .labelled_by(label.id);
             widgets::ring(ui, &search);
-            ui.add_space(24.0);
-            if widgets::button(ui, "Settings").clicked() {
-                action = Action::Settings;
-            }
-            if widgets::button(ui, "About and licences").clicked() {
-                action = Action::About;
-            }
-            if widgets::button(ui, "Trash").clicked() {
-                action = Action::Trash;
-            }
-            if widgets::button(ui, "Open a copy").clicked() {
-                action = Action::OpenCopy;
-            }
-        });
-        ui.add_space(14.0);
-        ui.horizontal(|ui| {
-            widgets::subheading(ui, "Your guides");
             // Ordering one guide is not a thing, so the button is there when there are two or more.
             if state.guides.len() > 1 {
                 ui.add_space(12.0);
                 let shown = format!("Sort: {}", state.sort.name());
                 let spoken = format!("{shown}. Press to change the order.");
-                if widgets::button_named(ui, &shown, &spoken).clicked() {
+                if widgets::icon_button_named(ui, UiIcon::ArrowUpDown, &shown, &spoken).clicked() {
                     action = Action::Sort;
                 }
             }
         });
+        ui.add_space(6.0);
         if let Some(rename) = state.renaming.as_mut() {
+            widgets::card_frame(ui).show(ui, |ui| {
             let shown = format!("Rename \"{}\"", rename.title);
             widgets::subheading(ui, &shown);
             ui.horizontal_wrapped(|ui| {
@@ -273,9 +266,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
                     action = Action::CancelRename;
                 }
             });
+            });
             ui.add_space(8.0);
         }
         if let Some(delete) = state.deleting.as_mut() {
+            widgets::card_frame(ui).show(ui, |ui| {
             let shown = format!("Move \"{}\" to the Trash?", delete.title);
             widgets::subheading(ui, &shown);
             ui.label(
@@ -297,6 +292,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
                     action = Action::KeepGuide;
                 }
             });
+            });
             ui.add_space(8.0);
         }
         let visible = state.visible();
@@ -306,17 +302,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         for index in visible {
             let card = &state.guides[index];
             ui.horizontal(|ui| {
-                let most = if card.path.is_some() { (ui.available_width() - BUTTONS_WIDTH).clamp(240.0, 760.0) } else { 760.0 };
+                let most = if card.path.is_some() { (ui.available_width() - BUTTONS_WIDTH).clamp(240.0, MOST_WIDTH) } else { MOST_WIDTH };
                 let response = widgets::card(ui, &card.title, &steps_words(card.steps), &card.label(), most);
                 if response.clicked() {
                     action = Action::Open(index);
                 }
                 // A guide on disk can be renamed or deleted; the example cannot. Each button says whose it is.
                 if card.path.is_some() {
-                    if widgets::button_named(ui, "Rename", &format!("Rename {}", card.title)).clicked() {
+                    if widgets::icon_button_named(ui, UiIcon::Pencil, "Rename", &format!("Rename {}", card.title)).clicked() {
                         action = Action::Rename(index);
                     }
-                    if widgets::button_named(ui, "Delete", &format!("Delete {}", card.title)).clicked() {
+                    if widgets::icon_button_named(ui, UiIcon::Trash, "Delete", &format!("Delete {}", card.title)).clicked() {
                         action = Action::Delete(index);
                     }
                 }
@@ -331,6 +327,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
                 .color(p.muted),
             );
         }
+        });
     });
     action
 }

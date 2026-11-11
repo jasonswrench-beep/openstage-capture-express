@@ -183,6 +183,73 @@ impl Harness {
         self.settle();
     }
 
+    /// Press a command wherever it is: a button on the screen with these words, or else an item with them in one of the menus (the
+    /// menu bar's, or a menu button's such as "..."), which is opened the way a screen reader opens it and closed again when the
+    /// item is not in it. Commands moved into menus in the suite's look (2026-11-11), so the tests about what a command does say
+    /// only which command, not where it sits.
+    fn press(&mut self, words: &str) {
+        if self.find_all(Role::Button, words).len() == 1 {
+            self.invoke(Role::Button, words);
+            return;
+        }
+        let item = self
+            .open_menu_with(words)
+            .unwrap_or_else(|| panic!("no button or menu item {words:?}. The tree has:\n{}", self.dump()));
+        self.events.push(Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: item,
+            data: None,
+        }));
+        self.settle();
+        // An item that cannot be used does nothing and leaves its menu open, as a click on it does: close it again.
+        if self.nodes.contains_key(&item) {
+            self.key(Key::Escape, Modifiers::NONE);
+        }
+    }
+
+    /// Open, one after another, every menu the screen has until one holds an item with these words; return that item (its menu
+    /// is left open), or None (every menu closed again).
+    fn open_menu_with(&mut self, words: &str) -> Option<NodeId> {
+        let openers: Vec<String> = self
+            .order
+            .iter()
+            .filter(|id| self.nodes[id].has_popup() == Some(accesskit::HasPopup::Menu))
+            .filter_map(|id| self.name(*id).map(|n| n.trim_end().to_string()))
+            .collect();
+        for opener in openers {
+            let id = self.order.iter().copied().find(|id| {
+                self.nodes[id].has_popup() == Some(accesskit::HasPopup::Menu)
+                    && self.name(*id).as_deref().map(str::trim_end) == Some(opener.as_str())
+            })?;
+            self.events.push(Event::AccessKitActionRequest(ActionRequest {
+                action: Action::Click,
+                target_tree: TreeId::ROOT,
+                target_node: id,
+                data: None,
+            }));
+            self.settle();
+            let found = self.order.iter().copied().find(|id| {
+                matches!(self.nodes[id].role(), Role::MenuItem | Role::MenuItemCheckBox | Role::MenuItemRadio)
+                    && self.nodes[id].has_popup().is_none()
+                    && self.name(*id).is_some_and(|w| w.trim_end() == words)
+            });
+            if found.is_some() {
+                return found;
+            }
+            self.key(Key::Escape, Modifiers::NONE);
+        }
+        None
+    }
+
+    /// Whether the command with these words, in whichever menu it is, can be used now (its menu is closed again afterwards).
+    fn usable_in_menu(&mut self, words: &str) -> bool {
+        let item = self.open_menu_with(words).unwrap_or_else(|| panic!("no menu item {words:?}"));
+        let usable = !self.nodes[&item].is_disabled();
+        self.key(Key::Escape, Modifiers::NONE);
+        usable
+    }
+
     /// What a screen reader's "move the keyboard here" does.
     fn focus_on(&mut self, role: Role, words: &str) {
         let id = self.find(role, words);
@@ -256,12 +323,14 @@ fn ctrl() -> Modifiers {
 #[test]
 fn home_is_a_heading_a_button_a_search_box_and_the_guide_all_with_names() {
     let h = Harness::new(Screen::Home);
-    let title = h.find(Role::Heading, "OpenStage Capture Express");
+    // The navy bar says the program's name; the screen's own first heading is the list of guides.
+    h.find(Role::Label, "OpenStage Capture Express");
+    let title = h.find(Role::Heading, "Your guides");
     assert_eq!(h.node(title).level(), Some(1));
     h.find(Role::Button, "Start capturing");
+    h.find(Role::Button, "Search for a command");
     let search = h.find(Role::TextInput, "Search");
     assert_eq!(h.node(search).placeholder(), Some("Search your guides"));
-    assert_eq!(h.node(h.find(Role::Heading, "Your guides")).level(), Some(2));
     h.find(Role::Button, "How to submit an assignment, 5 steps, example guide");
     assert_eq!(h.status(), "Ready.");
 }
@@ -530,14 +599,13 @@ fn tab_visits_every_control_on_home_in_order_and_does_not_get_stuck() {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
-    assert_eq!(seen[0], "Start capturing");
-    assert_eq!(seen[1], "Search");
-    assert_eq!(seen[2], "Settings");
-    assert_eq!(seen[3], "About and licences");
-    assert_eq!(seen[4], "Trash");
-    assert_eq!(seen[5], "Open a copy");
-    assert_eq!(seen[6], "How to submit an assignment, 5 steps, example guide");
-    assert!(seen[7..].contains(&"Start capturing".to_string()), "Tab comes back round to the start: {seen:?}");
+    // The navy bar (Search for a command, Start capturing), the menu bar (one stop), then the screen.
+    assert_eq!(seen[0], "Search for a command", "{seen:?}");
+    assert_eq!(seen[1], "Start capturing");
+    assert_eq!(seen[2], "File", "the menu bar is one stop");
+    assert_eq!(seen[3], "Search");
+    assert_eq!(seen[4], "How to submit an assignment, 5 steps, example guide");
+    assert!(seen[5..].contains(&"Search for a command".to_string()), "Tab comes back round to the start: {seen:?}");
 }
 
 #[test]
@@ -664,6 +732,7 @@ fn the_editor_is_read_in_a_natural_order_title_bar_steps_picture_details_then_th
     let undo = at(Role::Button, "Undo");
     let redo = at(Role::Button, "Redo");
     let title = at(Role::Heading, "How to submit an assignment");
+    let menus = at(Role::MenuBar, "Menus");
     let steps = at(Role::Heading, "Steps");
     let first_row = at(Role::ListBoxOption, "1. Click \"Assignments\"");
     let add = at(Role::Button, "Add a step");
@@ -671,7 +740,9 @@ fn the_editor_is_read_in_a_natural_order_title_bar_steps_picture_details_then_th
     let details = at(Role::Heading, "Step details");
     let title_box = at(Role::TextInput, "Title");
     let status = h.order.iter().position(|id| *id == h.status_node()).unwrap();
-    let order = [back, undo, redo, title, steps, first_row, add, picture, details, title_box, status];
+    // The navy bar (way back, the guide's title, Undo, Redo), the menus, the steps (the pane's Add before its list), the picture,
+    // the details, then the status line.
+    let order = [back, title, undo, redo, menus, steps, add, first_row, picture, details, title_box, status];
     assert!(order.windows(2).all(|w| w[0] < w[1]), "the reading order is wrong: {order:?}\n{}", h.dump());
 }
 
@@ -691,7 +762,7 @@ fn nothing_the_keyboard_reaches_is_a_control_that_does_nothing() {
 fn the_steps_list_is_one_stop_for_the_tab_key_however_long_it_is() {
     let mut h = Harness::new(Screen::Editor);
     let mut stops = Vec::new();
-    for _ in 0..6 {
+    for _ in 0..10 {
         h.key(Key::Tab, NO_MODS);
         stops.push(h.focused_words().unwrap_or_default());
     }
@@ -706,11 +777,9 @@ fn the_steps_list_is_one_stop_for_the_tab_key_however_long_it_is() {
         })
         .count();
     assert_eq!(in_the_list, 1, "the list should be a single stop: {stops:?}");
-    assert_eq!(
-        stops.iter().position(|w| w == "Add a step"),
-        stops.iter().position(|w| w.starts_with("1. ")).map(|p| p + 1),
-        "straight from the list to the next control: {stops:?}"
-    );
+    let row = stops.iter().position(|w| w.starts_with("1. ")).expect("the list is reached");
+    assert_eq!(stops[row - 1], "More for the steps", "the pane's Add and ... come just before it: {stops:?}");
+    assert_eq!(stops[row + 1], "Guide", "and straight from the list to the next control: {stops:?}");
 }
 
 // ---- the capture bar, and capturing through a stand-in that takes no pictures
@@ -1626,7 +1695,7 @@ fn settings_harness(dir: &std::path::Path, chosen: Option<PathBuf>) -> Harness {
 fn settings_open_from_home_and_every_choice_has_a_name() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     assert_eq!(h.app.screen, Screen::Settings);
     h.find(Role::Heading, "Settings");
     for heading in ["Appearance", "Capturing", "Folders", "Hotkeys"] {
@@ -1654,7 +1723,7 @@ fn settings_open_from_home_and_every_choice_has_a_name() {
 fn a_change_is_saved_at_once_and_said_and_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     h.invoke(Role::RadioButton, "Dark");
     assert_eq!(h.app.appearance(), Appearance::Dark);
     assert_eq!(h.status(), "Saved.");
@@ -1670,7 +1739,7 @@ fn a_change_is_saved_at_once_and_said_and_survives_a_restart() {
 fn the_key_choices_are_off_until_a_mode_that_uses_a_key_is_chosen() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     assert!(h.node(h.find(Role::RadioButton, "Shift")).is_disabled());
     h.invoke(Role::RadioButton, "only when I hold a key while I click");
     assert!(!h.node(h.find(Role::RadioButton, "Shift")).is_disabled());
@@ -1697,7 +1766,7 @@ fn what_is_chosen_reaches_the_next_capture() {
         Box::new(|_| false),
     );
     h.settle();
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     h.invoke(Role::RadioButton, "never. Only the capture now hotkey makes a step");
     h.invoke(Role::CheckBox, "Draw a circle round each click");
     h.invoke(Role::RadioButton, "French");
@@ -1720,7 +1789,7 @@ fn choosing_a_guides_folder_lists_the_guides_there_and_remembers_it() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), Some(library.clone()));
     h.find(Role::Button, "How to submit an assignment, 5 steps, example guide");
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     h.invoke(Role::Button, "Choose guides folder...");
     assert!(h.status().starts_with("Guides are now kept in "), "{}", h.status());
     h.find(Role::Label, &format!("Guides folder: {}", library.display()));
@@ -1735,13 +1804,13 @@ fn choosing_an_exports_folder_is_remembered_and_cancelling_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let elsewhere = dir.path().join("my exports");
     let mut h = settings_harness(dir.path(), Some(elsewhere.clone()));
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     h.invoke(Role::Button, "Choose exports folder...");
     assert_eq!(h.app.export.folder, elsewhere);
     let (back, _) = crate::settings::load(&dir.path().join("settings.json"));
     assert_eq!(back.exports_folder.as_deref(), Some(elsewhere.to_str().unwrap()));
     let mut h2 = settings_harness(dir.path(), None);
-    h2.invoke(Role::Button, "Settings");
+    h2.press("Settings...");
     let before = h2.app.export.folder.clone();
     h2.invoke(Role::Button, "Choose exports folder...");
     assert_eq!(h2.app.export.folder, before);
@@ -1773,7 +1842,7 @@ fn a_note_about_the_settings_file_is_shown_on_the_screen() {
         Some("The settings file is damaged, so the usual settings are used.".to_string()),
     );
     h.settle();
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     h.find(Role::Label, "The settings file is damaged, so the usual settings are used.");
     drop(dir);
 }
@@ -1783,7 +1852,7 @@ fn a_note_about_the_settings_file_is_shown_on_the_screen() {
 #[test]
 fn about_opens_from_home_and_shows_the_licence_and_the_credits() {
     let mut h = Harness::new(Screen::Home);
-    h.invoke(Role::Button, "About and licences");
+    h.press("About and licences");
     assert_eq!(h.app.screen, Screen::About);
     h.find(Role::Heading, "About OpenStage Capture Express");
     h.find(Role::Heading, "Licence and notices");
@@ -1817,18 +1886,27 @@ fn the_selected_mark(h: &Harness) -> openstage_express_core::model::Annotation {
 
 #[test]
 fn the_marks_section_offers_every_tool_and_lists_the_marks_the_step_has() {
-    let h = Harness::new(Screen::Editor);
+    let mut h = Harness::new(Screen::Editor);
     h.find(Role::Heading, "Marks");
-    for tool in openstage_express_core::marks::Tool::ALL {
-        h.find(Role::Button, &format!("Add {}", tool.name()));
-    }
     assert_eq!(h.mark_rows(), ["Mark 1: Click marker, at 110, 170", "Mark 2: Pointer, at 110, 170"]);
+    // Every kind of mark is one item of the section's Add a mark menu, not a button of its own.
+    let opener = h.find(Role::Button, "Add a mark");
+    assert_eq!(h.node(opener).has_popup(), Some(accesskit::HasPopup::Menu));
+    h.invoke(Role::Button, "Add a mark");
+    h.find(Role::Menu, "Add a mark");
+    for tool in openstage_express_core::marks::Tool::ALL {
+        h.find(Role::MenuItem, &format!("Add {}", tool.name()));
+    }
+    assert_eq!(h.focused_words().as_deref(), Some("Add rectangle"), "opened from the keyboard: on its first item");
+    h.key(Key::Escape, NO_MODS);
+    assert!(!h.has(Role::MenuItem, "Add rectangle"), "Escape closes it");
+    assert_eq!(h.focused_words().as_deref(), Some("Add a mark"), "and gives the keyboard back to its button");
 }
 
 #[test]
 fn adding_a_mark_chooses_it_says_so_and_is_one_undo() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add rectangle");
+    h.press("Add rectangle");
     assert!(h.status().starts_with("Added a rectangle: Rectangle"), "{}", h.status());
     assert_eq!(h.mark_rows().len(), 3);
     let row = h.mark_rows()[2].clone();
@@ -1842,7 +1920,7 @@ fn adding_a_mark_chooses_it_says_so_and_is_one_undo() {
 #[test]
 fn the_buttons_move_and_resize_the_chosen_mark_and_each_is_one_undo() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add rectangle");
+    h.press("Add rectangle");
     let start = the_selected_mark(&h);
     h.invoke(Role::Button, "Move right");
     h.invoke(Role::Button, "Move down");
@@ -1861,7 +1939,7 @@ fn the_buttons_move_and_resize_the_chosen_mark_and_each_is_one_undo() {
 #[test]
 fn colour_and_line_width_are_chosen_from_lists_and_applied() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add arrow");
+    h.press("Add arrow");
     h.invoke(Role::RadioButton, "Red");
     h.invoke(Role::RadioButton, "8 pixels");
     let mark = the_selected_mark(&h);
@@ -1873,11 +1951,11 @@ fn colour_and_line_width_are_chosen_from_lists_and_applied() {
 #[test]
 fn a_blur_has_no_colour_to_choose_and_a_text_mark_has_a_box_for_its_words() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add blur");
+    h.press("Add blur");
     assert!(!h.has(Role::RadioButton, "Red"), "a blur has no colour");
-    h.invoke(Role::Button, "Add text");
+    h.press("Add text");
     h.find(Role::TextInput, "Words in the text mark");
-    h.invoke(Role::Button, "Add step number");
+    h.press("Add step number");
     h.find(Role::Button, "Number up");
     assert!(h.node(h.find(Role::Button, "Number down")).is_disabled(), "step numbers start at 1");
     h.invoke(Role::Button, "Number up");
@@ -1887,7 +1965,7 @@ fn a_blur_has_no_colour_to_choose_and_a_text_mark_has_a_box_for_its_words() {
 #[test]
 fn deleting_a_mark_by_its_button_or_by_the_delete_key_and_undo_brings_it_back() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add oval");
+    h.press("Add oval");
     h.invoke(Role::Button, "Delete mark");
     assert!(h.status().starts_with("Deleted: Oval"), "{}", h.status());
     assert_eq!(h.mark_rows().len(), 2);
@@ -1925,7 +2003,7 @@ fn marks_are_available_only_when_the_step_has_a_picture() {
 #[test]
 fn every_control_the_marks_section_shows_has_a_name_and_a_keyboard_route() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add arrow");
+    h.press("Add arrow");
     for id in &h.order {
         let node = h.node(*id);
         if egui::accessibility::is_input(node.role()) {
@@ -1938,7 +2016,7 @@ fn every_control_the_marks_section_shows_has_a_name_and_a_keyboard_route() {
 #[test]
 fn dragging_a_mark_with_the_mouse_moves_it_by_what_the_pointer_moved_and_is_one_undo() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add rectangle");
+    h.press("Add rectangle");
     let before = the_selected_mark(&h);
     let image =
         h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).expect("the picture is in the tree");
@@ -1981,7 +2059,7 @@ fn dragging_a_mark_with_the_mouse_moves_it_by_what_the_pointer_moved_and_is_one_
 #[test]
 fn a_click_on_empty_picture_with_the_mouse_chooses_no_mark() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add rectangle");
+    h.press("Add rectangle");
     let image = h.order.iter().copied().find(|id| h.node(*id).role() == Role::Image).unwrap();
     let b = h.node(image).bounds().unwrap();
     let corner = Pos2::new(b.x1 as f32 - 3.0, b.y1 as f32 - 3.0);
@@ -2030,7 +2108,7 @@ fn the_guide_is_renamed_in_the_editor_and_home_lists_it_by_the_new_name() {
 fn duplicate_step_makes_a_copy_and_says_so() {
     let mut h = Harness::new(Screen::Editor);
     let before = h.rows().len();
-    h.invoke(Role::Button, "Duplicate step");
+    h.press("Duplicate step");
     assert_eq!(h.rows().len(), before + 1);
     assert!(h.status().starts_with("Duplicated. The copy is"), "{}", h.status());
 }
@@ -2358,7 +2436,7 @@ fn type_into(h: &mut Harness, name: &str, text: &str) {
 fn every_hotkey_has_a_named_box_that_shows_its_keys_and_the_usual_ones_button() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     for (name, keys) in
         [("Start or finish", "Ctrl+Shift+F7"), ("Pause or resume", "Ctrl+Shift+F8"), ("Capture now", "Ctrl+Shift+F9")]
     {
@@ -2373,7 +2451,7 @@ fn every_hotkey_has_a_named_box_that_shows_its_keys_and_the_usual_ones_button() 
 fn a_hotkey_is_changed_by_typing_it_and_the_change_is_saved_said_and_handed_on() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     type_into(&mut h, "Capture now", "alt + shift + k");
     assert_eq!(h.app.settings.hotkeys.capture_now.describe(), "Alt+Shift+K");
     assert_eq!(
@@ -2403,7 +2481,7 @@ fn a_hotkey_is_changed_by_typing_it_and_the_change_is_saved_said_and_handed_on()
 fn a_hotkey_that_is_not_allowed_is_refused_in_words_and_nothing_changes() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     type_into(&mut h, "Capture now", "Ctrl+Alt+K");
     assert!(h.status().starts_with("Capture now was not changed."), "{}", h.status());
     assert!(h.status().contains("AltGr"), "{}", h.status());
@@ -2429,7 +2507,7 @@ fn a_hotkey_that_is_not_allowed_is_refused_in_words_and_nothing_changes() {
 fn a_good_key_after_a_refused_one_works_and_the_refusal_goes() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     type_into(&mut h, "Capture now", "F7");
     let refusal = h.status().replace("Capture now was not changed. ", "");
     assert!(h.has(Role::Label, &refusal));
@@ -2442,7 +2520,7 @@ fn a_good_key_after_a_refused_one_works_and_the_refusal_goes() {
 fn leaving_a_box_without_changing_it_changes_nothing_and_says_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     let before = h.status();
     h.focus_on(Role::TextInput, "Start or finish");
     h.key(Key::Tab, NO_MODS);
@@ -2460,7 +2538,7 @@ fn leaving_a_box_without_changing_it_changes_nothing_and_says_nothing() {
 fn the_usual_hotkeys_button_puts_every_box_and_key_back() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = settings_harness(dir.path(), None);
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     type_into(&mut h, "Capture now", "Alt+Shift+K");
     type_into(&mut h, "Start or finish", "Ctrl+Shift+F1");
     let _ = h.app.take_hotkey_change();
@@ -2605,7 +2683,7 @@ fn the_sound_check_boxes_are_in_settings_and_the_hear_buttons_play_even_when_a_s
     let mut h = settings_harness(dir.path(), None);
     let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
     h.app = app.with_cues(Box::new(RecordedCues(Rc::clone(&played))));
-    h.invoke(Role::Button, "Settings");
+    h.press("Settings...");
     for check in [
         "When capturing starts or resumes, and when it pauses or finishes",
         "When a step is captured",
@@ -2826,8 +2904,8 @@ fn with_no_shape_chosen_a_drag_on_empty_picture_draws_nothing() {
 #[test]
 fn a_dragged_step_number_takes_the_next_number_and_a_drag_outside_the_picture_stays_on_it() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add step number");
-    h.invoke(Role::Button, "Add step number");
+    h.press("Add step number");
+    h.press("Add step number");
     h.invoke_named(SHAPES_HEADING);
     h.invoke(Role::RadioButton, "Draw a step number");
     let at = picture_mapper(&h);
@@ -2949,7 +3027,8 @@ fn a_guide_on_disk_has_rename_and_delete_buttons_named_for_it_and_the_example_ha
         h.find(Role::Button, &format!("Rename {title}"));
         h.find(Role::Button, &format!("Delete {title}"));
     }
-    h.find(Role::Button, "Trash");
+    let mut h = h;
+    assert!(h.usable_in_menu("Trash..."), "the Trash is in the File menu");
 }
 
 #[test]
@@ -3084,7 +3163,7 @@ fn keep_it_and_escape_both_leave_the_guide_where_it_is() {
 fn the_trash_lists_what_was_deleted_and_restore_brings_it_back_whole() {
     let dir = guides_dir(&["Alpha", "Beta"]);
     let (mut h, _) = home_over(dir.path(), &[]);
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     assert_eq!(h.app.screen, Screen::Trash);
     h.find(Role::Heading, "Trash");
     h.find(Role::Label, "The Trash is empty.");
@@ -3093,7 +3172,7 @@ fn the_trash_lists_what_was_deleted_and_restore_brings_it_back_whole() {
     assert_eq!(h.app.screen, Screen::Home);
     h.invoke(Role::Button, "Delete Alpha");
     h.invoke(Role::Button, "Move to the Trash");
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     assert_eq!(h.status(), "The Trash has 1 guide. Restore brings one back.");
     h.find(Role::Label, "Alpha");
     h.find(Role::Button, "Restore Alpha");
@@ -3113,13 +3192,13 @@ fn the_trash_lists_what_was_deleted_and_restore_brings_it_back_whole() {
 fn show_the_trash_folder_opens_it_or_the_guides_folder_until_something_has_been_deleted() {
     let dir = guides_dir(&["Alpha"]);
     let (mut h, shown) = home_over(dir.path(), &[]);
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     h.invoke(Role::Button, "Show the Trash folder");
     assert_eq!(*shown.borrow(), [dir.path().to_path_buf()], "there is no Trash folder yet");
     h.invoke(Role::Button, "Back to guides");
     h.invoke(Role::Button, "Delete Alpha");
     h.invoke(Role::Button, "Move to the Trash");
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     h.invoke(Role::Button, "Show the Trash folder");
     assert_eq!(shown.borrow().last(), Some(&dir.path().join("Trash")));
     assert_eq!(h.status(), "Showing the Trash folder in Explorer.");
@@ -3178,7 +3257,7 @@ fn every_control_on_home_and_the_trash_has_a_name_and_a_keyboard_route() {
                 h.invoke(Role::Button, "Keep it");
                 h.invoke(Role::Button, "Delete Alpha");
                 h.invoke(Role::Button, "Move to the Trash");
-                h.invoke(Role::Button, "Trash");
+                h.press("Trash...");
             }
             _ => {}
         }
@@ -3300,15 +3379,15 @@ fn shift_up_on_the_first_step_and_shift_down_on_the_last_choose_nothing_more() {
 fn the_choose_all_button_is_a_way_to_choose_several_without_keys_or_the_mouse() {
     let mut h = Harness::new(Screen::Editor);
     let rows = example_rows(&h);
-    h.invoke(Role::Button, "Choose all steps");
+    h.press("Choose all steps");
     assert_eq!(chosen(&h), rows);
-    assert!(h.node(h.find(Role::Button, "Choose all steps")).is_disabled(), "everything is chosen already");
+    assert!(!h.usable_in_menu("Choose all steps"), "everything is chosen already");
     h.find(Role::Heading, "Several steps chosen");
     h.find(Role::Label, "7 steps are chosen:");
     h.invoke(Role::Button, "Choose just one step: 1. Click \"Assignments\"");
     assert_eq!(chosen(&h), [rows[0].clone()]);
     assert_eq!(h.focused_words().as_deref(), Some(rows[0].as_str()), "the keyboard is back on the list");
-    assert!(!h.node(h.find(Role::Button, "Choose all steps")).is_disabled());
+    assert!(h.usable_in_menu("Choose all steps"));
 }
 
 #[test]
@@ -3327,7 +3406,10 @@ fn with_several_chosen_the_details_of_one_step_give_way_to_what_can_be_done_to_a
         assert!(!h.node(h.find(Role::Button, words)).is_disabled(), "{words}");
     }
     assert!(h.node(h.find(Role::Button, "Put these steps back in export")).is_disabled(), "none is skipped");
-    assert!(h.node(h.find(Role::Button, "Duplicate step")).is_disabled(), "duplicating is for one step");
+    assert!(
+        h.usable_in_menu("Duplicate step"),
+        "the menus' Duplicate step works on every chosen step, as Duplicate these steps does"
+    );
     // The guide's own title box stays.
     h.find(Role::TextInput, "Guide title");
 }
@@ -3514,7 +3596,7 @@ fn a_single_step_has_move_buttons_that_do_what_alt_up_and_alt_down_do() {
     assert_eq!(h.rows(), rows);
     assert_eq!(h.focused_words().as_deref(), Some("Move step up"), "the keyboard stays on the button");
     // They give way to the buttons for several when several are chosen.
-    h.invoke(Role::Button, "Choose all steps");
+    h.press("Choose all steps");
     assert!(!h.has(Role::Button, "Move step up") && h.has(Role::Button, "Move these steps up"));
 }
 
@@ -3522,11 +3604,11 @@ fn a_single_step_has_move_buttons_that_do_what_alt_up_and_alt_down_do() {
 fn adding_a_step_or_undoing_goes_back_to_one_chosen_step() {
     let mut h = Harness::new(Screen::Editor);
     let rows = example_rows(&h);
-    h.invoke(Role::Button, "Choose all steps");
+    h.press("Choose all steps");
     h.invoke(Role::Button, "Add a step");
     assert_eq!(chosen(&h).len(), 1, "only the new step is chosen");
     assert_eq!(h.rows().len(), 8);
-    h.invoke(Role::Button, "Choose all steps");
+    h.press("Choose all steps");
     h.invoke(Role::Button, "Undo");
     assert_eq!(chosen(&h).len(), 1);
     assert_eq!(h.rows(), rows);
@@ -3556,7 +3638,7 @@ fn with_several_steps_chosen_the_mouse_does_not_pick_up_a_mark() {
 #[test]
 fn the_steps_list_is_still_one_stop_for_the_tab_key_and_every_control_has_a_name() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Choose all steps");
+    h.press("Choose all steps");
     let mut stops = Vec::new();
     for _ in 0..8 {
         h.key(Key::Tab, NO_MODS);
@@ -3726,7 +3808,7 @@ fn a_restored_guide_takes_its_place_in_the_order_and_an_empty_list_keeps_the_cho
     h.invoke(Role::Button, "Delete banana");
     h.invoke(Role::Button, "Move to the Trash");
     assert_eq!(card_order(&h), ["Apple", "cherry"]);
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     h.invoke(Role::Button, "Restore banana");
     h.invoke(Role::Button, "Back to guides");
     assert_eq!(card_order(&h), ["Apple", "banana", "cherry"], "back between the two, by name");
@@ -3736,7 +3818,7 @@ fn a_restored_guide_takes_its_place_in_the_order_and_an_empty_list_keeps_the_cho
     }
     assert!(h.app.home.shows_example());
     assert_eq!(h.app.home.sort, crate::settings::HomeSort::NameAz, "the choice is not lost when the list is empty");
-    h.invoke(Role::Button, "Trash");
+    h.press("Trash...");
     h.invoke(Role::Button, "Restore cherry");
     h.invoke(Role::Button, "Restore banana");
     h.invoke(Role::Button, "Back to guides");
@@ -3753,7 +3835,7 @@ fn the_sort_button_is_one_tab_stop_before_the_first_card() {
         seen.push(h.focused_words().unwrap_or_default());
     }
     let sort = seen.iter().position(|w| w.starts_with("Sort: ")).expect("the sort button is reached");
-    assert_eq!(seen[sort - 1], "Open a copy");
+    assert_eq!(seen[sort - 1], "Search", "right after the search box");
     assert_eq!(seen[sort + 1], "banana, 5 steps", "then the first card");
 }
 
@@ -3782,7 +3864,7 @@ fn restore_buttons(h: &Harness) -> Vec<String> {
 fn a_guide_that_has_lost_nothing_has_no_deleted_steps_button_and_the_first_delete_brings_it() {
     let mut h = Harness::new(Screen::Editor);
     assert_eq!(deleted_button(&h), None);
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (1)"));
     h.invoke(Role::Button, "Undo");
     assert_eq!(deleted_button(&h), None, "undo brought the step back, so nothing is deleted");
@@ -3791,21 +3873,21 @@ fn a_guide_that_has_lost_nothing_has_no_deleted_steps_button_and_the_first_delet
 #[test]
 fn the_delete_step_button_deletes_the_chosen_step_and_leaves_the_keyboard_on_the_list() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     assert!(h.status().starts_with("Deleted 1. Click \"Assignments\". Undo brings it back"), "{}", h.status());
     assert_eq!(h.rows().len(), 6);
     assert_eq!(chosen(&h), ["1. Click \"New assignment\""], "the step that took its place is chosen");
     assert_eq!(h.focused_words().as_deref(), Some("1. Click \"New assignment\""), "and has the keyboard");
-    // With several steps chosen this one-step button waits, and the buttons for several do the work.
-    h.invoke(Role::Button, "Choose all steps");
-    assert!(h.node(h.find(Role::Button, "Delete step")).is_disabled());
+    // With several steps chosen the menus' Delete step deletes them all (as Ctrl+Shift+Delete and Delete these steps do).
+    h.press("Choose all steps");
+    assert!(h.usable_in_menu("Delete step"));
 }
 
 #[test]
 fn the_deleted_steps_screen_lists_each_step_with_a_restore_button_named_for_it() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Delete step");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
+    h.press("Delete step");
     assert_eq!(deleted_button(&h).as_deref(), Some("Deleted steps (2)"));
     h.invoke(Role::Button, "Deleted steps (2)");
     assert_eq!(h.app.screen, Screen::DeletedSteps);
@@ -3889,7 +3971,7 @@ fn restore_all_puts_every_step_back_in_its_old_place_as_one_change_and_one_undo_
 #[test]
 fn leaving_the_deleted_steps_screen_without_restoring_changes_nothing() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     let rows = h.rows();
     h.invoke(Role::Button, "Deleted steps (1)");
     h.invoke(Role::Button, "Back to the steps");
@@ -3911,12 +3993,13 @@ fn the_deleted_steps_screen_with_no_guide_open_goes_home() {
 fn tab_on_the_deleted_steps_screen_goes_to_back_then_restore_all_then_each_restore() {
     let mut h = Harness::new(Screen::DeletedSteps);
     let mut seen = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..6 {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
-    assert_eq!(&seen[..2], ["Back to the steps", "Restore all 2 steps"], "{seen:?}");
-    let mut restores = seen[2..].to_vec();
+    // After the navy bar's Search and the menu bar, which every screen has.
+    assert_eq!(&seen[..4], ["Search for a command", "File", "Back to the steps", "Restore all 2 steps"], "{seen:?}");
+    let mut restores = seen[4..].to_vec();
     restores.sort();
     assert_eq!(restores, ["Restore Click \"New assignment\"", "Restore Note: Tip"], "{seen:?}");
     h.key(Key::Tab, NO_MODS);
@@ -3926,19 +4009,23 @@ fn tab_on_the_deleted_steps_screen_goes_to_back_then_restore_all_then_each_resto
 #[test]
 fn the_deleted_steps_button_is_one_more_tab_stop_after_choose_all_steps() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Delete step");
-    let mut seen = Vec::new();
-    for _ in 0..30 {
+    h.press("Delete step");
+    // The keyboard is on the list after the delete; go once round the window from there.
+    let mut seen = vec![h.focused_words().unwrap_or_default()];
+    for _ in 0..40 {
         h.key(Key::Tab, NO_MODS);
-        seen.push(h.focused_words().unwrap_or_default());
+        let words = h.focused_words().unwrap_or_default();
+        if words == seen[0] {
+            break;
+        }
+        seen.push(words);
     }
-    let at = |words: &str| {
-        seen.iter().position(|s| s == words).unwrap_or_else(|| panic!("Tab never reached {words:?}: {seen:?}"))
-    };
-    let order = ["Add a step", "Duplicate step", "Delete step", "Choose all steps", "Deleted steps (1)"];
-    for pair in order.windows(2) {
-        assert!(at(pair[0]) < at(pair[1]), "{} comes before {}: {seen:?}", pair[0], pair[1]);
-    }
+    assert_eq!(seen[0], "1. Click \"New assignment\"");
+    assert_eq!(seen[1], "Deleted steps (1)", "one more stop, right after the list: {seen:?}");
+    assert_eq!(seen[2], "Guide", "then the details: {seen:?}");
+    // Round the window and back to the list: the pane's Add and "..." (which holds Duplicate, Delete and Choose all steps) come
+    // just before it.
+    assert_eq!(&seen[seen.len() - 2..], ["Add a step", "More for the steps"], "{seen:?}");
 }
 
 /// A real guide folder named `title` in `parent`, with a plain picture file for every step that has one.
@@ -3991,7 +4078,7 @@ fn a_deleted_step_and_its_picture_are_kept_in_the_guides_trash_on_disk_and_resto
     let picture = guide.join("images/step-0001.png");
     assert!(picture.is_file());
 
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     let (after_delete, kept) = saved_steps(&guide);
     assert_eq!((after_delete.len(), kept), (6, 1), "the guide on disk no longer has the step, and its trash has it");
     assert!(!picture.exists(), "the picture left images");
@@ -4011,7 +4098,7 @@ fn a_step_deleted_in_one_visit_can_be_restored_in_the_next_one() {
     let guide = guide_with_pictures(dir.path(), "Alpha");
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     h.invoke(Role::Button, "Back to guides");
     assert_eq!(h.app.screen, Screen::Home);
     h.invoke(Role::Button, "Alpha, 4 steps");
@@ -4046,7 +4133,7 @@ fn the_dev_switches_for_the_deleted_steps_are_read() {
 fn restoring_the_last_button_of_several_leaves_the_keyboard_on_the_new_last_one() {
     let mut h = Harness::new(Screen::Editor);
     for _ in 0..3 {
-        h.invoke(Role::Button, "Delete step");
+        h.press("Delete step");
     }
     h.invoke(Role::Button, "Deleted steps (3)");
     let buttons = restore_buttons(&h);
@@ -4099,13 +4186,14 @@ fn empty_the_trash_asks_first_with_keep_them_ready_and_deletes_nothing_until_tol
 fn tab_goes_through_the_question_and_empty_the_trash_is_the_last_stop_of_the_list() {
     let mut h = Harness::new(Screen::DeletedSteps);
     let mut list = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..7 {
         h.key(Key::Tab, NO_MODS);
         list.push(h.focused_words().unwrap_or_default());
     }
-    assert_eq!(list[0], "Back to the steps");
-    assert_eq!(list[1], "Restore all 2 steps");
-    assert_eq!(list[4], "Empty the trash", "after every Restore button: {list:?}");
+    assert_eq!(&list[..2], ["Search for a command", "File"], "the navy bar and the menus first: {list:?}");
+    assert_eq!(list[2], "Back to the steps");
+    assert_eq!(list[3], "Restore all 2 steps");
+    assert_eq!(list[6], "Empty the trash", "after every Restore button: {list:?}");
     h.invoke(Role::Button, "Empty the trash");
     let mut question = vec![h.focused_words().unwrap_or_default()];
     for _ in 0..2 {
@@ -4113,7 +4201,11 @@ fn tab_goes_through_the_question_and_empty_the_trash_is_the_last_stop_of_the_lis
         question.push(h.focused_words().unwrap_or_default());
     }
     question.sort();
-    assert_eq!(question, ["Back to the steps", "Empty the trash for good", "Keep them"]);
+    assert_eq!(
+        question,
+        ["Empty the trash for good", "Keep them", "Search for a command"],
+        "then on round to the navy bar"
+    );
 }
 
 #[test]
@@ -4152,8 +4244,8 @@ fn emptying_the_trash_of_a_real_guide_deletes_the_pictures_nothing_uses_and_keep
     h.invoke(Role::Button, "Alpha, 5 steps");
     let all = pngs_in(&guide.join("images"));
     assert_eq!(all.len(), 6);
-    h.invoke(Role::Button, "Delete step");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
+    h.press("Delete step");
     assert_eq!((pngs_in(&guide.join("images")).len(), pngs_in(&guide.join("trash")).len()), (4, 2));
     h.invoke(Role::Button, "Deleted steps (2)");
     h.invoke(Role::Button, "Empty the trash");
@@ -4179,8 +4271,8 @@ fn a_picture_a_step_that_is_left_still_uses_is_not_deleted() {
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
     // The copy shares the picture of the first step; deleting the copy leaves the picture in use.
-    h.invoke(Role::Button, "Duplicate step");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Duplicate step");
+    h.press("Delete step");
     h.invoke(Role::Button, "Deleted steps (1)");
     h.invoke(Role::Button, "Empty the trash");
     h.invoke(Role::Button, "Empty the trash for good");
@@ -4195,7 +4287,7 @@ fn if_the_guide_cannot_be_saved_the_trash_is_not_emptied_and_the_steps_can_still
     let guide = guide_with_pictures(dir.path(), "Alpha");
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     // A folder where the trash file should be: saving the trash fails, as a locked or full disk would.
     let trash_file = guide.join("trash/trash.json");
     std::fs::remove_file(&trash_file).unwrap();
@@ -4223,7 +4315,7 @@ fn a_picture_that_cannot_be_deleted_is_said_in_words_and_the_steps_are_gone() {
     let guide = guide_with_pictures(dir.path(), "Alpha");
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     let stuck = guide.join("trash/step-0001.png");
     let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(&stuck).unwrap();
     h.invoke(Role::Button, "Deleted steps (1)");
@@ -4254,7 +4346,7 @@ fn one_step_with_its_own_picture_is_said_in_the_singular() {
     let guide = guide_with_pictures(dir.path(), "Alpha");
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     h.invoke(Role::Button, "Deleted steps (1)");
     h.invoke(Role::Button, "Empty the trash");
     h.invoke(Role::Button, "Empty the trash for good");
@@ -4452,7 +4544,7 @@ fn a_press_on_the_picture_that_does_not_move_leaves_the_crop_alone() {
 #[test]
 fn a_drag_that_starts_on_a_mark_moves_the_mark_and_with_space_held_it_moves_the_crop() {
     let mut h = Harness::new(Screen::Editor);
-    h.invoke(Role::Button, "Add rectangle");
+    h.press("Add rectangle");
     let mark = the_selected_mark(&h);
     let (cx, cy) = (mark.x + mark.width.unwrap() / 2, mark.y + mark.height.unwrap() / 2);
     let at = picture_mapper(&h);
@@ -4599,7 +4691,7 @@ fn a_copy_of_a_real_guide_never_holds_a_deleted_step_or_its_picture_whichever_ki
     let guide = guide_with_pictures(dir.path(), "Alpha");
     let (mut h, _) = home_over(dir.path(), &[]);
     h.invoke(Role::Button, "Alpha, 5 steps");
-    h.invoke(Role::Button, "Delete step");
+    h.press("Delete step");
     let deleted_picture = std::fs::read(guide.join("trash/step-0001.png")).unwrap();
     for tick in [false, true] {
         if tick {
@@ -4661,7 +4753,7 @@ fn the_open_a_copy_screen_takes_a_path_with_quotes_opens_the_copy_as_a_guide_and
     let guides = guides_dir(&["Alpha"]);
     let file = a_copy_file(dir.path(), true);
     let (mut h, _) = home_over(guides.path(), &[]);
-    h.invoke(Role::Button, "Open a copy");
+    h.press("Open a copy...");
     assert_eq!(h.app.screen, Screen::OpenCopy);
     h.find(Role::Heading, "Open a copy");
     assert_eq!(h.focused_words().as_deref(), Some("File to open"), "the keyboard is in the box");
@@ -4692,7 +4784,7 @@ fn enter_in_the_box_opens_the_copy_and_browse_fills_the_box_from_the_dialog() {
     let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
     h.app = app.with_file_chooser(Box::new(move |_| record.borrow_mut().remove(0)));
     h.settle();
-    h.invoke(Role::Button, "Open a copy");
+    h.press("Open a copy...");
     h.invoke(Role::Button, "Browse...");
     assert_eq!(h.app.open_copy_path(), "", "cancelled, so nothing was filled in");
     h.invoke(Role::Button, "Browse...");
@@ -4724,7 +4816,7 @@ fn a_file_that_is_not_a_copy_is_said_in_words_the_screen_stays_and_no_guide_is_m
     }
     std::fs::write(&hostile, bad).unwrap();
     let (mut h, _) = home_over(guides.path(), &[]);
-    h.invoke(Role::Button, "Open a copy");
+    h.press("Open a copy...");
     for (path, expected) in [
         (text.display().to_string(), "not a ZIP file"),
         (hostile.display().to_string(), "Express will not open this ZIP file"),
@@ -4746,10 +4838,10 @@ fn a_file_that_is_not_a_copy_is_said_in_words_the_screen_stays_and_no_guide_is_m
 fn the_open_a_copy_screen_reads_in_order_and_goes_back() {
     let guides = guides_dir(&[]);
     let (mut h, _) = home_over(guides.path(), &[]);
-    h.invoke(Role::Button, "Open a copy");
+    h.press("Open a copy...");
     h.type_text("x");
     let mut seen = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..6 {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
@@ -4816,9 +4908,379 @@ fn the_buttons_for_the_whole_guide_come_after_the_guide_title_in_the_keyboard_or
     let mut h = Harness::new(Screen::Editor);
     h.focus_on(Role::TextInput, "Guide title");
     let mut seen = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         h.key(Key::Tab, NO_MODS);
         seen.push(h.focused_words().unwrap_or_default());
     }
-    assert_eq!(seen, ["Focused view on for every step", "Focused view off for every step", "Title"]);
+    assert_eq!(seen, ["Focused view on for every step", "Focused view off for every step", "Step details", "Title"]);
+}
+
+// ---- The OpenStage suite's look (2026-11-11): the navy bar, the menus, the command search, the keys, sections ----
+
+/// The words of every menu item under `parent` in the tree, in reading order.
+fn menu_items_under(h: &Harness, parent: NodeId) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack: Vec<NodeId> = h.node(parent).children().iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        if let Some(node) = h.nodes.get(&id) {
+            if node.role() == Role::MenuItem {
+                found.push(h.name(id).unwrap_or_default());
+            }
+            stack.extend(node.children().iter().rev());
+        }
+    }
+    found
+}
+
+/// The command search's chosen result, by its words.
+fn chosen_result(h: &Harness) -> Option<String> {
+    h.order
+        .iter()
+        .copied()
+        .find(|id| h.node(*id).is_selected() == Some(true) && h.node(*id).description().is_some())
+        .and_then(|id| h.name(id))
+}
+
+#[test]
+fn the_menu_bar_is_one_menu_bar_of_seven_titles_each_saying_it_has_a_closed_menu() {
+    let h = Harness::new(Screen::Editor);
+    let bar = h.find(Role::MenuBar, "Menus");
+    let titles = menu_items_under(&h, bar);
+    assert_eq!(titles, ["File", "Edit", "Step", "Marks", "View", "Tools", "Help"]);
+    for title in &titles {
+        let node = h.node(h.find(Role::MenuItem, title));
+        assert_eq!(node.has_popup(), Some(accesskit::HasPopup::Menu), "{title}");
+        assert_eq!(node.is_expanded(), Some(false), "{title} is closed");
+    }
+}
+
+#[test]
+fn f10_goes_to_the_menus_the_arrows_move_along_and_into_them_and_escape_goes_back_where_the_keyboard_was() {
+    let mut h = Harness::new(Screen::Editor);
+    h.focus_on(Role::TextInput, "Title");
+    h.key(Key::F10, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("File"));
+    h.key(Key::ArrowRight, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("Edit"));
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(h.node(h.find(Role::MenuItem, "Edit")).is_expanded(), Some(true));
+    h.find(Role::Menu, "Edit");
+    assert_eq!(h.focused_words().as_deref(), Some("Undo"), "the first item has the keyboard");
+    assert!(h.node(h.find(Role::MenuItem, "Undo")).is_disabled(), "nothing to undo yet: there, read as unavailable");
+    assert_eq!(h.node(h.find(Role::MenuItem, "Undo")).keyboard_shortcut(), Some("Ctrl+Z"));
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("Redo"));
+    h.key(Key::End, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("Deleted steps..."));
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("Undo"), "round to the top");
+    h.type_text("c");
+    assert_eq!(
+        h.focused_words().as_deref(),
+        Some("Choose all steps"),
+        "a letter jumps to the next item starting with it"
+    );
+    h.key(Key::ArrowRight, NO_MODS);
+    h.find(Role::Menu, "Step");
+    assert_eq!(h.focused_words().as_deref(), Some("Add a step"), "Right opens the next menu");
+    h.key(Key::Escape, NO_MODS);
+    assert!(!h.has(Role::Menu, "Step"));
+    assert_eq!(h.focused_words().as_deref(), Some("Step"), "Escape closes the menu and the keyboard is on its title");
+    h.key(Key::Escape, NO_MODS);
+    assert_eq!(h.focused_words().as_deref(), Some("Title"), "and again: back where it was before F10");
+}
+
+#[test]
+fn a_command_chosen_in_a_menu_is_done_and_the_keyboard_goes_back_where_it_was() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.focus_on(Role::ListBoxOption, &rows[0]);
+    h.key(Key::F10, NO_MODS);
+    for _ in 0..2 {
+        h.key(Key::ArrowRight, NO_MODS);
+    }
+    h.key(Key::Enter, NO_MODS);
+    h.find(Role::Menu, "Step");
+    // Down to Move step down, and Enter.
+    for _ in 0..4 {
+        h.key(Key::ArrowDown, NO_MODS);
+    }
+    assert_eq!(h.focused_words().as_deref(), Some("Move step down"));
+    h.key(Key::Enter, NO_MODS);
+    assert!(!h.has(Role::Menu, "Step"), "the menu closes");
+    assert!(
+        !h.rows()[0].contains("Assignments"),
+        "the step moved down, past the next step and its substep: {:?}",
+        h.rows()
+    );
+    assert!(h.status().starts_with("Moved"), "{}", h.status());
+    assert!(h.focused_words().unwrap_or_default().contains("Assignments"), "the keyboard is back on the list");
+    h.press("Undo");
+    assert!(h.rows()[0].contains("Assignments"));
+}
+
+#[test]
+fn a_command_that_cannot_be_used_now_does_nothing_and_stays_in_its_menu() {
+    let mut h = Harness::new(Screen::Home);
+    for words in ["Undo", "Add a step", "Export...", "Back to guides"] {
+        assert!(!h.usable_in_menu(words), "{words} is not for Home");
+    }
+    let before = h.status();
+    h.press("Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+    assert_eq!(h.status(), before, "nothing was done");
+    for words in ["Start capturing", "Open a copy...", "Trash...", "Settings...", "About and licences", "Keyboard keys"]
+    {
+        assert!(h.usable_in_menu(words), "{words} works from Home");
+    }
+}
+
+#[test]
+fn ticked_items_say_whether_they_are_ticked_and_the_colours_are_one_of_three() {
+    let mut h = Harness::new(Screen::Editor);
+    let skip = h.open_menu_with("Skip in export").unwrap();
+    assert_eq!(h.node(skip).role(), Role::MenuItemCheckBox);
+    assert_eq!(h.node(skip).toggled(), Some(accesskit::Toggled::False));
+    h.key(Key::Escape, NO_MODS);
+    h.press("Skip in export");
+    let skip = h.open_menu_with("Skip in export").unwrap();
+    assert_eq!(h.node(skip).toggled(), Some(accesskit::Toggled::True), "the step is skipped now");
+    h.key(Key::Escape, NO_MODS);
+    h.press("Skip in export");
+    assert!(!h.rows()[0].contains("(skipped)"));
+    let dark = h.open_menu_with("Colours: dark").unwrap();
+    assert_eq!(h.node(dark).role(), Role::MenuItemRadio);
+    assert_eq!(h.node(dark).toggled(), Some(accesskit::Toggled::False));
+    h.key(Key::Escape, NO_MODS);
+    h.press("Colours: dark");
+    assert_eq!(h.app.appearance(), crate::settings::Appearance::Dark);
+    assert_eq!(h.status(), "Colours: dark.");
+    let dark = h.open_menu_with("Colours: dark").unwrap();
+    assert_eq!(h.node(dark).toggled(), Some(accesskit::Toggled::True));
+    let windows = h.find(Role::MenuItemRadio, "Colours: follow Windows");
+    assert_eq!(h.node(windows).toggled(), Some(accesskit::Toggled::False), "one of the three at a time");
+}
+
+#[test]
+fn the_screens_that_were_buttons_on_home_open_from_the_menus() {
+    let mut h = Harness::new(Screen::Home);
+    h.press("Settings...");
+    assert_eq!(h.app.screen, Screen::Settings);
+    h.invoke(Role::Button, "Back to guides");
+    h.press("About and licences");
+    assert_eq!(h.app.screen, Screen::About);
+    h.invoke(Role::Button, "Back to guides");
+    h.press("Trash...");
+    assert_eq!(h.app.screen, Screen::Trash);
+    h.invoke(Role::Button, "Back to guides");
+    h.press("Open a copy...");
+    assert_eq!(h.app.screen, Screen::OpenCopy);
+    h.press("Start capturing");
+    assert_eq!(h.app.screen, Screen::Bar, "File > Start capturing opens the capture bar from the other screens too");
+}
+
+#[test]
+fn leaving_an_open_guide_for_settings_saves_it_and_goes_back_to_the_guides_after() {
+    let mut h = Harness::new(Screen::Editor);
+    h.key(Key::ArrowDown, Modifiers::ALT);
+    h.press("Settings...");
+    assert_eq!(h.app.screen, Screen::Settings);
+    h.invoke(Role::Button, "Back to guides");
+    assert_eq!(h.app.screen, Screen::Home);
+    h.invoke(Role::Button, "How to submit an assignment, 5 steps, example guide");
+    assert!(h.rows()[0].starts_with("1. Click \"New assignment\""), "the change is still there: {:?}", h.rows());
+}
+
+#[test]
+fn the_navy_bar_names_the_guide_as_the_editors_first_heading_and_says_it_is_an_example() {
+    let h = Harness::new(Screen::Editor);
+    let title = h.find(Role::Heading, "How to submit an assignment");
+    assert_eq!(h.node(title).level(), Some(1));
+    h.find(Role::Label, "Example, not saved");
+    assert!(h.node(h.find(Role::Button, "Undo")).is_disabled(), "nothing to undo yet");
+    h.find(Role::Button, "Export");
+    let search = h.node(h.find(Role::Button, "Search for a command"));
+    assert_eq!(search.keyboard_shortcut(), Some("Ctrl+K"));
+    assert_eq!(search.has_popup(), Some(accesskit::HasPopup::Dialog));
+}
+
+#[test]
+fn ctrl_k_finds_a_command_by_its_words_and_enter_does_it() {
+    let mut h = Harness::new(Screen::Editor);
+    let rows = example_rows(&h);
+    h.focus_on(Role::ListBoxOption, &rows[0]);
+    h.key(Key::K, ctrl());
+    h.find(Role::Dialog, "Search for a command");
+    assert_eq!(h.focused_words().as_deref(), Some("Search for a command"), "the keyboard is in the box");
+    let listed = h.order.iter().filter(|id| h.node(**id).description().is_some_and(|d| d.ends_with(" menu"))).count();
+    assert!(listed > 30, "nothing typed lists every command: {listed}");
+    h.type_text("move step d");
+    assert_eq!(chosen_result(&h).as_deref(), Some("Move step down"));
+    let chosen = h
+        .order
+        .iter()
+        .copied()
+        .find(|id| h.name(*id).as_deref() == Some("Move step down") && h.node(*id).role() == Role::ListBoxOption)
+        .unwrap();
+    assert_eq!(h.node(chosen).description(), Some("Step menu"));
+    assert_eq!(h.node(chosen).keyboard_shortcut(), Some("Alt+Down"));
+    let field = h.find(Role::TextInput, "Search for a command");
+    assert_eq!(h.node(field).active_descendant(), Some(chosen), "a screen reader is told which one is chosen");
+    h.key(Key::Enter, NO_MODS);
+    assert!(!h.has(Role::Dialog, "Search for a command"), "it closes");
+    assert!(!h.rows()[0].contains("Assignments"), "and the command was done: {:?}", h.rows());
+}
+
+#[test]
+fn the_command_search_chooses_with_up_and_down_and_escape_closes_it_and_gives_the_keyboard_back() {
+    let mut h = Harness::new(Screen::Editor);
+    h.focus_on(Role::TextInput, "Title");
+    h.invoke(Role::Button, "Search for a command");
+    h.find(Role::Dialog, "Search for a command");
+    h.type_text("colours");
+    assert_eq!(chosen_result(&h).as_deref(), Some("Colours: follow Windows"));
+    h.key(Key::ArrowDown, NO_MODS);
+    assert_eq!(chosen_result(&h).as_deref(), Some("Colours: light"));
+    h.key(Key::ArrowUp, NO_MODS);
+    h.key(Key::ArrowUp, NO_MODS);
+    assert_eq!(chosen_result(&h).as_deref(), Some("Colours: dark"), "Up from the top goes round to the bottom");
+    h.type_text("zzz");
+    h.find(Role::Label, "No command matches what you typed.");
+    h.key(Key::Enter, NO_MODS);
+    h.find(Role::Dialog, "Search for a command");
+    h.key(Key::Escape, NO_MODS);
+    assert!(!h.has(Role::Dialog, "Search for a command"));
+    assert_eq!(h.focused_words().as_deref(), Some("Title"), "the keyboard is back where it was");
+}
+
+#[test]
+fn a_command_that_cannot_be_used_is_listed_in_the_search_but_enter_does_nothing() {
+    let mut h = Harness::new(Screen::Home);
+    h.key(Key::K, ctrl());
+    h.type_text("undo");
+    let undo = h
+        .order
+        .iter()
+        .copied()
+        .find(|id| h.node(*id).role() == Role::ListBoxOption && h.name(*id).as_deref() == Some("Undo"))
+        .unwrap();
+    assert!(h.node(undo).is_disabled());
+    h.key(Key::Enter, NO_MODS);
+    h.find(Role::Dialog, "Search for a command");
+    assert_eq!(h.app.screen, Screen::Home);
+}
+
+#[test]
+fn ctrl_slash_lists_the_keys_in_groups_and_escape_closes_the_list() {
+    let mut h = Harness::new(Screen::Editor);
+    h.focus_on(Role::TextInput, "Title");
+    h.key(Key::Slash, ctrl());
+    h.find(Role::Dialog, "Keyboard keys");
+    for group in [
+        "Everywhere",
+        "The steps list",
+        "Working with steps",
+        "Marks and the picture",
+        "Capturing (anywhere in Windows)",
+    ] {
+        h.find(Role::Heading, group);
+    }
+    for keys in ["Ctrl+K", "F10", "Alt+Up, Alt+Down", "Ctrl+Shift+Delete"] {
+        assert!(h.has(Role::Label, keys), "{keys} is listed");
+    }
+    h.invoke(Role::Button, "Close");
+    assert!(!h.has(Role::Dialog, "Keyboard keys"));
+    assert_eq!(h.focused_words().as_deref(), Some("Title"));
+    h.press("Keyboard keys");
+    h.find(Role::Dialog, "Keyboard keys");
+    h.key(Key::Escape, NO_MODS);
+    assert!(!h.has(Role::Dialog, "Keyboard keys"));
+}
+
+#[test]
+fn a_section_of_the_details_is_a_heading_with_a_button_that_opens_and_closes_it() {
+    let mut h = Harness::new(Screen::Editor);
+    let heading = h.find(Role::Heading, "Step details");
+    assert_eq!(h.node(heading).level(), Some(2));
+    let button = h.find(Role::Button, "Step details");
+    assert_eq!(h.node(button).is_expanded(), Some(true));
+    assert!(h.node(heading).children().contains(&button), "the button is inside the heading");
+    h.find(Role::TextInput, "Title");
+    h.invoke(Role::Button, "Step details");
+    assert_eq!(h.node(h.find(Role::Button, "Step details")).is_expanded(), Some(false));
+    assert!(!h.has(Role::TextInput, "Title"), "closed: only its heading is left");
+    h.find(Role::TextInput, "Guide title");
+    h.invoke(Role::Button, "Step details");
+    h.find(Role::TextInput, "Title");
+}
+
+#[test]
+fn the_menus_and_the_navy_bar_fit_the_smallest_window_in_both_colour_schemes() {
+    for dark in [true, false] {
+        for screen in [Screen::Home, Screen::Editor, Screen::Export, Screen::Settings] {
+            let h = Harness::sized(screen, egui::vec2(900.0, 560.0), 1.0, dark);
+            let mut must =
+                vec![(Role::MenuItem, "File"), (Role::MenuItem, "Help"), (Role::Button, "Search for a command")];
+            if screen == Screen::Editor {
+                must.extend([
+                    (Role::Button, "Back to guides"),
+                    (Role::Button, "Undo"),
+                    (Role::Button, "Redo"),
+                    (Role::Button, "Export"),
+                ]);
+            }
+            if screen == Screen::Home {
+                must.push((Role::Button, "Start capturing"));
+            }
+            for (role, words) in must {
+                let b = h.node(h.find(role, words)).bounds().unwrap_or_else(|| {
+                    panic!(
+                        "{screen:?}: {words:?} has no place
+{}",
+                        h.dump()
+                    )
+                });
+                assert!(b.x0 >= 0.0 && b.x1 <= 900.5 && b.y1 <= 560.0, "{screen:?} dark={dark}: {words:?} at {b:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_capture_bar_keeps_its_own_few_controls_without_the_menus() {
+    let mut h = Harness::new(Screen::Home);
+    h.invoke(Role::Button, "Start capturing");
+    assert_eq!(h.app.screen, Screen::Bar);
+    assert!(!h.has(Role::MenuBar, "Menus"), "the strip has no menus");
+    assert!(!h.has(Role::Button, "Search for a command"));
+    h.key(Key::K, ctrl());
+    assert!(!h.has(Role::Dialog, "Search for a command"), "nor the command search");
+    let heading = h.find(Role::Heading, "Ready to capture");
+    assert_eq!(h.node(heading).level(), Some(1));
+    for words in ["Start", "Cancel"] {
+        h.find(Role::Button, words);
+    }
+}
+
+#[test]
+fn the_picture_switches_open_a_menu_the_command_search_or_the_keys_and_a_wrong_menu_is_refused() {
+    use super::DevOptions;
+    let words = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let ok = DevOptions::parse(&words(&["--menu", "Edit", "--search", "export pdf", "--keys"])).unwrap();
+    assert_eq!(ok.menu.as_deref(), Some("Edit"));
+    assert_eq!(ok.search.as_deref(), Some("export pdf"));
+    assert!(ok.keys);
+    let error = DevOptions::parse(&words(&["--menu", "Format"])).unwrap_err();
+    assert_eq!(error, "--menu is File, Edit, Step, Marks, View, Tools or Help, not \"Format\".");
+    assert!(DevOptions::parse(&words(&["--search"])).is_err(), "--search needs its words");
+}
+
+#[test]
+fn the_about_screen_credits_the_icons_and_their_licences() {
+    let mut h = Harness::new(Screen::Home);
+    h.press("About and licences");
+    let said: Vec<String> = h.order.iter().filter_map(|id| h.name(*id)).collect();
+    for words in ["Lucide icons", "ISC License", "derived from the Feather project", "Copyright (c) 2013-present Cole Bemis"] {
+        assert!(said.iter().any(|s| s.contains(words)), "the About screen says {words:?}");
+    }
 }
