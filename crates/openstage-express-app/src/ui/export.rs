@@ -167,17 +167,15 @@ pub enum ExportAction {
 
 pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
     let mut action = ExportAction::None;
-    egui::Panel::top("export-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to the guide").clicked() {
-                action = ExportAction::Back;
-            }
-            widgets::heading(ui, "Export");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(ui, "export-top", "Back to the guide", "Export", false) {
+        action = ExportAction::Back;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(super::shell::PAGE_WIDTH));
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Formats");
             ui.label(RichText::new("Each one you choose goes into a folder of its own.").color(p.muted));
             ui.add_space(4.0);
@@ -199,7 +197,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
                     ui.label(RichText::new(about).size(13.5).color(p.muted));
                 });
             }
-            ui.add_space(10.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "How wide the pictures are");
             ui.label(
                 RichText::new(
@@ -295,7 +296,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
                     ui.label(RichText::new(problem).color(p.text));
                 }
             }
-            ui.add_space(6.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Try it on a few steps first");
             ui.label(
                 RichText::new(
@@ -324,14 +328,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
                     ui.label(RichText::new(problem).color(p.text));
                 }
             }
-            ui.add_space(10.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Where to put them");
             let folder_words = state.folder.display().to_string();
             let shown = ui.label(RichText::new(&folder_words).color(p.text));
             let name = format!("Export folder: {folder_words}");
             ui.ctx().accesskit_node_builder(shown.id, |node| node.set_label(name));
             ui.horizontal(|ui| {
-                if widgets::button(ui, "Choose folder...").clicked() {
+                if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Choose folder...").clicked() {
                     action = ExportAction::ChooseFolder;
                 }
             });
@@ -354,7 +361,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
             if state.selection.is_empty() {
                 ui.label(RichText::new("Choose at least one format.").color(p.muted));
             }
-            ui.add_space(14.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "A copy as one file");
             ui.label(
                 RichText::new(
@@ -374,7 +384,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
             };
             ui.label(RichText::new(format!("{kind} Deleted steps are never included.")).size(13.5).color(p.muted));
             let copy = ui.add_enabled_ui(!state.working, |ui| {
-                widgets::button(ui, if state.working { "Working..." } else { "Save a copy as one file" })
+                widgets::icon_button(ui, super::icon::UiIcon::Package, if state.working { "Working..." } else { "Save a copy as one file" })
             });
             if copy.inner.clicked() {
                 action = ExportAction::SaveCopy;
@@ -383,6 +393,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
                 ui.add_space(8.0);
                 ui.label(RichText::new(said).color(p.text));
             }
+});
+ui.add_space(12.0);
         });
     });
     action

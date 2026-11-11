@@ -21,14 +21,17 @@ use super::capture::{
 };
 use super::choose_area::{self, AreaAction, AreaScreen};
 use super::choose_window::{self, WindowList, WindowListAction};
+use super::commands::{Command, MENUS};
 use super::deleted::{self, DeletedAction, DeletedView};
 use super::editor::{self, Leave};
 use super::editor_state::EditorState;
 use super::export::{self, ExportAction, ExportState};
 use super::home::{self, Action, HomeState};
+use super::menubar::{self, Entry, Line, Menu};
 use super::open_copy::{self, OpenCopyAction, OpenCopyState};
 use super::rows::{step_count, steps_words};
 use super::settings::{self as settings_screen, HotkeyEdit, SettingsAction, SettingsInfo};
+use super::shell::{self, BarButton, Saved, SearchState, TopBarView};
 use super::trash::{self, TrashAction, TrashState};
 use super::widgets::{self, Status};
 use crate::export_run::{self, Job, Report};
@@ -127,6 +130,35 @@ pub struct App {
     open_copy: OpenCopyState,
     /// Shows a folder to the person (opens it in Explorer).
     opener: Box<dyn Fn(&Path)>,
+    /// The command search (Ctrl+K), while it is open.
+    pub search: Option<SearchState>,
+    /// Whether the list of keyboard keys (Ctrl+/) is open.
+    pub keys_open: bool,
+    /// Where the keyboard was when the command search or the keys list opened, to give it back when it closes (`None` until
+    /// it is noted, in the first frame the window is open).
+    dialog_return: Option<Option<egui::Id>>,
+    /// The keyboard to give back once a closed dialog no longer holds it: egui keeps the keyboard inside a dialog's layer for one
+    /// frame after it was last drawn, so the place is given back in the frame after that (the count is the frames to wait).
+    focus_next_frame: Option<(egui::Id, u8)>,
+}
+
+/// Whether a command can be used now: on which screen the window is, whether a guide is open, whether a capture is running.
+fn self_usable(editor: &Option<EditorState>, screen: Screen, capturing: bool, command: Command) -> bool {
+    let in_editor = screen == Screen::Editor;
+    let guide_open = editor.is_some() && matches!(screen, Screen::Editor | Screen::Export | Screen::DeletedSteps);
+    match command {
+        Command::SearchCommands | Command::KeyboardKeys | Command::About | Command::Colours(_) | Command::Settings => {
+            true
+        }
+        Command::StartCapturing => !capturing,
+        Command::OpenCopy | Command::Trash => true,
+        Command::BackToGuides => screen != Screen::Home,
+        Command::ExportScreen => guide_open && editor.as_ref().is_some_and(|e| !e.doc().guide.steps.is_empty()),
+        Command::DeletedSteps => guide_open && editor.as_ref().is_some_and(|e| e.deleted_count() > 0),
+        other => {
+            in_editor && editor.as_ref().and_then(|e| editor::command_state(e, other)).is_some_and(|(usable, _)| usable)
+        }
+    }
 }
 
 impl App {
@@ -164,6 +196,10 @@ impl App {
             file_chooser: Box::new(|_| None),
             open_copy: OpenCopyState::new(),
             opener: Box::new(|_| {}),
+            search: None,
+            keys_open: false,
+            dialog_return: None,
+            focus_next_frame: None,
         };
         match screen {
             Screen::Editor => app.open_example(),
@@ -749,8 +785,14 @@ impl App {
         }
     }
 
-    /// Draw the window: the screen, then the status line along the foot. The foot is drawn last so that a screen reader reaches it
-    /// last, after everything the screen shows.
+    /// Whether this screen is shown in the suite's frame (the navy bar and the menus). The capture bar and the two screens that
+    /// choose what to capture are a small window that stays on top, and keep to their own few controls.
+    pub fn has_frame(&self) -> bool {
+        !matches!(self.screen, Screen::Bar | Screen::ChooseWindow | Screen::ChooseArea)
+    }
+
+    /// Draw the window: the navy bar and the menus, the screen, then the status line along the foot. The foot is drawn last so that
+    /// a screen reader reaches it last, after everything the screen shows. The command search and the keys list are drawn over it.
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         self.poll();
         if let Some(editor) = self.editor.as_mut() {
@@ -758,20 +800,291 @@ impl App {
                 self.status.say(why);
             }
         }
+        match self.focus_next_frame.take() {
+            Some((back, 0)) => ui.ctx().memory_mut(|m| m.request_focus(back)),
+            Some((back, wait)) => {
+                self.focus_next_frame = Some((back, wait - 1));
+                ui.ctx().request_repaint();
+            }
+            None => {}
+        }
+        let mut chosen = if self.has_frame() { self.window_keys(ui.ctx()) } else { None };
         let full = ui.available_rect_before_wrap();
         let split = (full.max.y - STATUS_HEIGHT).max(full.min.y);
-        let main = egui::Rect::from_min_max(full.min, egui::pos2(full.max.x, split));
+        let mut main = egui::Rect::from_min_max(full.min, egui::pos2(full.max.x, split));
         let foot = egui::Rect::from_min_max(egui::pos2(full.min.x, split), full.max);
+        if self.has_frame() {
+            let bar = egui::Rect::from_min_size(main.min, egui::vec2(main.width(), shell::BAR_HEIGHT));
+            let menus = egui::Rect::from_min_size(bar.left_bottom(), egui::vec2(main.width(), shell::MENU_HEIGHT));
+            main.min.y = menus.max.y;
+            let view = self.bar_view();
+            if let Some(command) =
+                ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| shell::top_bar(ui, &view)).inner
+            {
+                chosen = Some(command);
+            }
+            let menus_now = self.menus();
+            if let Some(command) =
+                ui.scope_builder(egui::UiBuilder::new().max_rect(menus), |ui| shell::menu_row(ui, &menus_now)).inner
+            {
+                chosen = Some(command);
+            }
+        }
         ui.scope_builder(egui::UiBuilder::new().max_rect(main), |ui| self.draw_screen(ui));
         ui.scope_builder(egui::UiBuilder::new().max_rect(foot), |ui| {
-            let border = widgets::palette(ui).border;
-            ui.painter().hline(foot.x_range(), foot.min.y, egui::Stroke::new(1.0, border));
+            let p = widgets::palette(ui);
+            if self.has_frame() {
+                ui.painter().rect_filled(foot, 0.0, p.surface);
+            }
+            ui.painter().hline(
+                foot.x_range(),
+                foot.min.y,
+                egui::Stroke::new(1.0, if self.has_frame() { p.divider } else { p.border }),
+            );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
                 widgets::status_line(ui, &self.status);
             });
         });
+        if self.has_frame() {
+            let a_dialog_was_open = self.search.is_some() || self.keys_open;
+            if a_dialog_was_open && self.dialog_return.is_none() {
+                self.dialog_return = Some(ui.ctx().memory(|m| m.focused()));
+            }
+            if let Some(search) = self.search.as_mut() {
+                let usable = |c: Command| self_usable(&self.editor, self.screen, self.capture.is_some(), c);
+                let (run, close) = shell::command_search(ui.ctx(), search, &usable);
+                if close {
+                    self.search = None;
+                }
+                if run.is_some() {
+                    chosen = run;
+                }
+            } else if self.keys_open && shell::keyboard_keys(ui.ctx(), &self.hotkey_words) {
+                self.keys_open = false;
+            }
+            // A dialog that closed gives the keyboard back to where it was (a command run from it may then move it on).
+            if a_dialog_was_open && self.search.is_none() && !self.keys_open {
+                if let Some(Some(back)) = self.dialog_return.take() {
+                    self.focus_next_frame = Some((back, 1));
+                    ui.ctx().request_repaint();
+                }
+                self.dialog_return = None;
+            }
+        }
+        if let Some(command) = chosen {
+            self.run_command(command);
+        }
+    }
+
+    /// The keys that work anywhere in the window: Ctrl+K (search for a command), Ctrl+/ (the keys), F10 (the menus).
+    fn window_keys(&mut self, ctx: &egui::Context) -> Option<Command> {
+        let (search, keys, menus) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::K),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::F10),
+            )
+        });
+        if menus && self.search.is_none() && !self.keys_open {
+            menubar::focus_bar(ctx);
+        }
+        if search {
+            return Some(Command::SearchCommands);
+        }
+        if keys {
+            return Some(Command::KeyboardKeys);
+        }
+        None
+    }
+
+    /// What the navy bar shows on this screen.
+    fn bar_view(&self) -> TopBarView {
+        let mut view = TopBarView::default();
+        let guide = self.editor.as_ref().map(|e| {
+            let saved = if e.is_saved_to_disk() { Saved::Saved } else { Saved::Example };
+            (e.doc().guide.title.clone(), saved)
+        });
+        let state = |c: Command| self.command_state(c).0;
+        match self.screen {
+            Screen::Home => {
+                view.buttons.push(BarButton {
+                    command: Command::StartCapturing,
+                    words: "Start capturing",
+                    primary: true,
+                    enabled: true,
+                });
+            }
+            Screen::Editor => {
+                view.back = Some(BarButton {
+                    command: Command::BackToGuides,
+                    words: "Back to guides",
+                    primary: false,
+                    enabled: true,
+                });
+                if let Some((title, saved)) = guide {
+                    view.guide = Some((title, saved, true));
+                }
+                view.buttons.push(BarButton {
+                    command: Command::Undo,
+                    words: "Undo",
+                    primary: false,
+                    enabled: state(Command::Undo),
+                });
+                view.buttons.push(BarButton {
+                    command: Command::Redo,
+                    words: "Redo",
+                    primary: false,
+                    enabled: state(Command::Redo),
+                });
+                view.buttons.push(BarButton {
+                    command: Command::ExportScreen,
+                    words: "Export",
+                    primary: true,
+                    enabled: state(Command::ExportScreen),
+                });
+            }
+            Screen::Export | Screen::DeletedSteps => {
+                if let Some((title, saved)) = guide {
+                    view.guide = Some((title, saved, false));
+                }
+            }
+            _ => {}
+        }
+        view
+    }
+
+    /// The menu bar as it stands now: every command, with whether it can be used and whether it is ticked.
+    fn menus(&self) -> Vec<Menu<Command>> {
+        MENUS
+            .iter()
+            .map(|plan| Menu {
+                title: plan.title.to_string(),
+                lines: plan
+                    .items
+                    .iter()
+                    .map(|item| match item {
+                        None => Line::Separator,
+                        Some(command) => {
+                            let (enabled, ticked) = self.command_state(*command);
+                            Line::Item(Entry {
+                                command: *command,
+                                words: command.words(),
+                                icon: Some(command.icon()),
+                                keys: command.keys().map(str::to_string),
+                                enabled,
+                                kind: command.kind(),
+                                ticked,
+                            })
+                        }
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Whether a command can be used now, and whether it is ticked.
+    pub fn command_state(&self, command: Command) -> (bool, bool) {
+        if let Command::Colours(appearance) = command {
+            return (true, self.settings.appearance == appearance);
+        }
+        (self_usable(&self.editor, self.screen, self.capture.is_some(), command), self.ticked(command))
+    }
+
+    fn ticked(&self, command: Command) -> bool {
+        match (self.screen, self.editor.as_ref()) {
+            (Screen::Editor, Some(editor)) => editor::command_state(editor, command).is_some_and(|(_, ticked)| ticked),
+            _ => false,
+        }
+    }
+
+    /// Leave the open guide, if there is one: save it, and let go of its folder (and its lock) when it is a guide on disk.
+    fn leave_guide(&mut self) {
+        let Some(editor_state) = self.editor.as_mut() else { return };
+        editor_state.commit_pending();
+        let saved_to_disk = editor_state.is_saved_to_disk();
+        if let Some(why) = editor_state.save_if_changed() {
+            self.status.say(why);
+        }
+        if saved_to_disk {
+            self.editor = None;
+            self.refresh_home();
+        } else if let Some(card) = self.home.guides.iter_mut().find(|g| g.example) {
+            card.steps = step_count(&editor_state.doc().guide);
+            card.title = editor_state.doc().guide.title.clone();
+        }
+    }
+
+    /// Do a command from the navy bar, a menu or the command search.
+    pub fn run_command(&mut self, command: Command) {
+        if !self.command_state(command).0 {
+            return;
+        }
+        match command {
+            Command::SearchCommands => {
+                self.keys_open = false;
+                self.search = Some(SearchState::new());
+            }
+            Command::KeyboardKeys => {
+                self.search = None;
+                self.keys_open = true;
+            }
+            Command::Colours(appearance) => {
+                self.settings.appearance = appearance;
+                self.save_settings();
+                self.status.say(format!(
+                    "Colours: {}.",
+                    match appearance {
+                        Appearance::System => "following Windows",
+                        Appearance::Light => "light",
+                        Appearance::Dark => "dark",
+                    }
+                ));
+            }
+            Command::StartCapturing => {
+                self.leave_guide();
+                self.home_action(Action::StartCapturing);
+            }
+            Command::OpenCopy | Command::Trash | Command::Settings | Command::About => {
+                self.leave_guide();
+                self.home_action(match command {
+                    Command::OpenCopy => Action::OpenCopy,
+                    Command::Trash => Action::Trash,
+                    Command::Settings => Action::Settings,
+                    _ => Action::About,
+                });
+            }
+            Command::BackToGuides => {
+                self.leave_guide();
+                self.screen = Screen::Home;
+                self.status.say("Back at your guides.");
+            }
+            Command::ExportScreen => {
+                if let Some(editor) = self.editor.as_mut() {
+                    editor.commit_pending();
+                }
+                self.screen = Screen::Export;
+                self.status.say("Export. Choose the formats and the folder, then press Export.");
+            }
+            Command::DeletedSteps => self.open_deleted_steps(),
+            other => {
+                let Some(editor_state) = self.editor.as_mut() else { return };
+                match editor::run(editor_state, &mut self.status, other) {
+                    Leave::ToDeleted => self.open_deleted_steps(),
+                    Leave::Stay => {}
+                }
+            }
+        }
+    }
+
+    fn open_deleted_steps(&mut self) {
+        let Some(editor_state) = self.editor.as_mut() else { return };
+        editor_state.commit_pending();
+        self.screen = Screen::DeletedSteps;
+        self.deleted = DeletedView::default();
+        let n = editor_state.deleted_count();
+        self.status.say(format!("Deleted steps. {n} can be put back. Restore puts a step back where it was."));
     }
 
     /// What the person asked for on Home.
@@ -1155,35 +1468,9 @@ impl App {
                     self.screen = Screen::Home;
                     return;
                 };
-                let left = editor::show(ui, editor_state, &mut self.status);
-                if left == Leave::ToExport {
-                    self.screen = Screen::Export;
-                    self.status.say("Export. Choose the formats and the folder, then press Export.");
-                    return;
-                }
-                if left == Leave::ToDeleted {
-                    self.screen = Screen::DeletedSteps;
-                    self.deleted = DeletedView::default();
-                    let n = editor_state.deleted_count();
-                    self.status
-                        .say(format!("Deleted steps. {n} can be put back. Restore puts a step back where it was."));
-                    return;
-                }
-                if left == Leave::ToHome {
-                    let saved_to_disk = editor_state.is_saved_to_disk();
-                    if let Some(why) = editor_state.save_if_changed() {
-                        self.status.say(why);
-                    }
-                    if saved_to_disk {
-                        // Let go of the guide's folder, and its lock, now that the person has left it.
-                        self.editor = None;
-                        self.refresh_home();
-                    } else if let Some(card) = self.home.guides.iter_mut().find(|g| g.example) {
-                        card.steps = step_count(&editor_state.doc().guide);
-                        card.title = editor_state.doc().guide.title.clone();
-                    }
-                    self.screen = Screen::Home;
-                    self.status.say("Back at your guides.");
+                match editor::show(ui, editor_state, &mut self.status) {
+                    Leave::Stay => {}
+                    Leave::ToDeleted => self.open_deleted_steps(),
                 }
             }
         }

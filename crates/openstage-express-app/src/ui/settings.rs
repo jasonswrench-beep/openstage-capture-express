@@ -85,15 +85,10 @@ pub fn show(
 ) -> SettingsAction {
     let before = settings.clone();
     let mut action = SettingsAction::None;
-    egui::Panel::top("settings-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to guides").clicked() {
-                action = SettingsAction::Back;
-            }
-            widgets::heading(ui, "Settings");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(ui, "settings-top", "Back to guides", "Settings", false) {
+        action = SettingsAction::Back;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         let mut page = egui::ScrollArea::vertical().auto_shrink([false, false]);
         if let Some(y) = info.scroll {
@@ -101,10 +96,13 @@ pub fn show(
         }
         page.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
+            ui.set_max_width(ui.available_width().min(super::shell::PAGE_WIDTH));
             if let Some(note) = &info.note {
                 ui.label(RichText::new(note).color(p.text));
             }
 
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Appearance");
             for (value, words) in
                 [(Appearance::System, "Follow Windows"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")]
@@ -113,7 +111,10 @@ pub fn show(
                 widgets::ring(ui, &r);
             }
 
-            ui.add_space(8.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Capturing");
             ui.label(RichText::new("A click makes a step:").color(p.muted));
             for (value, words) in [
@@ -158,7 +159,10 @@ pub fn show(
                     .color(p.muted),
             );
 
-            ui.add_space(8.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Folders");
             let guides = ui.label(RichText::new(&info.guides_folder).color(p.text));
             let name = format!("Guides folder: {}", info.guides_folder);
@@ -175,7 +179,10 @@ pub fn show(
             let r = ui.checkbox(&mut settings.open_folder_after_export, "Open the folder when an export is done");
             widgets::ring(ui, &r);
 
-            ui.add_space(8.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Hotkeys");
             let words = if info.hotkeys.is_empty() { "No hotkeys could be set." } else { info.hotkeys.as_str() };
             ui.label(RichText::new(words).color(p.text));
@@ -230,7 +237,10 @@ pub fn show(
                 }
             }
 
-            ui.add_space(8.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             widgets::subheading(ui, "Sounds");
             ui.label(RichText::new("A quiet sound, off unless you turn it on:").color(p.muted));
             for (value, words) in [
@@ -249,7 +259,10 @@ pub fn show(
                 }
             });
 
-            ui.add_space(8.0);
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
             let header =
                 egui::CollapsingHeader::new(RichText::new("Advanced").size(19.0).family(super::fonts::bold_family()))
                     .default_open(false)
@@ -280,6 +293,8 @@ pub fn show(
                         widgets::ring(ui, &r);
                     });
             widgets::ring(ui, &header.header_response);
+});
+ui.add_space(12.0);
         });
     });
     if action == SettingsAction::None && *settings != before {

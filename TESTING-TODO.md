@@ -350,3 +350,20 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       tried): close Word, run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-office.ps1` from the Express folder
       after `EXPORT DEMO.bat`, and tell me if any line says FAIL.
 - [ ] The optional logo on slides (spec section 10.2) is not built.
+
+## The OpenStage suite's look (2026-11-11)
+
+Built and checked by the window tests and by pictures (`D:\Claude Audio Test\revamp-screens\express-before` as it was,
+`express-x1` after). Not yet tried by a person.
+
+- [ ] Open the program and use it for a while: is every command where you would look for it? Write down anything you would move.
+- [ ] F10, then the arrows through the menus; Enter on an item; Escape back. Then Ctrl+K and type "export" or "dark"; Ctrl+/.
+- [ ] With Narrator, and with NVDA (only when you are away from the computer: NVDA logs everything it speaks): a menu title
+      ("File, menu item, collapsed" or similar), an item with its keys ("Undo, Ctrl+Z"), a ticked item (Skip in export), a section
+      heading in the details ("Step details, heading level 2, button, expanded"), and the command search (the chosen command
+      should be read as Up and Down move, while the keyboard stays in the box).
+- [ ] Windows display scaling at 150 and 200 percent on a real screen, and the smallest window (900 by 560): the navy bar drops
+      "OpenStage" from the name and then the words on its buttons (keeping their names and tooltips) as the window narrows.
+- [ ] Dark colours (View > Colours: dark), and Windows' high-contrast themes: egui draws its own colours and does not follow a
+      high-contrast theme; say whether the dark scheme is enough or a high-contrast scheme of Express's own is needed.
+- [ ] The navy bar's icon is the 64 pixel PNG drawn at 28 pixels: does it look sharp on your screen?

@@ -41,15 +41,10 @@ pub fn notice_paragraphs() -> Vec<String> {
 /// Draw the screen. Returns true when the person asked to go back.
 pub fn show(ui: &mut egui::Ui) -> bool {
     let mut back = false;
-    egui::Panel::top("about-top").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if widgets::button(ui, "Back to guides").clicked() {
-                back = true;
-            }
-            widgets::heading(ui, "About OpenStage Capture Express");
-        });
-    });
-    egui::CentralPanel::default().show(ui, |ui| {
+    if super::shell::screen_header(ui, "about-top", "Back to guides", "About OpenStage Capture Express", false) {
+        back = true;
+    }
+    egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;

@@ -16,17 +16,17 @@ editing, undo, saving, smart titles, the step builder, drawing of marks, the foc
 a folder of pictures (PNG and JPG), an animated GIF, a PDF made by the WebView2 engine that Windows ships, a Word file and a
 PowerPoint file that Express writes itself, a window, and (since 2026-11-01) real capture.** Home lists the guides in the guides
 folder (`Documents\OpenStage Express\Guides`) with a search box and, once there are two guides, a Sort button that goes round newest first, oldest first, name A to Z and name Z to A (the order is remembered in the settings); each has a Rename and a Delete button (Delete asks first
-and moves the guide to a `Trash` folder inside the guides folder, never erasing it), and the Trash button lists what was deleted,
+and moves the guide to a `Trash` folder inside the guides folder, never erasing it), and File > Trash... lists what was deleted,
 each with a Restore button. **Start capturing** turns the window into a small capture bar that stays on top
 while you work in other programs; before Start you choose what to capture: the whole screen, one window (from a list of the open
 windows) or an area you draw on a picture of a display (by mouse, or by typing its four numbers); each click and each field you type in becomes a step, with its picture, written to disk as it is
-made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped and deleted (a Delete step button, or Ctrl+Shift+Delete), with undo
+made. **Finish** opens the guide in the editor, where steps can be chosen (one, or several with Ctrl+click, Shift+click, Shift+Up and Down, Ctrl+A or a button, then skipped or deleted together as one undoable change), renamed, moved, skipped and deleted (Delete step, in the Step menu and the steps list's ... menu, or Ctrl+Shift+Delete), with undo
 and redo, and every change is saved. Deleted steps are kept with the guide: once one is deleted a Deleted steps button opens a list
 where each has a Restore button (and from two up a Restore all), and an Empty the trash button that asks first and then deletes them for good. In the editor the guide can be renamed (a box above the step details), steps can be duplicated, and marks (rectangle, oval, line, arrow, text, step number, highlight, blur,
-spotlight) are added with buttons or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
+spotlight) are added from the Add a mark menu (or the Marks menu) or drawn by dragging on the picture once a shape is chosen (a click places the usual size), listed,
 moved and resized by buttons or by dragging, coloured, and deleted, each change one undo; the
-whole picture is shown with the focused crop as a frame. **Export** (in the editor) offers every format in a screen of its own and makes them on a
-thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (on Home) holds the colour scheme, how
+whole picture is shown with the focused crop as a frame. **Export** (in the editor's navy bar, or File > Export...) offers every format in a screen of its own and makes them on a
+thread of their own, each in a new folder (the folder dialog is Windows' own). **Settings** (Tools > Settings...) holds the colour scheme, how
 clicks make steps, the pointer and circle, the language of step titles, the two folders, the three hotkeys (each written as words,
 such as Ctrl+Shift+F7, and changed as soon as the person leaves its box; keys that would take a key from every other program are
 refused with the reason), three optional cue sounds (off to begin with, each with a button to hear it) and a few delays; each
@@ -357,6 +357,44 @@ accessibility checker or read with a screen reader, and Word and PowerPoint use 
 scheme of the web page has not been seen rendered. The icon files are copied in but not used by any program yet (milestone M7).
 `TESTING-TODO.md` lists what only a person can check.
 
+## The window's look (the OpenStage suite's, 2026-11-11)
+
+Express now looks like the other OpenStage programs (OpenStage Author, OpenStage Recorder and OpenExplainer): the same navy bar,
+pale page, white panels, icons and way of finding commands, with Express's own colour, the indigo of its icon (`#9CA5FF` on the
+navy bar, a deeper `#4E57BC` for filled buttons and the chosen row, white words on it 6.2 to 1). Nothing it does changed; every
+command is still there under the same name. What moved:
+
+- **The navy bar** along the top of every screen of the whole window: the icon and the name, **Search** (Ctrl+K), and the screen's
+  main buttons: **Start capturing** on Home; **Back to guides**, the guide's title (its first heading) with "Saved" or "Example,
+  not saved", **Undo**, **Redo** and **Export** in the editor.
+- **The menus** under it hold every command, each with its icon and its keys: **File** (Start capturing, Open a copy, Export,
+  Back to guides, Trash), **Edit** (Undo, Redo, Choose all steps, Choose just one step, Deleted steps), **Step** (Add, Duplicate,
+  Delete, Move up and down, the step before and after, Edit the step's title, Skip in export and Focused view, each ticked when
+  it is on), **Marks** (one item for each of the nine kinds of mark, and Delete mark), **View** (the focused view for every step,
+  and the colours: follow Windows, light or dark), **Tools** (Settings) and **Help** (Search for a command, Keyboard keys, About
+  and licences). The four buttons Home had for Settings, About, Trash and Open a copy are in these menus now. A command that
+  cannot be used now stays in its menu, dimmed and read as unavailable. **F10** goes to the menus; the arrows move along them and
+  in them, a letter jumps to an item, Enter does it, Escape goes back; afterwards the keyboard goes back where it was.
+- **The steps list** has an **Add** button and a **...** menu (Duplicate step, Delete step, Choose all steps, Choose just one
+  step, Deleted steps) in its heading, in place of the four buttons under it. The Deleted steps button is still there under the
+  list once something is deleted.
+- **The details** on the right are sections that open and close (**Guide**, **Step details**, **Marks**), each a heading with a
+  button that says whether it is open. The nine Add buttons for marks are one **Add a mark** menu.
+- **Ctrl+K** (or Search) finds any command by its name, its menu or what it is for, with Up, Down and Enter. **Ctrl+/** (Help >
+  Keyboard keys) lists every key in groups. Both close with Escape or their Close button and give the keyboard back.
+- **Settings** and **Export** are white cards on the page, one for each group. The other screens have a white strip with their
+  way back and their heading.
+- **The capture bar** keeps its few controls, under a navy strip that says what the capture is doing (a red dot while it
+  captures, the pause sign while it is paused, always with the words), with icons on its buttons.
+
+The parts: `crates/openstage-express-app/src/ui/theme.rs` (the colours, each pairing measured by a test), `commands.rs` (every
+command's words, icon, keys and menu), `menubar.rs` (the menu bar and the menu buttons, keyboard and screen reader as in the
+suite), `shell.rs` (the navy bar, the screen headers, the sections, the command search and the keys list), `icon.rs` and
+`uiicons_gen.rs` (the Lucide icons, made by OpenStage Author's `tools/make_ui_icons.py --express`). Tried by the window tests,
+which read what a screen reader is told (358 in the window's crate, 910 in all), and in pictures of every screen at full size, at the
+smallest window (900 by 560) and in both colour schemes. **Not yet tried by a person, with Narrator or NVDA, or at 200 percent
+scaling on a real screen** (see `TESTING-TODO.md`). Switches for pictures: `--menu Edit`, `--search <words>`, `--keys`.
+
 ## What to do on Windows (no typing needed)
 
 1. Double-click **`BUILD EXPRESS.bat`**. It checks that Rust is installed (and explains how to install it if not), builds the
@@ -429,7 +467,8 @@ crates/
                                 writer); a made-up demo guide; the Roboto font files for the PDF (fonts/)
   openstage-express-windows/    Windows only: the PDF engine (WebView2); the mouse and keyboard hooks, UI Automation, pictures of the
                                 screen, hotkeys and the capture run that ties them together; the test window and synthetic input
-  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home, the capture bar and the editor, in src/ui),
+  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home, the capture bar and the editor, in src/ui,
+                                in the OpenStage suite's look: the navy bar, the menus and the command search),
                                 the capture bar and the saving of captured steps, the computer check, the click test,
                                 and the command-line export demo
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code

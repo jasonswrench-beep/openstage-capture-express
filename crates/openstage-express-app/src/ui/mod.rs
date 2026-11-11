@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The window (milestones M5 and M6): Home, the capture bar and the Editor, drawn with egui and described to screen readers
-//! through AccessKit.
+//! through AccessKit, in the OpenStage suite's look (the navy bar, the menus, the command search: `shell.rs`, `menubar.rs`,
+//! `commands.rs`).
 //!
 //! The screens (`home`, `bar`, `editor`) and their state (`editor_state`, `rows`) draw into a `Ui` they are given and know nothing
 //! of the operating system, so the tests run whole screens without opening a window and read back what a screen reader would be
@@ -13,17 +14,25 @@ pub mod bar;
 pub mod capture;
 pub mod choose_area;
 pub mod choose_window;
+pub mod commands;
 pub mod deleted;
 pub mod editor;
 pub mod editor_state;
 pub mod export;
 pub mod fonts;
 pub mod home;
+pub mod icon;
+pub mod menubar;
 pub mod open_copy;
 pub mod rows;
 pub mod settings;
+pub mod shell;
 pub mod theme;
 pub mod trash;
+// Made by OpenStage Author's tools/make_ui_icons.py (see the file's heading), so it is not formatted here.
+#[rustfmt::skip]
+#[allow(dead_code, clippy::approx_constant)]
+pub mod uiicons_gen;
 pub mod widgets;
 
 #[cfg(test)]
@@ -62,6 +71,12 @@ pub struct DevOptions {
     pub delete_steps: bool,
     /// Open the question "Empty the trash for good?" on the Deleted steps screen.
     pub ask_to_empty: bool,
+    /// Open this menu of the menu bar (its title), so a picture shows it.
+    pub menu: Option<String>,
+    /// Open the command search with these words typed, so a picture shows it.
+    pub search: Option<String>,
+    /// Open the list of keyboard keys, so a picture shows it.
+    pub keys: bool,
 }
 
 impl DevOptions {
@@ -96,6 +111,15 @@ impl DevOptions {
                 "--choose-steps" => options.choose_steps = true,
                 "--delete-steps" => options.delete_steps = true,
                 "--ask-to-empty" => options.ask_to_empty = true,
+                "--keys" => options.keys = true,
+                "--search" => options.search = Some(value("the words to search for")?),
+                "--menu" => {
+                    let title = value("the title of a menu")?;
+                    if !commands::MENUS.iter().any(|m| m.title == title) {
+                        return Err(format!("--menu is File, Edit, Step, Marks, View, Tools or Help, not {title:?}."));
+                    }
+                    options.menu = Some(title);
+                }
                 "--scroll" => {
                     let pixels: f32 = value("a number of pixels")?
                         .parse()
@@ -480,6 +504,15 @@ pub fn run(options: DevOptions) -> eframe::Result {
             }
             if options.choose_steps {
                 app.choose_demo_steps();
+            }
+            if let Some(words) = &options.search {
+                app.search = Some(shell::SearchState { typed: words.clone(), chosen: 0, focus_next: true });
+            }
+            app.keys_open = options.keys;
+            if let Some(title) = &options.menu {
+                if let Some(at) = commands::MENUS.iter().position(|m| m.title == title.as_str()) {
+                    menubar::open_at_start(&cc.egui_ctx, at);
+                }
             }
             // The two choosing screens are looked at over a made-up desktop, so no one's real windows are shown.
             match screen {
