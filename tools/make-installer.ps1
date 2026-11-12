@@ -4,7 +4,11 @@
 #
 # It puts the built program (with the product icon added to it), the licence files and a short guide in a folder, draws the pictures
 # for the setup wizard from the product icon, and has Inno Setup's compiler (ISCC.exe) make one setup file from installer\express.iss.
-param([Parameter(Mandatory = $true)][string]$OutDir)
+#
+# With -Sign, the program (after its icon is added) and then the setup file and its uninstaller are signed with Azure Artifact Signing,
+# each signature timestamped, by tools\sign_windows.py (which says what it needs: three OPENSTAGE_SIGN_ settings and a sign-in).
+# The SHA-256 is worked out after that, so it is the hash of the signed setup file.
+param([Parameter(Mandatory = $true)][string]$OutDir, [switch]$Sign)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'target\release\openstage-capture-express.exe'
@@ -33,6 +37,14 @@ if (-not $iscc) {
     throw "Inno Setup was not found. It is free (https://jrsoftware.org/isdl.php). Install it, or set EXPRESS_ISCC to the full path of ISCC.exe, then try again."
 }
 
+$signer = Join-Path $PSScriptRoot 'sign_windows.py'
+if ($Sign) {
+    $python = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $python) { throw 'Signing needs Python (for tools\sign_windows.py), and python was not found.' }
+    & $python $signer --ready
+    if ($LASTEXITCODE -ne 0) { throw 'Signing cannot start: see what is missing above.' }
+}
+
 $name = "OpenStage-Capture-Express-$version-$arch-setup"
 $setup = Join-Path $OutDir "$name.exe"
 if (Test-Path -LiteralPath $setup) { throw "$name.exe is already in $OutDir. Nothing was replaced; move it away first." }
@@ -46,6 +58,20 @@ try {
     New-Item -ItemType Directory -Path $stage | Out-Null
     Copy-Item -LiteralPath $exe -Destination $stage
     & (Join-Path $PSScriptRoot 'set-exe-icon.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Icon $icon
+    if ($Sign) {
+        # Signed after the icon is added (changing the program afterwards would break its signature).
+        & $python $signer --description 'OpenStage Capture Express' (Join-Path $stage 'openstage-capture-express.exe')
+        if ($LASTEXITCODE -ne 0) { throw 'The program could not be signed.' }
+        $warning = @"
+  This program is signed by Jason Wrench. Because it is new, Windows SmartScreen may still say it protected your PC at first;
+  if it does, choose "More info", then "Run anyway".
+"@
+    }
+    else {
+        $warning = @"
+  This program is not signed yet, so Windows SmartScreen may say it protected your PC. Choose "More info", then "Run anyway".
+"@
+    }
     foreach ($file in 'LICENSE', 'NOTICE', 'THIRD-PARTY.md') { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage }
     $start = @"
 OpenStage Capture Express $version
@@ -59,7 +85,7 @@ To start
   Open OpenStage Capture Express from the Start menu (or the desktop shortcut, if you chose one).
 
 If Windows warns you
-  This program is not signed yet, so Windows SmartScreen may say it protected your PC. Choose "More info", then "Run anyway".
+$warning
   Some antivirus programs are wary of any program that watches the mouse and keyboard; that is how capturing works, and the
   program reads no key (it reads the text of a field when you finish typing, never for a password field).
 
@@ -128,7 +154,13 @@ Licence
     foreach ($size in @(@(164, 314), @(246, 471), @(328, 628))) { New-TallPicture $size[0] $size[1] $source (Join-Path $wizard "tall-$($size[0]).png") }
     foreach ($side in 55, 83, 110) { New-SmallPicture $side $source (Join-Path $wizard "small-$side.png") }
 
-    & $iscc "/DAppVersion=$version" "/DStageDir=$stage" "/DWizardDir=$wizard" "/O$OutDir" "/F$name" $script
+    $compile = @("/DAppVersion=$version", "/DStageDir=$stage", "/DWizardDir=$wizard", "/O$OutDir", "/F$name")
+    if ($Sign) {
+        # Inno Setup puts the quoted file name in place of $f and a quote mark in place of $q.
+        $compile += '/DSignTool=artifact'
+        $compile += ('/Sartifact=$q' + $python + '$q $q' + $signer + '$q --description $qOpenStage Capture Express$q $f')
+    }
+    & $iscc @compile $script
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup's compiler stopped with error $LASTEXITCODE." }
     if (-not (Test-Path -LiteralPath $setup)) { throw "The compiler finished but $setup was not made." }
     $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash
