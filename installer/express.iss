@@ -54,12 +54,23 @@ UninstallDisplayIcon={app}\{#AppIcon}
 UninstallDisplayName={#AppName}
 WizardImageFile={#WizardDir}\tall-164.png,{#WizardDir}\tall-246.png,{#WizardDir}\tall-328.png
 WizardSmallImageFile={#WizardDir}\small-55.png,{#WizardDir}\small-83.png,{#WizardDir}\small-110.png
+#ifdef SignTool
+; A signed build (make-installer.ps1 -Sign): the compiler signs the setup file and its uninstaller with the sign tool named on its
+; command line, which signs with Azure Artifact Signing and timestamps every signature (tools\sign_windows.py).
+SignTool={#SignTool}
+SignedUninstaller=yes
+SignToolRetryCount=3
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
+#ifdef SignTool
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nIt turns what you do on screen into a step-by-step guide. It has no account and makes no network connection.%n%nIt is recommended that you close other programs before continuing.
+#else
 WelcomeLabel2=This will install [name/ver] on your computer.%n%nIt turns what you do on screen into a step-by-step guide. It has no account and makes no network connection.%n%nThis version is not signed yet, so Windows may have warned you before starting this setup.%n%nIt is recommended that you close other programs before continuing.
+#endif
 
 [CustomMessages]
 english.UninstallKept=Your guides, exports and settings were not deleted. They are in your Documents folder (in OpenStage Express) and in the AppData folder (in OpenStage Capture Express).
