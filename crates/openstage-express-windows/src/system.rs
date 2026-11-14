@@ -11,6 +11,27 @@ use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS
 use windows::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 
 /// The person's Documents folder as Windows has it, or `None` if Windows will not say.
+/// Show a folder in File Explorer. Windows is asked to open it (ShellExecuteW), so no program is looked for by its bare name: one
+/// named explorer.exe beside Express, in a folder others can write to, would otherwise run (the security review of 2026-11-13).
+pub fn open_folder(folder: &std::path::Path) {
+    use windows::core::{w, HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    if !folder.is_dir() {
+        return;
+    }
+    let path = HSTRING::from(folder.as_os_str());
+    let _ = unsafe { ShellExecuteW(None, w!("open"), &path, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+}
+
+/// Open Windows' notification settings, where Do not disturb is turned on. Windows has no way for a program to turn it on itself.
+pub fn open_notification_settings() {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let _ = unsafe { ShellExecuteW(None, w!("open"), w!("ms-settings:notifications"), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+}
+
 pub fn documents_folder() -> Option<PathBuf> {
     unsafe {
         let path = SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, None).ok()?;

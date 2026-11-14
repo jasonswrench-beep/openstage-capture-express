@@ -205,6 +205,9 @@ pub struct AppSettings {
     /// Draw a circle round each click.
     pub mark_clicked_area: bool,
     pub capture_typing: bool,
+    /// Say which field was typed in, not what was typed (`Type in "Name"`); the field's text is then never read. On unless turned
+    /// off (the security review of 2026-11-13).
+    pub say_field_not_text: bool,
     /// What to capture: the whole screen, one window or an area (the window or area itself is chosen each time, but the last area
     /// is kept).
     pub capture_target: TargetKind,
@@ -250,6 +253,7 @@ impl Default for AppSettings {
             show_cursor: true,
             mark_clicked_area: true,
             capture_typing: true,
+            say_field_not_text: true,
             capture_target: TargetKind::Screen,
             last_area: None,
             title_language: TitleLanguage::En,
@@ -288,6 +292,7 @@ impl AppSettings {
         BuilderSettings {
             mode,
             capture_typing: self.capture_typing,
+            say_field_not_text: self.say_field_not_text,
             typing_delay_ms: self.typing_delay_ms.clamp(500, 5000),
             screenshot_delay_ms: self.screenshot_delay_ms.min(5000),
             capture_outside_clicks: self.capture_outside_clicks,
@@ -309,13 +314,22 @@ impl AppSettings {
     }
 
     /// The guides folder this setting asks for, if any.
+    /// A folder on another computer (`\\server\share`) is never used from the settings: Windows would connect to that server with
+    /// the person's sign-in as Express started (the security review of 2026-11-13). The usual place is used instead.
     pub fn guides_path(&self) -> Option<PathBuf> {
-        self.guides_folder.as_ref().filter(|p| !p.trim().is_empty()).map(PathBuf::from)
+        usable_folder(self.guides_folder.as_deref())
     }
 
     pub fn exports_path(&self) -> Option<PathBuf> {
-        self.exports_folder.as_ref().filter(|p| !p.trim().is_empty()).map(PathBuf::from)
+        usable_folder(self.exports_folder.as_deref())
     }
+}
+
+fn usable_folder(setting: Option<&str>) -> Option<PathBuf> {
+    setting
+        .filter(|p| !p.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|p| !openstage_express_core::fsutil::is_network_path(p))
 }
 
 /// Where the settings file is: `%APPDATA%\OpenStage Capture Express\settings.json`.

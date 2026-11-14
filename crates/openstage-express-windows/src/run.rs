@@ -201,10 +201,10 @@ impl Drop for CaptureRun {
 struct UiaFields<'a>(Option<&'a Uia>);
 
 impl FieldReader for UiaFields<'_> {
-    fn focused_field(&mut self) -> FocusedField {
+    fn focused_field(&mut self, read_text: bool) -> FocusedField {
         match self.0 {
-            Some(uia) => uia.focused_field(),
-            None => FocusedField { name: String::new(), role: String::new(), text: FieldText::Unreadable },
+            Some(uia) => uia.focused_field(read_text),
+            None => FocusedField { name: String::new(), role: String::new(), text: FieldText::Unreadable, id: None },
         }
     }
 }

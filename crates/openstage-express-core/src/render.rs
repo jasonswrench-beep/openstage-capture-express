@@ -111,13 +111,34 @@ pub fn crop_canvas(canvas: &Canvas, rect: &Rect) -> Canvas {
     out
 }
 
+/// The most pixels a picture made by Express may have: 64 million, a quarter of a gigabyte of colour, more than eight 4K displays.
+/// A guide made by someone else can ask for far more (a crop a few pixels wide scaled to the export's width), and the program
+/// used to stop when it could not find the memory (the security review of 2026-11-13).
+pub const MAX_PICTURE_PIXELS: u64 = 64 * 1024 * 1024;
+
+/// A picture is never made more than this many times wider than it was: a very narrow crop is shown small, not blown up.
+pub const MAX_UPSCALE: u32 = 4;
+
 /// A copy of a canvas scaled to `width` pixels across, the height following (rounded, never zero). A canvas made smaller is
-/// averaged so thin lines stay readable.
+/// averaged so thin lines stay readable. The width is kept to `MAX_UPSCALE` times the canvas's and to what fits in
+/// `MAX_PICTURE_PIXELS`, so the result can be narrower than asked.
 pub fn scale_to_width(canvas: &Canvas, width: u32) -> Canvas {
     if width == 0 || canvas.width == 0 || canvas.height == 0 || width == canvas.width {
         return canvas.clone();
     }
-    let height = ((canvas.height as u64 * width as u64 + canvas.width as u64 / 2) / canvas.width as u64).max(1) as u32;
+    let height_for = |w: u32| ((canvas.height as u64 * w as u64 + canvas.width as u64 / 2) / canvas.width as u64).max(1);
+    let mut width = width.min(canvas.width.saturating_mul(MAX_UPSCALE));
+    if width as u64 * height_for(width) > MAX_PICTURE_PIXELS {
+        // The widest that fits, from w * w * height / width <= budget, then down a pixel at a time for the rounding.
+        width = ((MAX_PICTURE_PIXELS as f64 * canvas.width as f64 / canvas.height as f64).sqrt() as u32).clamp(1, width);
+        while width > 1 && width as u64 * height_for(width) > MAX_PICTURE_PIXELS {
+            width -= 1;
+        }
+    }
+    if width == canvas.width {
+        return canvas.clone();
+    }
+    let height = height_for(width).min(u32::MAX as u64) as u32;
     let picture = Picture::solid_pixels(canvas.width, canvas.height, canvas.bgra.clone());
     let mut out = Canvas::new(width, height);
     out.draw_picture(

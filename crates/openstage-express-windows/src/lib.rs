@@ -5,8 +5,8 @@
 //! which lets the window close the console box a double-clicked program starts with.
 //!
 //! Planned contents (spec sections 6.2, 6.4 and 8, milestone M6): mouse and keyboard hooks, UI Automation lookups,
-//! the frame ring, hotkeys and the capture bar's window handling, reusing OpenStage Capture's crates through a
-//! path link to the sibling `openstage-author` folder. On other systems this crate stays empty so that
+//! the frame ring, hotkeys and the capture bar's window handling, reusing OpenStage Capture's crates (from the
+//! openstage-author repository at one fixed commit, named in the workspace's Cargo.toml). On other systems this crate stays empty so that
 //! `cargo test --workspace` still runs everywhere.
 
 #[cfg(windows)]
@@ -35,6 +35,8 @@ pub mod system;
 pub mod testwin;
 #[cfg(windows)]
 pub mod uia;
+#[cfg(windows)]
+pub mod updates;
 
 /// Windows' own text drawing (from Capture's code): the words on text marks and the numbers on step badges, in the computer's fonts.
 #[cfg(windows)]

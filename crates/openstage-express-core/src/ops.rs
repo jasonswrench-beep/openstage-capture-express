@@ -118,7 +118,6 @@ pub struct StepDraft {
     pub image_description: String,
     pub click: Option<Click>,
     pub control: Option<Control>,
-    pub typed: Option<String>,
     pub program: Option<String>,
     pub focus: Option<Rect>,
     pub annotations: Vec<Annotation>,
@@ -136,7 +135,6 @@ impl StepDraft {
             image_description: String::new(),
             click: None,
             control: None,
-            typed: None,
             program: None,
             focus: None,
             annotations: Vec::new(),
@@ -295,7 +293,6 @@ impl Document {
         step.image_description = draft.image_description;
         step.click = draft.click;
         step.control = draft.control;
-        step.typed = draft.typed;
         step.program = draft.program;
         step.focus = draft.focus;
         step.annotations = draft.annotations;

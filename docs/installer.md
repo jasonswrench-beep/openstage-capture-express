@@ -21,7 +21,7 @@ It never replaces a setup file that is already there; move the old one away firs
 ## Inno Setup
 
 The installer is made with **Inno Setup** (free; <https://jrsoftware.org/isinfo.php>), version 7.1.1 on this PC, installed in
-`C:\Users\Jason\InnoSetup7` (the build looks there, then in the usual Program Files places, or in the full path given in the
+`%USERPROFILE%\InnoSetup7` (the build looks there, then in the usual Program Files places, or in the full path given in the
 environment variable `EXPRESS_ISCC`). Its licence (`license.txt` in its folder) allows use "for any purpose, including commercial
 applications", and the installers it makes carry no licence conditions beyond keeping Inno Setup's own copyright notices in the setup
 file, which it does by itself. Its authors ask commercial users to buy a licence and anyone to donate; that is a request, not a

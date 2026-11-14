@@ -8,22 +8,23 @@
 use openstage_express_core::fsutil::sanitise_folder_name;
 use openstage_express_core::StepKind;
 
-use crate::encoding::markdown_escape;
+use crate::encoding::{markdown_escape, markdown_to_markdown};
 use crate::plan::Plan;
 use crate::{Export, OutFile};
 
 /// The text of the Markdown file.
 pub fn markdown_text(plan: &Plan) -> String {
     let mut blocks: Vec<String> = vec![format!("# {}", markdown_escape(&plan.title))];
-    if !plan.description.trim().is_empty() {
-        blocks.push(plan.description.trim().to_string());
-    }
+    // Descriptions are written from the subset they were read as, escaped (the security review of 2026-11-13): written as typed,
+    // a guide from someone else could carry HTML, a picture fetched from a server, or a script link to a viewer that shows them.
+    blocks.extend(markdown_to_markdown(&plan.description));
     for step in &plan.steps {
         if step.kind == StepKind::Block {
             let mut quote = vec![format!("> **{}**", markdown_escape(&step.title))];
-            if !step.description.trim().is_empty() {
+            let description = markdown_to_markdown(&step.description).join("\n\n");
+            if !description.is_empty() {
                 quote.push(">".to_string());
-                quote.extend(step.description.trim().lines().map(|l| {
+                quote.extend(description.lines().map(|l| {
                     if l.is_empty() {
                         ">".to_string()
                     } else {
@@ -41,9 +42,7 @@ pub fn markdown_text(plan: &Plan) -> String {
             step.number.as_deref().unwrap_or(""),
             markdown_escape(&step.title)
         ));
-        if !step.description.trim().is_empty() {
-            blocks.push(step.description.trim().to_string());
-        }
+        blocks.extend(markdown_to_markdown(&step.description));
         if let Some(picture) = &step.picture {
             blocks.push(format!("![{}]({})", markdown_escape(&step.alt), picture.file));
         }
@@ -154,6 +153,41 @@ Check your details, then submit. The student's name is hidden in this guide.
         assert!(text.starts_with("# Use \\*stars\\* & \\[brackets\\]\n"), "{text}");
         assert!(text.contains("## 1. Click \"A\\_B\" \\#1 \\<now\\>\n"));
         assert!(text.contains("![A \\] picture \\[with\\] odd \\`marks\\`](images/step-01.png)"));
+    }
+
+    /// The security review of 2026-11-13: descriptions went into the file as typed, so a guide from someone else could carry HTML, a
+    /// picture fetched from a server, or a script link to a viewer that shows them. Now only the subset passes, and the rest is text.
+    #[test]
+    fn html_a_remote_picture_and_a_script_link_in_a_description_come_out_as_plain_escaped_text() {
+        let mut p = demo_plan();
+        p.description = "<script>alert(1)</script> intro".to_string();
+        p.steps[0].description = "<img src=https://evil.example/t.png onerror=alert(1)>\n\
+             ![seen](https://evil.example/track.png)\n\
+             [click](javascript:alert(1))\n\n\
+             **Bold** and [the help page](https://example.org/help)\n\n\
+             - one\n- two"
+            .to_string();
+        let text = markdown_text(&p);
+        // No tag gets through: every angle bracket has a backslash in front of it, except the `>` that starts a line of a quotation.
+        for (at, _) in text.match_indices(['<', '>']) {
+            let quote_marker = text[at..].starts_with('>') && (at == 0 || text[..at].ends_with('\n'));
+            assert!(quote_marker || text[..at].ends_with('\\'), "an angle bracket got through at {at}: {text}");
+        }
+        assert!(text.contains(r"\<img src=https://evil.example/t.png onerror=alert(1)\>"), "{text}");
+        assert!(text.contains(r"\<script\>alert(1)\</script\> intro"), "{text}");
+        // The only pictures are the guide's own: every other `![` has a backslash in front of it.
+        for (at, _) in text.match_indices("![") {
+            let escaped = text[..at].ends_with('\\');
+            let line = text[at..].lines().next().unwrap_or("");
+            assert!(escaped || line.contains("](images/"), "a picture link got through: {line}");
+        }
+        assert!(text.contains(r"\![seen](https://evil.example/track.png)"), "a link to the page, never a picture: {text}");
+        assert!(text.contains(r"\[click\](javascript:alert(1))"), "{text}");
+        for (at, _) in text.match_indices("](javascript") {
+            assert!(text[..at].ends_with('\\'), "a script link got through: {text}");
+        }
+        assert!(text.contains("**Bold** and [the help page](https://example.org/help)"), "{text}");
+        assert!(text.contains("- one\n- two"), "{text}");
     }
 
     #[test]

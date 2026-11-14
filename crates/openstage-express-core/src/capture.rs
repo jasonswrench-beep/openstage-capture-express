@@ -162,9 +162,9 @@ impl FrameRing {
     }
 }
 
-/// Asked, on the noting thread, for the field that has the keyboard.
+/// Asked, on the noting thread, for the field that has the keyboard (its text only when `read_text` is true; see `Host`).
 pub trait FieldReader {
-    fn focused_field(&mut self) -> FocusedField;
+    fn focused_field(&mut self, read_text: bool) -> FocusedField;
 }
 
 enum Shot {
@@ -206,8 +206,8 @@ impl Host for EngineHost<'_> {
         id
     }
 
-    fn focused_field(&mut self) -> FocusedField {
-        self.fields.focused_field()
+    fn focused_field(&mut self, read_text: bool) -> FocusedField {
+        self.fields.focused_field(read_text)
     }
 }
 
@@ -398,7 +398,6 @@ pub fn step_draft(captured: &Captured, image: StepImage, options: &MarkOptions, 
     let mut step = StepDraft::with_picture(&draft.title, image);
     step.click = draft.click.clone();
     step.control = draft.control.clone();
-    step.typed = draft.typed.clone();
     step.annotations = marks(draft.click.as_ref(), role, options);
     if options.focused_view {
         let click = draft.click.as_ref().map(|c| (c.x, c.y));
@@ -411,6 +410,12 @@ pub fn step_draft(captured: &Captured, image: StepImage, options: &MarkOptions, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The settings these tests were written for: the field's text is read ("Say which field was typed in, not what was typed"
+    /// turned off). The tests of that setting, which is on unless turned off, use `Settings::default()` itself.
+    fn reading() -> Settings {
+        Settings { say_field_not_text: false, ..Settings::default() }
+    }
     use crate::builder::{FieldText, Key, ModKey, Mods, MouseButton, Target};
 
     fn picture(shade: u8) -> Picture {
@@ -424,13 +429,17 @@ mod tests {
     struct Field(FocusedField);
 
     impl FieldReader for Field {
-        fn focused_field(&mut self) -> FocusedField {
-            self.0.clone()
+        fn focused_field(&mut self, read_text: bool) -> FocusedField {
+            let mut field = self.0.clone();
+            if !read_text && matches!(field.text, FieldText::Text(_)) {
+                field.text = FieldText::Unreadable;
+            }
+            field
         }
     }
 
     fn no_field() -> Field {
-        Field(FocusedField { name: String::new(), role: String::new(), text: FieldText::Unreadable })
+        Field(FocusedField { name: String::new(), role: String::new(), text: FieldText::Unreadable, id: None })
     }
 
     fn click(at: Ms, x: i32, y: i32) -> Input {
@@ -447,7 +456,7 @@ mod tests {
     }
 
     fn engine() -> CaptureEngine {
-        CaptureEngine::new(Settings::default(), RING_BYTES)
+        CaptureEngine::new(reading(), RING_BYTES)
     }
 
     // ---- the picture and the area
@@ -611,7 +620,7 @@ mod tests {
 
     #[test]
     fn a_screenshot_delay_waits_for_a_later_picture() {
-        let settings = Settings { screenshot_delay_ms: 500, ..Settings::default() };
+        let settings = Settings { screenshot_delay_ms: 500, ..reading() };
         let mut e = CaptureEngine::new(settings, RING_BYTES);
         let mut field = no_field();
         e.push_frame(100, picture(1));
@@ -625,7 +634,7 @@ mod tests {
 
     #[test]
     fn a_still_screen_does_not_hold_a_delayed_step_up_forever() {
-        let settings = Settings { screenshot_delay_ms: 500, ..Settings::default() };
+        let settings = Settings { screenshot_delay_ms: 500, ..reading() };
         let mut e = CaptureEngine::new(settings, RING_BYTES);
         let mut field = no_field();
         e.push_frame(100, picture(1));
@@ -638,7 +647,7 @@ mod tests {
 
     #[test]
     fn a_waiting_step_holds_back_the_later_ones_so_the_order_stays() {
-        let settings = Settings { screenshot_delay_ms: 500, ..Settings::default() };
+        let settings = Settings { screenshot_delay_ms: 500, ..reading() };
         let mut e = CaptureEngine::new(settings, RING_BYTES);
         let mut field = no_field();
         e.push_frame(100, picture(1));
@@ -691,6 +700,7 @@ mod tests {
             name: "Email".into(),
             role: "edit".into(),
             text: FieldText::Text("ann@example.org".into()),
+            id: None,
         });
         e.push_frame(100, picture(1));
         let field_click = Input::Click {
@@ -726,7 +736,7 @@ mod tests {
     #[test]
     fn a_password_field_never_makes_a_step_with_text() {
         let mut e = engine();
-        let mut field = Field(FocusedField { name: "Password".into(), role: "edit".into(), text: FieldText::Password });
+        let mut field = Field(FocusedField { name: "Password".into(), role: "edit".into(), text: FieldText::Password, id: None });
         e.push_frame(100, picture(1));
         let field_click = Input::Click {
             at: 200,
@@ -750,7 +760,7 @@ mod tests {
     #[test]
     fn the_capture_mode_still_applies() {
         let settings =
-            Settings { mode: crate::builder::CaptureMode::OnClickWithKey(ModKey::Ctrl), ..Settings::default() };
+            Settings { mode: crate::builder::CaptureMode::OnClickWithKey(ModKey::Ctrl), ..reading() };
         let mut e = CaptureEngine::new(settings, RING_BYTES);
         let mut field = no_field();
         e.push_frame(10, picture(1));

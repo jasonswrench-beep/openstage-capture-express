@@ -145,6 +145,8 @@ pub enum UiIcon {
     Plus,
     /// Lucide `redo-2`.
     Redo2,
+    /// Lucide `refresh-cw`.
+    RefreshCw,
     /// Lucide `scan`.
     Scan,
     /// Lucide `search`.
@@ -174,7 +176,7 @@ pub enum UiIcon {
 }
 
 impl UiIcon {
-    pub const ALL: [UiIcon; 56] = [
+    pub const ALL: [UiIcon; 57] = [
         UiIcon::AppWindow,
         UiIcon::Archive,
         UiIcon::ArchiveRestore,
@@ -218,6 +220,7 @@ impl UiIcon {
         UiIcon::Play,
         UiIcon::Plus,
         UiIcon::Redo2,
+        UiIcon::RefreshCw,
         UiIcon::Scan,
         UiIcon::Search,
         UiIcon::Settings,
@@ -279,6 +282,7 @@ impl UiIcon {
             UiIcon::Play => "play",
             UiIcon::Plus => "plus",
             UiIcon::Redo2 => "redo-2",
+            UiIcon::RefreshCw => "refresh-cw",
             UiIcon::Scan => "scan",
             UiIcon::Search => "search",
             UiIcon::Settings => "settings",
@@ -341,6 +345,7 @@ impl UiIcon {
             UiIcon::Play => &PLAY_LINES,
             UiIcon::Plus => &PLUS_LINES,
             UiIcon::Redo2 => &REDO2_LINES,
+            UiIcon::RefreshCw => &REFRESHCW_LINES,
             UiIcon::Scan => &SCAN_LINES,
             UiIcon::Search => &SEARCH_LINES,
             UiIcon::Settings => &SETTINGS_LINES,
@@ -563,6 +568,12 @@ const PLUS_LINES: [IconLine; 2] = [
 const REDO2_LINES: [IconLine; 2] = [
     IconLine { points: &[[15.0, 14.0], [20.0, 9.0], [15.0, 4.0]], closed: false },
     IconLine { points: &[[20.0, 9.0], [9.5, 9.0], [7.8, 9.27], [6.27, 10.05], [5.05, 11.27], [4.27, 12.8], [4.0, 14.5], [4.27, 16.2], [5.05, 17.73], [6.27, 18.95], [7.8, 19.73], [9.5, 20.0], [13.0, 20.0]], closed: false },
+];
+const REFRESHCW_LINES: [IconLine; 4] = [
+    IconLine { points: &[[3.0, 12.0], [3.31, 9.67], [4.21, 7.5], [5.64, 5.64], [7.5, 4.21], [9.67, 3.31], [12.0, 3.0], [14.46, 3.32], [16.75, 4.26], [18.74, 5.74], [21.0, 8.0]], closed: false },
+    IconLine { points: &[[21.0, 3.0], [21.0, 8.0], [16.0, 8.0]], closed: false },
+    IconLine { points: &[[21.0, 12.0], [20.69, 14.33], [19.79, 16.5], [18.36, 18.36], [16.5, 19.79], [14.33, 20.69], [12.0, 21.0], [9.54, 20.68], [7.25, 19.74], [5.26, 18.26], [3.0, 16.0]], closed: false },
+    IconLine { points: &[[8.0, 16.0], [3.0, 16.0], [3.0, 21.0]], closed: false },
 ];
 const SCAN_LINES: [IconLine; 4] = [
     IconLine { points: &[[3.0, 7.0], [3.0, 5.0], [3.27, 4.0], [4.0, 3.27], [5.0, 3.0], [7.0, 3.0]], closed: false },

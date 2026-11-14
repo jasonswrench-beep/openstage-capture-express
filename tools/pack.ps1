@@ -15,6 +15,8 @@ $zip = "$stage.zip"
 if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $zip)) { throw "$name is already in $OutDir. Nothing was replaced; move it away first." }
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item -LiteralPath $exe -Destination $stage
+# The program must not name this computer's user folder or the folder it was built in (the security review of 2026-11-13).
+& (Join-Path $PSScriptRoot 'check-exe-paths.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Root $root
 # The product icon goes into the copy that is shipped, not into the one in target\.
 & (Join-Path $PSScriptRoot 'set-exe-icon.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Icon (Join-Path $root 'assets\icon\OpenCapture_Express.ico')
 foreach ($file in 'LICENSE', 'NOTICE', 'THIRD-PARTY.md') { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage }

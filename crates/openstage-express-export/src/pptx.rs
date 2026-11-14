@@ -454,7 +454,9 @@ pub fn pptx_parts(plan: &Plan, options: &PptxOptions) -> Vec<ZipEntry> {
         let mut shapes = spec.shapes.clone();
         if let Some((path, bytes)) = &spec.image {
             let id = rels.add("image", &format!("../media/{}", path.trim_start_matches("ppt/media/")), false);
-            shapes = shapes.replace("@IMAGE@", &id);
+            // Only the picture's own attribute: a title or a description that says @IMAGE@ is escaped text and is never touched
+            // (its quotation marks are written as &quot;, so it cannot look like the attribute).
+            shapes = shapes.replace("r:embed=\"@IMAGE@\"", &format!("r:embed=\"{id}\""));
             slide_parts.push(ZipEntry::stored(path.clone(), bytes.clone()));
         }
         if !spec.notes.is_empty() {

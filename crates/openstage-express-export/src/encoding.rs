@@ -164,9 +164,15 @@ fn numbered_text(line: &str) -> Option<&str> {
     trimmed[digits..].strip_prefix(". ").map(str::trim)
 }
 
+/// A description longer than this is not read for bold, italic, lists and links: it is all plain text (nothing is lost). The
+/// reader of the subset looks ahead for each mark, so a very long description made by someone else could take minutes (the
+/// security review of 2026-11-13).
+pub const MAX_FORMATTED_CHARS: usize = 20_000;
+
 /// A description's Markdown subset as blocks: paragraphs (a line break inside one is kept), bullet lists and numbered lists,
-/// with bold, italic and safe links inside them.
+/// with bold, italic and safe links inside them. Over `MAX_FORMATTED_CHARS`, each line is plain text.
 pub fn parse_markdown(text: &str) -> Vec<Block> {
+    let plain = text.chars().nth(MAX_FORMATTED_CHARS).is_some();
     let mut blocks = Vec::new();
     let mut paragraph: Vec<Vec<Inline>> = Vec::new();
     let mut list: Option<(bool, Vec<Vec<Inline>>)> = None;
@@ -184,6 +190,9 @@ pub fn parse_markdown(text: &str) -> Vec<Block> {
         if line.trim().is_empty() {
             flush_paragraph(&mut blocks, &mut paragraph);
             flush_list(&mut blocks, &mut list);
+        } else if plain {
+            flush_list(&mut blocks, &mut list);
+            paragraph.push(vec![Inline::Text(line.trim().to_string())]);
         } else if let Some(item) = bullet_text(line).or_else(|| numbered_text(line)) {
             let numbered = numbered_text(line).is_some();
             flush_paragraph(&mut blocks, &mut paragraph);
@@ -241,6 +250,40 @@ pub fn markdown_to_html(text: &str) -> String {
     out
 }
 
+fn inlines_to_markdown(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            // `!` too: written just before a link it would make the link a picture, which a viewer fetches.
+            Inline::Text(text) => out.push_str(&markdown_escape(text).replace('!', "\\!")),
+            Inline::Strong(inner) => out.push_str(&format!("**{}**", inlines_to_markdown(inner))),
+            Inline::Emphasis(inner) => out.push_str(&format!("*{}*", inlines_to_markdown(inner))),
+            Inline::Link { url, label } => {
+                out.push_str(&format!("[{}]({})", inlines_to_markdown(label), url.replace('(', "%28").replace(')', "%29")))
+            }
+        }
+    }
+    out
+}
+
+/// A description as Markdown made from the subset it was read as (the Markdown export): bold, italic, bullet and numbered lists,
+/// and links that passed [`is_safe_link`]; everything else escaped, so no HTML, no picture and no other link gets through (the
+/// security review of 2026-11-13). A line break inside a paragraph is kept as one. One string for each block.
+pub fn markdown_to_markdown(text: &str) -> Vec<String> {
+    parse_markdown(text)
+        .into_iter()
+        .map(|block| match block {
+            Block::Paragraph(lines) => lines.iter().map(|line| inlines_to_markdown(line)).collect::<Vec<_>>().join("  \n"),
+            Block::List { numbered, items } => items
+                .iter()
+                .enumerate()
+                .map(|(n, item)| if numbered { format!("{}. {}", n + 1, inlines_to_markdown(item)) } else { format!("- {}", inlines_to_markdown(item)) })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        })
+        .collect()
+}
+
 /// The plain words of some inline pieces: no marks, a link shown as `label (address)`.
 pub fn inlines_to_plain(inlines: &[Inline]) -> String {
     let mut out = String::new();
@@ -281,6 +324,22 @@ pub fn markdown_to_plain_lines(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The security review of 2026-11-13: the subset's reader looks ahead for each mark, so a very long description made by someone
+    /// else could take minutes. Over 20,000 characters it is read as plain text, quickly, and nothing is lost.
+    #[test]
+    fn a_description_far_longer_than_any_is_plain_text_and_read_quickly() {
+        let long = format!("{}**end**", "*a [b](c _d ".repeat(4_000));
+        assert!(long.chars().count() > MAX_FORMATTED_CHARS);
+        let started = std::time::Instant::now();
+        let blocks = parse_markdown(&long);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+        assert_eq!(blocks, vec![Block::Paragraph(vec![vec![Inline::Text(long.trim().to_string())]])]);
+        let html = markdown_to_html(&long);
+        assert!(!html.contains("<strong>") && html.contains("**end**"));
+        // Just under the line it is still formatted.
+        assert_eq!(parse_markdown("**bold**"), vec![Block::Paragraph(vec![vec![Inline::Strong(vec![Inline::Text("bold".into())])]])]);
+    }
 
     #[test]
     fn base64_matches_known_values() {

@@ -240,6 +240,14 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                     warnings.push(format!("Step {label}: a text mark could not be drawn ({problem})."));
                 }
                 let scaled = scale_to_width(&rendered.canvas, image_width);
+                // Said only of a picture shown at under a quarter of the width asked for: one that small was made so on purpose
+                // by nobody, and the person should know why it looks small.
+                if scaled.width.saturating_mul(4) < image_width && rendered.canvas.width < image_width {
+                    warnings.push(format!(
+                        "Step {label}: its picture is only {} pixels across, so it is shown {} pixels across, not {image_width}.",
+                        rendered.canvas.width, scaled.width
+                    ));
+                }
                 let png = encode_png(&scaled);
                 let jpg = match options.document_pictures {
                     DocumentPictures::Png => None,
@@ -629,6 +637,15 @@ mod tests {
         assert!(name.chars().count() <= 80, "file names keep 80 characters of a title, so the mark has to be first");
     }
 
+    /// One step whose picture is the size of a small screen, for the tests of the export widths.
+    fn one_screen_sized_step() -> (Document, MemoryPictures) {
+        let mut doc = Document::new(Guide::new("g", "Guide", "en", "t"));
+        let mut pictures = MemoryPictures::default();
+        pictures.0.insert("images/step-0001.png".to_string(), Picture::solid(1024, 768, Rgb(40, 80, 120)));
+        doc.add_step(StepDraft::with_picture("A", StepImage::new("images/step-0001.png", 1024, 768)), Position::End, "t").unwrap();
+        (doc, pictures)
+    }
+
     #[test]
     fn every_width_on_offer_is_the_width_of_the_pictures_and_the_usual_one_is_on_offer() {
         assert_eq!(IMAGE_WIDTH_CHOICES, [640, 800, 1024, 1280, 1600, 1920]);
@@ -636,7 +653,7 @@ mod tests {
         assert!(IMAGE_WIDTH_CHOICES.contains(&DEFAULT_IMAGE_WIDTH));
         assert_eq!(ExportOptions::default().image_width, DEFAULT_IMAGE_WIDTH);
         assert!(IMAGE_WIDTH_CHOICES.windows(2).all(|w| w[0] < w[1]), "smallest first");
-        let (doc, pictures) = eight_steps();
+        let (doc, pictures) = one_screen_sized_step();
         for width in IMAGE_WIDTH_CHOICES {
             let options = ExportOptions { image_width: width, first_steps: Some(1), ..ExportOptions::default() };
             let p = plan(&doc.guide, &pictures, &BlockText, &options);
@@ -648,9 +665,28 @@ mod tests {
         }
     }
 
+    /// The security review of 2026-11-13: a guide made by someone else with a crop 8 pixels wide and a picture as tall as can be
+    /// read made the export ask for gigabytes, and the program stopped. Now the picture is shown at most four times its size, kept
+    /// to the pixel budget, and the export says so.
+    #[test]
+    fn a_crop_eight_pixels_wide_is_shown_small_with_a_note_and_nothing_huge_is_made() {
+        let mut doc = Document::new(Guide::new("g", "Guide", "en", "t"));
+        let mut pictures = MemoryPictures::default();
+        pictures.0.insert("images/step-0001.png".to_string(), Picture::solid(64, 16_384, Rgb(40, 80, 120)));
+        let mut draft = StepDraft::with_picture("Thin", StepImage::new("images/step-0001.png", 64, 16_384));
+        draft.focus = Some(openstage_express_core::model::Rect { x: 0, y: 0, width: 8, height: 16_384, extra: Default::default() });
+        doc.add_step(draft, Position::End, "t").unwrap();
+        let options = ExportOptions { image_width: 1920, ..ExportOptions::default() };
+        let p = plan(&doc.guide, &pictures, &BlockText, &options);
+        let picture = p.steps[0].picture.as_ref().expect("a picture is still made");
+        assert!(picture.width <= 8 * openstage_express_core::render::MAX_UPSCALE, "{}", picture.width);
+        assert!(picture.width as u64 * picture.height as u64 <= openstage_express_core::render::MAX_PICTURE_PIXELS);
+        assert!(p.warnings.iter().any(|w| w.contains("only 8 pixels across")), "{:?}", p.warnings);
+    }
+
     #[test]
     fn a_wild_width_is_kept_between_the_smallest_and_the_largest() {
-        let (doc, pictures) = eight_steps();
+        let (doc, pictures) = one_screen_sized_step();
         let width_for = |asked: u32| {
             let options = ExportOptions { image_width: asked, first_steps: Some(1), ..ExportOptions::default() };
             plan(&doc.guide, &pictures, &BlockText, &options).steps[0].picture.as_ref().unwrap().width

@@ -4,7 +4,7 @@
 
 Free, open-source Windows program that turns what a person does on screen into a clean step-by-step guide: a picture for each
 step with a marker where the click was, a title already written (such as `Click "Save"`), light editing, and export. It is meant
-to be straightforward to use, with no account and no network. Licence: Apache-2.0. Written in Rust.
+to be straightforward to use, with no account, and no network except one request when you choose Check for updates. Licence: Apache-2.0. Written in Rust.
 
 It is a sibling of OpenStage Capture (the recorder inside OpenStage Author) and reuses its design and code, but it is its own
 small program with its own window.
@@ -238,7 +238,7 @@ Written and type-checked, not yet run on Windows:
 
 - The installer and the program's icon (2026-11-01; `docs/installer.md`; Jason said to download Inno Setup and to use the product
   icon in the installer). `MAKE EXPRESS INSTALLER.bat` builds the program and has Inno Setup 7.1.1 (free; downloaded from its
-  project's GitHub release after its Authenticode signature and SHA-256 were checked, and installed in `C:\Users\Jason\InnoSetup7`)
+  project's GitHub release after its Authenticode signature and SHA-256 were checked, and installed in `%USERPROFILE%\InnoSetup7`)
   make `dist\OpenStage-Capture-Express-0.1.0-x64-setup.exe` (6.5 MB) from `installer/express.iss`. The product icon is the setup
   file's own icon, is drawn into the setup wizard's pictures (the tall one on the first and last pages, a small one in the corner of
   the others), is on the program file inside the setup file and the zip (`tools/set-exe-icon.ps1` adds it with Windows' own
@@ -404,7 +404,8 @@ scaling on a real screen** (see `TESTING-TODO.md`). Switches for pictures: `--me
 3. Double-click **`EXPORT DEMO.bat`**. It makes a made-up guide and exports it in every format that is built, into a new folder each
    time, and opens it. Open the web page in the `html` folder first.
 
-If the OpenStage code is not next to this folder, the scripts say so; double-click **`GET OPENSTAGE CODE.bat`** (it asks first).
+The OpenStage capture code Express is built on comes from GitHub at one fixed commit (see "Layout on every computer"); the first
+build fetches it with the other libraries, after asking.
 
 4. Double-click **`OPEN EXPRESS.bat`**. It builds the program if needed (a few seconds when nothing has changed) and opens the
    window. Press Tab to move between controls and Enter to press one. The example guide ("How to submit an assignment") is a
@@ -430,8 +431,8 @@ Made by Jason on 2026-10-31, when the kickoff questions were put to him:
 
 | Question | Answer | What it changes |
 |---|---|---|
-| Where does it live? | A separate folder with its own git repo, not `capture-express/` inside the OpenStage repo (spec D4 is replaced) | This folder, beside the `openstage-author` clone. Nothing is pushed anywhere, and no remote is set |
-| How does it reuse Capture's code? | A path link to the sibling clone | See "Layout on every computer" below |
+| Where does it live? | A separate folder with its own git repo, not `capture-express/` inside the OpenStage repo (spec D4 is replaced) | This folder (its own repository on GitHub since 2026-11-02) |
+| How does it reuse Capture's code? | A path link to the sibling clone at first; since 2026-11-13 a git dependency at one fixed commit | See "Layout on every computer" below |
 | Window toolkit? | egui with AccessKit, all Rust (spec D5) | Milestone M5 includes the Narrator and NVDA pass, with Tauri as the fallback |
 | First slice? | Capture, edit, **and** PDF, Word and PowerPoint (spec D6, widened) | The first version includes the formats the spec calls S2 |
 
@@ -446,17 +447,13 @@ Use an original design and implementation.
 ## Layout on every computer
 
 The spec is `docs\capture-express\spec.md` in the OpenStage repo (`https://github.com/jasonswrench-beep/openstage-author`, branch
-`feature/capture-express`). Express reads OpenStage Capture's crates (drawing, text layout, the edit types) through a path link, so
-on every computer these two folders must sit side by side:
-
-```
-somewhere\openstage-author\          the OpenStage repo, branch feature/capture-express
-somewhere\openstage-capture-express\ this folder
-```
-
-The link is in use since milestone M3. `BUILD EXPRESS.bat`, `TEST EXPRESS.bat` and `EXPORT DEMO.bat` check that the folder is there
-and, if not, say so; `GET OPENSTAGE CODE.bat` copies it from GitHub (it asks first, and needs Git). Choose a folder that OneDrive
-does not sync, and extract each new copy into a new, empty folder.
+`feature/capture-express`). Express reads OpenStage Capture's crates (drawing, text layout, the edit types) from that repository at
+one fixed commit, named in `Cargo.toml` (a git dependency with `rev`, since the security review of 2026-11-13; before that, a path
+link to a clone beside this folder, which made a release impossible to rebuild from GitHub alone). A clone of this repository
+anywhere builds the same capture code that was shipped, with nothing beside it. The first build fetches it with the other
+libraries, after asking (`cargo-run.bat`). To move to newer capture code, change the commit in all three lines of `Cargo.toml`,
+build, run `TEST EXPRESS.bat`, and name the commit in the release notes. Choose a folder that OneDrive does not sync, and extract
+each new copy into a new, empty folder.
 
 ## How the pieces fit
 
@@ -481,10 +478,16 @@ TESTING-TODO.md                 what only a person can check
 
 - Apache-2.0 only. No GPL or AGPL, no FFmpeg, no libuiohook. `tools/check_rules.py` fails the build on a dependency licence
   outside the allowed list.
-- No network in version 1: no HTTP client, no telemetry, no update check. The checker also fails on known network and
-  telemetry crates. Exported web pages make no outside requests either.
+- No network of its own: no HTTP client, no telemetry. The one request is Help > Check for updates, only when the person chooses
+  it, made with Windows' own WinHTTP to GitHub's list of releases (`docs/update-check.md`). The checker fails on known network and
+  telemetry crates, and on WinHTTP anywhere but `crates/openstage-express-windows/src/updates.rs`. Exported web pages make no
+  outside requests either.
 - Accessibility is not optional: every feature works by keyboard and with a screen reader, and nothing traps focus.
-- Typed text is read from the field, never logged key by key, and never for a password field.
+- A typing step says which field was typed in (`Type in "Name"`) and does not read the text, unless the person turns "Say which
+  field was typed in, not what was typed" off in Settings. Then the text is read from the field when typing ends, never logged key
+  by key, and never for a password field: a field that was a password field at the first key or at the end, a password check that
+  fails, or focus that moved to another element during the typing all count as a password field. A step never keeps the text in
+  a field of its own, and a copy made to share has no clicks, controls or program names in it (the security review of 2026-11-13).
 - Nothing is erased by the software. Delete means the trash folder, and only the person's "Empty the trash" deletes files (for a
   whole guide there is no such button: it is moved to a `Trash` folder and the person deletes it in Explorer). An
   export never replaces a file that is already there.

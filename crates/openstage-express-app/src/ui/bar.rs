@@ -76,6 +76,8 @@ pub enum BarAction {
     Resume,
     Finish,
     CaptureNow,
+    /// Open Windows' notification settings, where Do not disturb is turned on.
+    DoNotDisturb,
 }
 
 /// Draw the bar. The first button gets the keyboard whenever the phase changes, so a person who starts it with the keyboard
@@ -109,6 +111,9 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
     egui::CentralPanel::default().frame(page).show(ui, |ui| {
         if view.phase == BarPhase::Ready {
             ui.label(RichText::new(format!("Captures {}.", view.what)).color(p.muted));
+            // A picture is of the screen, so a notification or a pop-up that is showing goes into it (the security review of
+            // 2026-11-13).
+            ui.label(RichText::new(PICTURES_SHOW_EVERYTHING).color(p.muted));
         }
         if let Some(last) = &view.last {
             ui.label(RichText::new(format!("Last step: {last}")).color(p.muted));
@@ -152,6 +157,9 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
                 if widgets::icon_button(ui, UiIcon::X, "Cancel").clicked() {
                     action = BarAction::Cancel;
                 }
+                if widgets::button(ui, "Do not disturb...").clicked() {
+                    action = BarAction::DoNotDisturb;
+                }
             }
             BarPhase::Capturing => {
                 let pause = widgets::icon_button(ui, UiIcon::Pause, "Pause");
@@ -191,6 +199,10 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
     });
     action
 }
+
+/// What the bar says before a capture starts: a picture shows whatever is on the screen when it is taken.
+pub const PICTURES_SHOW_EVERYTHING: &str =
+    "Anything on the screen when a step is taken is in its picture, a notification too. Do not disturb keeps them away.";
 
 /// The icon of each thing that can be captured.
 fn target_icon(kind: TargetKind) -> UiIcon {

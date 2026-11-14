@@ -32,7 +32,8 @@ if errorlevel 1 exit /b 1
 echo.
 echo Some of the libraries this program is built from are not on this
 echo computer yet. To get them, the program must download them once
-echo from crates.io, the website that holds Rust libraries. Nothing of
+echo from crates.io, the website that holds Rust libraries, and the
+echo OpenStage capture code at one fixed version from GitHub. Nothing of
 echo yours is sent. After this, builds on this computer do not download.
 echo.
 set "CR_ALLOW="

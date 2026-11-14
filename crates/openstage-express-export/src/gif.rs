@@ -343,6 +343,15 @@ fn draw_progress(canvas: &mut Canvas, done: usize, of: usize) {
     canvas.fill_rect(PixelRect::new(0, h - bar, filled, bar), ACCENT);
 }
 
+/// The tallest frame a GIF is made with. The format allows 65,535 pixels; a frame of a step is never sensibly taller than this,
+/// and every frame is padded to the tallest, so one very tall picture made the whole GIF enormous (the security review of
+/// 2026-11-13). A taller picture is shown as a card with its title instead.
+pub const MAX_FRAME_HEIGHT: u32 = 8192;
+
+/// The most pixels all of a GIF's frames together may have, once each is padded to the tallest: 256 million, a gigabyte of
+/// colour. A GIF that would be bigger is not made, and the export says what to change.
+pub const MAX_TOTAL_PIXELS: u64 = 256 * 1024 * 1024;
+
 /// Make the GIF for a plan.
 pub fn export_gif(plan: &Plan, options: &GifOptions, text: &dyn TextRenderer) -> Export {
     let width = options.width();
@@ -360,7 +369,13 @@ pub fn export_gif(plan: &Plan, options: &GifOptions, text: &dyn TextRenderer) ->
                     c.bgra = picture.bgra.clone();
                     c
                 };
-                scale_to_width(&canvas, width)
+                let scaled = scale_to_width(&canvas, width);
+                if scaled.height > MAX_FRAME_HEIGHT {
+                    warnings.push(format!("The picture of \"{}\" is too tall for a GIF, so its frame shows the step's title.", step.title));
+                    card(width, card_height, &step.title, width as f32 / 18.0, text)
+                } else {
+                    scaled
+                }
             }
             None => card(width, card_height, &step.title, width as f32 / 18.0, text),
         };
@@ -370,7 +385,11 @@ pub fn export_gif(plan: &Plan, options: &GifOptions, text: &dyn TextRenderer) ->
         frames.push(card(width, card_height, &plan.title, width as f32 / 14.0, text));
         warnings.push("The guide has no steps to show, so the GIF is only its title.".to_string());
     }
-    let height = frames.iter().map(|f| f.height).max().unwrap_or(card_height);
+    let height = frames.iter().map(|f| f.height).max().unwrap_or(card_height).min(MAX_FRAME_HEIGHT);
+    if frames.len() as u64 * width as u64 * height as u64 > MAX_TOTAL_PIXELS {
+        warnings.push("The GIF would be too big to make: choose a smaller width, or make it from fewer steps.".to_string());
+        return Export { files: Vec::new(), warnings };
+    }
     let steps_total = frames.len() - usize::from(options.title_card && !plan.steps.is_empty());
     let mut padded: Vec<Canvas> = Vec::with_capacity(frames.len());
     for (i, frame) in frames.iter().enumerate() {

@@ -87,6 +87,11 @@ OpenStage Capture Express is Apache-2.0. These Rust crates are built into it, ea
 | num-conv | 0.2.2 | MIT OR Apache-2.0 |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 (*) |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
+| openstage-capture | 0.1.0 | Apache-2.0 |
+| openstage-capture-project | 0.1.0 | Apache-2.0 (*) |
+| openstage-capture-protocol | 0.1.0 | Apache-2.0 |
+| openstage-capture-render | 0.1.0 | Apache-2.0 (*) |
+| openstage-capture-windows | 0.1.0 | Apache-2.0 |
 | ordered-float | 5.5.1 | MIT |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 (*) |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |

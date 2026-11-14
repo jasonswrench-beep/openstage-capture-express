@@ -4,11 +4,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
 
 use eframe::egui;
 use openstage_express_core::cues::Cue;
 use openstage_express_core::fsutil::{sanitise_folder_name, utc_now_iso};
 use openstage_express_core::hotkey::{self, HotkeySet, KeyCombo};
+use openstage_express_core::updates::UpdateAnswer;
 use openstage_express_core::{Access, GuideFolder};
 use openstage_express_export::demo::demo;
 use openstage_express_export::plan::exported_step_count;
@@ -117,6 +119,12 @@ pub struct App {
     export_job: Option<Receiver<Result<Report, String>>>,
     /// A copy as one file being made on its own thread.
     copy_job: Option<Receiver<Result<export_run::CopyReport, String>>>,
+    /// Check for updates: what asks (GitHub, on Windows; a stand-in in the tests), what opens a release page, the check under way,
+    /// and its answer, shown on the About screen.
+    update_checker: Arc<dyn Fn() -> UpdateAnswer + Send + Sync>,
+    page_opener: Box<dyn Fn(&str)>,
+    update_job: Option<Receiver<UpdateAnswer>>,
+    update_answer: Option<UpdateAnswer>,
     /// What to capture, as chosen so far.
     pub target: Target,
     desktop: Box<dyn Desktop>,
@@ -130,6 +138,8 @@ pub struct App {
     open_copy: OpenCopyState,
     /// Shows a folder to the person (opens it in Explorer).
     opener: Box<dyn Fn(&Path)>,
+    /// Opens Windows' notification settings (Do not disturb). Nothing in the tests.
+    notifications: Box<dyn Fn()>,
     /// The command search (Ctrl+K), while it is open.
     pub search: Option<SearchState>,
     /// Whether the list of keyboard keys (Ctrl+/) is open.
@@ -147,9 +157,12 @@ fn self_usable(editor: &Option<EditorState>, screen: Screen, capturing: bool, co
     let in_editor = screen == Screen::Editor;
     let guide_open = editor.is_some() && matches!(screen, Screen::Editor | Screen::Export | Screen::DeletedSteps);
     match command {
-        Command::SearchCommands | Command::KeyboardKeys | Command::About | Command::Colours(_) | Command::Settings => {
-            true
-        }
+        Command::SearchCommands
+        | Command::KeyboardKeys
+        | Command::CheckForUpdates
+        | Command::About
+        | Command::Colours(_)
+        | Command::Settings => true,
         Command::StartCapturing => !capturing,
         Command::OpenCopy | Command::Trash => true,
         Command::BackToGuides => screen != Screen::Home,
@@ -188,6 +201,10 @@ impl App {
             settings_note: None,
             export_job: None,
             copy_job: None,
+            update_checker: Arc::new(|| UpdateAnswer::error("Checking for updates works only in the Windows program.")),
+            page_opener: Box::new(|_| {}),
+            update_job: None,
+            update_answer: None,
             target: Target::default(),
             desktop: Box::new(NoDesktop),
             window_list: WindowList::default(),
@@ -196,6 +213,7 @@ impl App {
             file_chooser: Box::new(|_| None),
             open_copy: OpenCopyState::new(),
             opener: Box::new(|_| {}),
+            notifications: Box::new(|| {}),
             search: None,
             keys_open: false,
             dialog_return: None,
@@ -260,6 +278,54 @@ impl App {
     }
 
     /// Give the program a way to ask for a copy saved as one file.
+    /// What the bar's Do not disturb button does (opening Windows' notification settings, on Windows).
+    pub fn with_notifications(mut self, open: Box<dyn Fn()>) -> App {
+        self.notifications = open;
+        self
+    }
+
+    /// What Check for updates asks, and what opens a page of the releases (on Windows, GitHub and the person's browser).
+    pub fn with_updates(mut self, checker: Arc<dyn Fn() -> UpdateAnswer + Send + Sync>, page_opener: Box<dyn Fn(&str)>) -> App {
+        self.update_checker = checker;
+        self.page_opener = page_opener;
+        self
+    }
+
+    /// The same as `with_updates`, for a test that already has the app.
+    #[cfg(test)]
+    pub fn use_updates(&mut self, checker: Arc<dyn Fn() -> UpdateAnswer + Send + Sync>, page_opener: Box<dyn Fn(&str)>) {
+        self.update_checker = checker;
+        self.page_opener = page_opener;
+    }
+
+    /// Ask, once, on a thread of its own, whether a newer Express is published. The answer is shown on the About screen.
+    fn start_update_check(&mut self) {
+        if self.update_job.is_some() {
+            return;
+        }
+        let checker = self.update_checker.clone();
+        let (tell, heard) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tell.send(checker());
+        });
+        self.update_job = Some(heard);
+        self.update_answer = None;
+        self.status.say("Checking for updates. Please wait.");
+    }
+
+    /// Take the answer of Check for updates, if it has come.
+    fn poll_updates(&mut self) {
+        let Some(job) = &self.update_job else { return };
+        let answer = match job.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => UpdateAnswer::error("The check stopped without an answer. Try again."),
+        };
+        self.update_job = None;
+        self.status.say(answer.message.clone());
+        self.update_answer = Some(answer);
+    }
+
     pub fn with_file_chooser(mut self, chooser: FileChooser) -> App {
         self.file_chooser = chooser;
         self
@@ -555,6 +621,10 @@ impl App {
                 self.screen = Screen::Home;
                 self.status.say("Cancelled. Nothing was captured.");
             }
+            BarAction::DoNotDisturb => {
+                (self.notifications)();
+                self.status.say("Windows' notification settings are open: turn on Do not disturb there, then come back and press Start.");
+            }
             other => {
                 // Only an action the capture can take now makes a sound: Pause while capturing, Resume while paused, Finish either way.
                 let phase = self.capture.as_ref().map(|c| c.view().phase);
@@ -745,6 +815,7 @@ impl App {
     /// Take what the capture has to say, and open the guide when it has finished. Call it every frame.
     pub fn poll(&mut self) {
         self.poll_export();
+        self.poll_updates();
         let Some(capture) = self.capture.as_mut() else { return };
         let steps_before = capture.view().steps;
         let said = capture.poll();
@@ -1045,6 +1116,11 @@ impl App {
             Command::StartCapturing => {
                 self.leave_guide();
                 self.home_action(Action::StartCapturing);
+            }
+            Command::CheckForUpdates => {
+                self.leave_guide();
+                self.screen = Screen::About;
+                self.start_update_check();
             }
             Command::OpenCopy | Command::Trash | Command::Settings | Command::About => {
                 self.leave_guide();
@@ -1383,9 +1459,18 @@ impl App {
                 }
             }
             Screen::About => {
-                if about::show(ui) {
-                    self.screen = Screen::Home;
-                    self.status.say("Back at your guides.");
+                let view = about::AboutView { checking: self.update_job.is_some(), answer: self.update_answer.as_ref() };
+                match about::show(ui, &view) {
+                    about::AboutAction::None => {}
+                    about::AboutAction::Back => {
+                        self.screen = Screen::Home;
+                        self.status.say("Back at your guides.");
+                    }
+                    about::AboutAction::Check => self.start_update_check(),
+                    about::AboutAction::OpenPage(url) => {
+                        (self.page_opener)(&url);
+                        self.status.say("The release page is opening in your browser.");
+                    }
                 }
             }
             Screen::Settings => {
@@ -1418,7 +1503,13 @@ impl App {
                         self.status.say("Back at your guides.");
                     }
                     SettingsAction::ChooseGuidesFolder => {
-                        if let Some(chosen) = (self.chooser)(&self.library) {
+                        if let Some(chosen) = (self.chooser)(&self.library).filter(|c| {
+                            let network = openstage_express_core::fsutil::is_network_path(c);
+                            if network {
+                                self.status.say("Express keeps guides and exports on this computer, so a folder on another computer (\\\\server\\share) is not used. A network drive with a letter, such as Z:, can be chosen.");
+                            }
+                            !network
+                        }) {
                             self.settings.guides_folder = Some(chosen.display().to_string());
                             self.library = chosen;
                             self.refresh_home();
@@ -1427,7 +1518,13 @@ impl App {
                         }
                     }
                     SettingsAction::ChooseExportsFolder => {
-                        if let Some(chosen) = (self.chooser)(&self.export.folder) {
+                        if let Some(chosen) = (self.chooser)(&self.export.folder).filter(|c| {
+                            let network = openstage_express_core::fsutil::is_network_path(c);
+                            if network {
+                                self.status.say("Express keeps guides and exports on this computer, so a folder on another computer (\\\\server\\share) is not used. A network drive with a letter, such as Z:, can be chosen.");
+                            }
+                            !network
+                        }) {
                             self.settings.exports_folder = Some(chosen.display().to_string());
                             self.export.folder = chosen;
                             self.save_settings();
