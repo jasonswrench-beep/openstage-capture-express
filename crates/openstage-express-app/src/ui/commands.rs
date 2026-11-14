@@ -46,6 +46,7 @@ pub enum Command {
     // Help
     SearchCommands,
     KeyboardKeys,
+    CheckForUpdates,
     About,
 }
 
@@ -129,7 +130,7 @@ pub const MENUS: [MenuPlan; 7] = [
     MenuPlan { title: "Tools", items: &[Some(Command::Settings)] },
     MenuPlan {
         title: "Help",
-        items: &[Some(Command::SearchCommands), Some(Command::KeyboardKeys), None, Some(Command::About)],
+        items: &[Some(Command::SearchCommands), Some(Command::KeyboardKeys), None, Some(Command::CheckForUpdates), Some(Command::About)],
     },
 ];
 
@@ -211,6 +212,7 @@ impl Command {
             Command::Settings => "Settings...".into(),
             Command::SearchCommands => "Search for a command".into(),
             Command::KeyboardKeys => "Keyboard keys".into(),
+            Command::CheckForUpdates => "Check for updates...".into(),
             Command::About => "About and licences".into(),
         }
     }
@@ -246,6 +248,7 @@ impl Command {
             Command::Settings => UiIcon::Settings,
             Command::SearchCommands => UiIcon::Search,
             Command::KeyboardKeys => UiIcon::Keyboard,
+            Command::CheckForUpdates => UiIcon::RefreshCw,
             Command::About => UiIcon::Info,
         }
     }
@@ -300,6 +303,7 @@ impl Command {
             Command::Settings => "hotkeys, folders, sounds, appearance, capturing, preferences, options",
             Command::SearchCommands => "find a command by its name",
             Command::KeyboardKeys => "shortcuts, every key",
+            Command::CheckForUpdates => "new version, release, upgrade, asks GitHub once, installs nothing",
             Command::About => "version, licence, notices, what it is built from",
         }
     }

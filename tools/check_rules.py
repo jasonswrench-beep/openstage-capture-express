@@ -7,7 +7,10 @@ openstage-author repository), with Express's extra rules added. It fails if:
   * a dependency has a license that is not on the allowed list (no GPL, no unknown licenses);
   * a dependency looks like FFmpeg (FFmpeg is never bundled);
   * a dependency is a network client, a telemetry or crash-report crate, an OCR engine that downloads
-    data, or libuiohook (Express makes no network connection in version 1, spec rule P1);
+    data, or libuiohook (Express makes no network connection of its own, spec rule P1, except one: Check
+    for updates, which the person chooses, made with Windows' own WinHTTP and no network crate);
+  * anything but crates/openstage-express-windows/src/updates.rs uses WinHTTP, or that file asks any
+    host but GitHub's (the one network request stays the one, in one place);
   * any build file or script asks for an FFmpeg build with --enable-gpl or --enable-nonfree
     (--enable-version3 is only flagged for review);
   * a source file is missing its Apache-2.0 license header;
@@ -36,18 +39,18 @@ ALLOWED = {
 
 # Crates that must never be in the dependency tree, and why (spec sections 2 and 6.3).
 FORBIDDEN_CRATES = {
-    "reqwest": "an HTTP client (no network in version 1)",
-    "hyper": "an HTTP library (no network in version 1)",
-    "hyper-util": "an HTTP library (no network in version 1)",
-    "hyper-tls": "an HTTP library (no network in version 1)",
-    "ureq": "an HTTP client (no network in version 1)",
-    "curl": "an HTTP client (no network in version 1)",
-    "curl-sys": "an HTTP client (no network in version 1)",
-    "isahc": "an HTTP client (no network in version 1)",
-    "surf": "an HTTP client (no network in version 1)",
-    "attohttpc": "an HTTP client (no network in version 1)",
-    "minreq": "an HTTP client (no network in version 1)",
-    "awc": "an HTTP client (no network in version 1)",
+    "reqwest": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "hyper": "an HTTP library (no network crate: the one request is Windows' own WinHTTP)",
+    "hyper-util": "an HTTP library (no network crate: the one request is Windows' own WinHTTP)",
+    "hyper-tls": "an HTTP library (no network crate: the one request is Windows' own WinHTTP)",
+    "ureq": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "curl": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "curl-sys": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "isahc": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "surf": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "attohttpc": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "minreq": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
+    "awc": "an HTTP client (no network crate: the one request is Windows' own WinHTTP)",
     "sentry": "telemetry or crash reporting (nothing leaves this computer)",
     "sentry-core": "telemetry or crash reporting (nothing leaves this computer)",
     "opentelemetry": "telemetry (nothing leaves this computer)",
@@ -184,6 +187,31 @@ def check_dependencies(packages):
         record("FAIL", "no network, telemetry or LGPL hook crates", "; ".join(banned))
     else:
         record("PASS", "no network, telemetry or LGPL hook crates")
+
+
+# The one file that may make a network request, and the hosts it may ask.
+UPDATE_CHECK_FILE = ROOT / "crates" / "openstage-express-windows" / "src" / "updates.rs"
+NETWORK_WORDS = ("WinHttp", "WinINet", "InternetOpen", "URLDownloadToFile", "TcpStream", "UdpSocket")
+
+
+def check_one_network_request():
+    """Only the update check makes a request, and only to GitHub (Check for updates, the security review of 2026-11-13)."""
+    elsewhere = []
+    for path in files(ROOT / "crates", (".rs",)):
+        if path.resolve() == UPDATE_CHECK_FILE.resolve():
+            continue
+        text = path.read_text(encoding="utf-8")
+        found = [w for w in NETWORK_WORDS if w in text]
+        if found:
+            elsewhere.append(f"{path.relative_to(ROOT)} ({', '.join(found)})")
+    hosts = []
+    if UPDATE_CHECK_FILE.is_file():
+        core = (ROOT / "crates" / "openstage-express-core" / "src" / "updates.rs").read_text(encoding="utf-8")
+        hosts = [line.strip() for line in core.splitlines() if "_HOST: &str" in line and '"api.github.com"' not in line]
+    if elsewhere or hosts:
+        record("FAIL", "one network request, Check for updates, to GitHub only", "; ".join(elsewhere + hosts))
+    else:
+        record("PASS", "one network request, Check for updates, to GitHub only")
 
 
 def check_headers():
@@ -351,6 +379,7 @@ def main():
         check_dependencies(packages)
     check_project_files()
     check_headers()
+    check_one_network_request()
     check_ffmpeg_flags()
     check_style()
     check_batch_files()

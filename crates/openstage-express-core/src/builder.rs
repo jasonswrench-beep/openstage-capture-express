@@ -222,6 +222,9 @@ pub struct FocusedField {
     pub name: String,
     pub role: String,
     pub text: FieldText,
+    /// Which element it is (UI Automation's runtime id), so that the field at the end of typing can be told from the one typing
+    /// began in. None when it cannot be said.
+    pub id: Option<Vec<i32>>,
 }
 
 /// What the builder needs from the outside world.
@@ -229,8 +232,9 @@ pub trait Host {
     /// A picture of the screen for the step made at this time: the frame just before it, or a fresh one if none is
     /// held. A time in the future means "wait until then" (the screenshot delay).
     fn screenshot(&mut self, at: Ms) -> ShotId;
-    /// The field that has the keyboard now, and its text.
-    fn focused_field(&mut self) -> FocusedField;
+    /// The field that has the keyboard now, and its text when `read_text` is true. With `read_text` false the text is never
+    /// read: the answer is `Password` for a password field and `Unreadable` for any other.
+    fn focused_field(&mut self, read_text: bool) -> FocusedField;
 }
 
 /// What a draft is, for the editor and the tests.
@@ -268,6 +272,10 @@ pub struct Draft {
 pub struct Settings {
     pub mode: CaptureMode,
     pub capture_typing: bool,
+    /// Say which field was typed in, not what was typed: a typing step is `Type in "Name"`, and the field's text is never read
+    /// (the security review of 2026-11-13; on unless the person turns it off). Many boxes that hold a secret are not marked as
+    /// passwords: one-time codes, PINs, card numbers, recovery keys, a key pasted in.
+    pub say_field_not_text: bool,
     pub typing_delay_ms: Ms,
     pub screenshot_delay_ms: Ms,
     pub capture_outside_clicks: bool,
@@ -283,6 +291,7 @@ impl Default for Settings {
         Settings {
             mode: CaptureMode::OnClick,
             capture_typing: true,
+            say_field_not_text: true,
             typing_delay_ms: 1000,
             screenshot_delay_ms: 0,
             capture_outside_clicks: false,
@@ -315,7 +324,16 @@ enum State {
     Typing {
         pending: Option<Candidate>,
         last: Ms,
+        /// The field as it was at the first key: whether it was a password field, and which element it was.
+        first: FieldLook,
     },
+}
+
+/// The field that had the keyboard at the first key of a typing run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldLook {
+    password: bool,
+    id: Option<Vec<i32>>,
 }
 
 /// The step builder.
@@ -357,7 +375,7 @@ impl StepBuilder {
         match input {
             Input::Tick { .. } => {}
             Input::Pause { at } | Input::Finish { at } => self.settle(host, at, &mut out),
-            Input::Typing { at } => self.on_typing(at, &mut out),
+            Input::Typing { at } => self.on_typing(host, at, &mut out),
             Input::Key { at, .. } => {
                 // Enter, Tab and Escape all finish a typing step (spec R5). Nothing else waiting is affected.
                 if matches!(self.state, State::Typing { .. }) {
@@ -415,8 +433,8 @@ impl StepBuilder {
         match std::mem::replace(&mut self.state, State::Idle) {
             State::Idle => {}
             State::Held(c) | State::Pending(c) => out.push(self.plain_click(c)),
-            State::Typing { pending, last } => {
-                self.state = State::Typing { pending, last };
+            State::Typing { pending, last, first } => {
+                self.state = State::Typing { pending, last, first };
                 self.end_typing(host, at, out);
             }
         }
@@ -509,29 +527,45 @@ impl StepBuilder {
 
     // ---- typing
 
-    fn on_typing(&mut self, at: Ms, out: &mut Vec<Draft>) {
+    fn on_typing(&mut self, host: &mut dyn Host, at: Ms, out: &mut Vec<Draft>) {
         if !self.settings.capture_typing {
             return;
         }
+        // At the first key of a run, the field that has the keyboard is looked at, without reading its text: whether it is a
+        // password field, and which element it is. A box with a "show password" button stops being a password field when the
+        // button is pressed, so the look at the end of typing alone is not enough (the security review of 2026-11-13).
+        let look = |host: &mut dyn Host| {
+            let field = host.focused_field(false);
+            FieldLook { password: field.text == FieldText::Password, id: field.id }
+        };
         match std::mem::replace(&mut self.state, State::Idle) {
-            State::Pending(c) => self.state = State::Typing { pending: Some(c), last: at },
-            State::Typing { pending, .. } => self.state = State::Typing { pending, last: at },
+            State::Pending(c) => self.state = State::Typing { pending: Some(c), last: at, first: look(host) },
+            State::Typing { pending, first, .. } => self.state = State::Typing { pending, last: at, first },
             State::Held(c) => {
                 // The click was not on a field Windows described as editable, but typing followed. The click stands
                 // as its own step and a typing step begins.
                 out.push(self.plain_click(c));
-                self.state = State::Typing { pending: None, last: at };
+                self.state = State::Typing { pending: None, last: at, first: look(host) };
             }
-            State::Idle => self.state = State::Typing { pending: None, last: at },
+            State::Idle => self.state = State::Typing { pending: None, last: at, first: look(host) },
         }
     }
 
     /// End a typing step: read the field and make one `Type` step, or the plain click it came from (R5, R6).
     fn end_typing(&mut self, host: &mut dyn Host, at: Ms, out: &mut Vec<Draft>) {
-        let State::Typing { pending, last } = std::mem::replace(&mut self.state, State::Idle) else {
+        let State::Typing { pending, last, first } = std::mem::replace(&mut self.state, State::Idle) else {
             return;
         };
-        let field = host.focused_field();
+        let read_text = !self.settings.say_field_not_text;
+        let mut field = host.focused_field(read_text);
+        // The text is never kept if the field was a password field at the first key, or the keyboard is now in another element
+        // than the one typing began in (the text read would be some other field's). Either counts as a password field.
+        if first.password || first.id != field.id {
+            field.text = FieldText::Password;
+        } else if !read_text && matches!(field.text, FieldText::Text(_)) {
+            // Asked not to read it: whatever came back is not used.
+            field.text = FieldText::Unreadable;
+        }
         // Never earlier than the event that ended the typing, and never before the screen has had time to show the last key.
         let shot_at = at.max(last.saturating_add(TYPE_SETTLE_MS));
         let language = self.settings.language;
@@ -638,16 +672,24 @@ impl StepBuilder {
 mod tests {
     use super::*;
 
+    /// The settings these tests were written for: the field's text is read ("Say which field was typed in, not what was typed"
+    /// turned off). The tests of that setting, which is on unless turned off, use `Settings::default()` itself.
+    fn reading() -> Settings {
+        Settings { say_field_not_text: false, ..Settings::default() }
+    }
+
     /// A host with a scripted field and a log of every picture asked for.
     struct FakeHost {
         next: u64,
         asked: Vec<(ShotId, Ms)>,
         field: FocusedField,
+        /// Each time the field was asked for, whether its text was to be read.
+        reads: Vec<bool>,
     }
 
     impl FakeHost {
         fn new() -> FakeHost {
-            FakeHost { next: 1, asked: Vec::new(), field: field("Email", "edit", FieldText::Text(String::new())) }
+            FakeHost { next: 1, asked: Vec::new(), field: field("Email", "edit", FieldText::Text(String::new())), reads: Vec::new() }
         }
 
         fn set_text(&mut self, text: &str) {
@@ -667,13 +709,18 @@ mod tests {
             id
         }
 
-        fn focused_field(&mut self) -> FocusedField {
-            self.field.clone()
+        fn focused_field(&mut self, read_text: bool) -> FocusedField {
+            self.reads.push(read_text);
+            let mut field = self.field.clone();
+            if !read_text && matches!(field.text, FieldText::Text(_)) {
+                field.text = FieldText::Unreadable;
+            }
+            field
         }
     }
 
     fn field(name: &str, role: &str, text: FieldText) -> FocusedField {
-        FocusedField { name: name.to_string(), role: role.to_string(), text }
+        FocusedField { name: name.to_string(), role: role.to_string(), text, id: None }
     }
 
     fn click(at: Ms, x: i32, y: i32, name: &str, role: &str) -> Input {
@@ -712,7 +759,7 @@ mod tests {
     }
 
     fn builder() -> StepBuilder {
-        StepBuilder::new(Settings::default())
+        StepBuilder::new(reading())
     }
 
     #[test]
@@ -936,7 +983,7 @@ mod tests {
 
     #[test]
     fn the_typing_delay_is_a_setting() {
-        let settings = Settings { typing_delay_ms: 2500, ..Settings::default() };
+        let settings = Settings { typing_delay_ms: 2500, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         h.set_text("slow");
         b.push(&mut h, field_click(1000, 5, 5, "Name"));
@@ -987,7 +1034,7 @@ mod tests {
 
     #[test]
     fn outside_clicks_are_captured_when_the_setting_is_on() {
-        let settings = Settings { capture_outside_clicks: true, ..Settings::default() };
+        let settings = Settings { capture_outside_clicks: true, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         let outside = Input::Click {
             at: 1000,
@@ -1031,7 +1078,7 @@ mod tests {
             (CaptureMode::HotkeyOnly, Mods::with(ModKey::Ctrl), false),
         ];
         for (mode, mods, expected) in cases {
-            let settings = Settings { mode, ..Settings::default() };
+            let settings = Settings { mode, ..reading() };
             let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
             b.push(&mut h, click_with(1000, mods));
             let drafts = b.finish(&mut h, 1100);
@@ -1041,7 +1088,7 @@ mod tests {
 
     #[test]
     fn a_click_the_mode_ignores_still_ends_typing() {
-        let settings = Settings { mode: CaptureMode::OnClickWithKey(ModKey::Ctrl), ..Settings::default() };
+        let settings = Settings { mode: CaptureMode::OnClickWithKey(ModKey::Ctrl), ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         h.set_text("typed");
         b.push(
@@ -1064,7 +1111,7 @@ mod tests {
 
     #[test]
     fn hotkey_only_mode_still_takes_the_capture_now_hotkey() {
-        let settings = Settings { mode: CaptureMode::HotkeyOnly, ..Settings::default() };
+        let settings = Settings { mode: CaptureMode::HotkeyOnly, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         assert!(b.push(&mut h, click_with(1000, Mods::none())).is_empty());
         let drafts = b.push(&mut h, Input::CaptureNow { at: 2000, cursor: Some((7, 8)) });
@@ -1192,7 +1239,7 @@ mod tests {
         assert!(drafts[0].click.is_none(), "the cursor is only marked when the setting is on");
         assert!(drafts[0].control.is_none());
 
-        let settings = Settings { hotkey_captures_cursor: true, ..Settings::default() };
+        let settings = Settings { hotkey_captures_cursor: true, ..reading() };
         b.set_settings(settings);
         let with = b.push(&mut h, Input::CaptureNow { at: 2000, cursor: Some((10, 20)) });
         assert_eq!(with[0].click.as_ref().map(|c| (c.x, c.y)), Some((10, 20)));
@@ -1234,6 +1281,73 @@ mod tests {
         assert_eq!(drafts[0].typed, None);
         let everything = format!("{drafts:?}");
         assert!(!everything.contains("hunter2"), "{everything}");
+    }
+
+    // ---- the security review of 2026-11-13: a secret is never read
+
+    /// A field that is a password field at the first key and plain text by the end, as a box with a "show password" button is.
+    #[test]
+    fn a_field_that_stops_being_a_password_during_the_run_never_gives_its_text() {
+        let (mut b, mut h) = (builder(), FakeHost::new());
+        h.field = field("Password", "edit", FieldText::Password);
+        let mut drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Password"), Input::Typing { at: 1100 }]);
+        h.field = field("Password", "edit", FieldText::Text("hunter2".into()));
+        drafts.extend(run(&mut b, &mut h, vec![Input::Typing { at: 1200 }, Input::Key { at: 1300, key: Key::Enter }]));
+        assert_eq!(titles(&drafts), ["Click \"Password\""]);
+        assert!(drafts.iter().all(|d| d.typed.is_none() && d.kind != DraftKind::Type));
+        assert!(!format!("{drafts:?}").contains("hunter2"));
+    }
+
+    /// Windows could not say whether the field is a password field. The Windows side then answers `Password` (uia.rs, tested
+    /// there); the builder never makes a step with text from it, at the first key or at the end.
+    #[test]
+    fn a_field_whose_password_check_fails_is_a_password_field_at_either_look() {
+        for (at_first, at_end) in [(FieldText::Password, FieldText::Text("123456".into())), (FieldText::Text("123456".into()), FieldText::Password)] {
+            let (mut b, mut h) = (builder(), FakeHost::new());
+            h.field = field("Code", "edit", at_first);
+            let mut drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Code"), Input::Typing { at: 1100 }]);
+            h.field = field("Code", "edit", at_end);
+            drafts.extend(run(&mut b, &mut h, vec![Input::Key { at: 1300, key: Key::Enter }]));
+            assert_eq!(titles(&drafts), ["Click \"Code\""]);
+            assert!(!format!("{drafts:?}").contains("123456"));
+        }
+    }
+
+    /// The keyboard moved to another element during the run (a page that moved focus, or typing that went on in the next box):
+    /// the text read at the end belongs to some other field, so none of it is kept.
+    #[test]
+    fn focus_that_moved_to_another_field_during_the_run_gives_no_text() {
+        let (mut b, mut h) = (builder(), FakeHost::new());
+        h.field = FocusedField { id: Some(vec![42, 1]), ..field("Name", "edit", FieldText::Text(String::new())) };
+        let mut drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Name"), Input::Typing { at: 1100 }]);
+        h.field = FocusedField { id: Some(vec![42, 2]), ..field("Card number", "edit", FieldText::Text("4111 1111".into())) };
+        drafts.extend(run(&mut b, &mut h, vec![Input::Key { at: 1300, key: Key::Enter }]));
+        assert_eq!(titles(&drafts), ["Click \"Name\""]);
+        assert!(!format!("{drafts:?}").contains("4111"));
+        // The same element at both looks is read as before.
+        let (mut b, mut h) = (builder(), FakeHost::new());
+        h.field = FocusedField { id: Some(vec![42, 1]), ..field("Name", "edit", FieldText::Text("Ann".into())) };
+        let drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Name"), Input::Typing { at: 1100 }, Input::Key { at: 1300, key: Key::Enter }]);
+        assert_eq!(titles(&drafts), ["Type \"Ann\""]);
+    }
+
+    /// The setting is on unless the person turns it off: a typing step says which field, and the field's text is never asked for.
+    #[test]
+    fn by_default_a_typing_step_says_which_field_and_its_text_is_never_read() {
+        let (mut b, mut h) = (StepBuilder::new(Settings::default()), FakeHost::new());
+        assert!(Settings::default().say_field_not_text);
+        h.set_text("ann@example.org");
+        let drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Email"), Input::Typing { at: 1100 }, Input::Key { at: 1300, key: Key::Enter }]);
+        assert_eq!(titles(&drafts), ["Type in \"Email\""]);
+        assert_eq!(drafts[0].kind, DraftKind::TypeUnreadable);
+        assert!(drafts[0].typed.is_none());
+        assert!(!format!("{drafts:?}").contains("ann@example.org"));
+        assert!(!h.reads.is_empty() && h.reads.iter().all(|read| !read), "the text was never asked for: {:?}", h.reads);
+        // A password field still gives only its click.
+        let (mut b, mut h) = (StepBuilder::new(Settings::default()), FakeHost::new());
+        h.field = field("Password", "edit", FieldText::Password);
+        let drafts = run(&mut b, &mut h, vec![field_click(1000, 5, 5, "Password"), Input::Typing { at: 1100 }, Input::Key { at: 1300, key: Key::Enter }]);
+        assert_eq!(titles(&drafts), ["Click \"Password\""]);
     }
 
     #[test]
@@ -1283,7 +1397,7 @@ mod tests {
 
     #[test]
     fn the_pending_wait_is_the_longer_of_two_seconds_and_the_typing_delay() {
-        let settings = Settings { typing_delay_ms: 4000, ..Settings::default() };
+        let settings = Settings { typing_delay_ms: 4000, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         b.push(&mut h, field_click(1000, 5, 5, "Search"));
         assert!(b.push(&mut h, Input::Tick { at: 4999 }).is_empty());
@@ -1324,7 +1438,7 @@ mod tests {
 
     #[test]
     fn typing_capture_off_means_plain_clicks_and_no_type_steps() {
-        let settings = Settings { capture_typing: false, ..Settings::default() };
+        let settings = Settings { capture_typing: false, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         h.set_text("abc");
         let drafts = run(
@@ -1342,7 +1456,7 @@ mod tests {
 
     #[test]
     fn titles_are_made_in_the_chosen_language() {
-        let settings = Settings { language: Language::German, ..Settings::default() };
+        let settings = Settings { language: Language::German, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         h.set_text("Hallo");
         let drafts = run(
@@ -1361,7 +1475,7 @@ mod tests {
 
     #[test]
     fn the_screenshot_delay_asks_for_a_picture_that_long_after_the_click() {
-        let settings = Settings { screenshot_delay_ms: 500, ..Settings::default() };
+        let settings = Settings { screenshot_delay_ms: 500, ..reading() };
         let (mut b, mut h) = (StepBuilder::new(settings), FakeHost::new());
         b.push(&mut h, click(1000, 1, 1, "Menu", "button"));
         let drafts = b.finish(&mut h, 1100);

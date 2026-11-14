@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::error::{io_error, StoreError};
-use crate::fsutil::{unique_guide_folder, write_atomic};
-use crate::migrate::{bring_up_to_date, MIGRATIONS};
+use crate::fsutil::{is_link, is_plain_file_inside, unique_guide_folder, write_atomic};
+use crate::migrate::{bring_up_to_date, drop_retired_fields, MIGRATIONS};
 use crate::model::{is_safe_picture_path, Guide, SCHEMA_VERSION};
 use crate::ops::{Document, Trash};
 use crate::session::Session;
@@ -82,18 +82,46 @@ fn picture_name(logical: &str) -> Option<&str> {
 }
 
 fn read_json(path: &Path, what: &str) -> Result<Value, StoreError> {
-    let bytes = fs::read(path).map_err(io_error(format!("{what} could not be read")))?;
+    let bytes = read_guide_file(path, what)?;
     serde_json::from_slice(&bytes)
         .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: format!("it is not valid JSON ({e})") })
+}
+
+/// The largest `guide.json` that is read: a guide of a thousand steps with long descriptions is well under a megabyte, and one
+/// made by someone else could otherwise be as large as the memory (the security review of 2026-11-13).
+pub const MAX_GUIDE_JSON_BYTES: u64 = 16 * 1024 * 1024;
+
+fn too_large(what: &str, size: u64) -> StoreError {
+    StoreError::Damaged {
+        what: what.to_string(),
+        detail: format!(
+            "it is {:.1} MB, and a guide's file is never more than {} MB, so it was not read",
+            size as f64 / (1024.0 * 1024.0),
+            MAX_GUIDE_JSON_BYTES / (1024 * 1024)
+        ),
+    }
+}
+
+/// Read a file that holds a guide's JSON (`guide.json`, `trash.json`), refusing one over `MAX_GUIDE_JSON_BYTES` before reading it.
+pub fn read_guide_file(path: &Path, what: &str) -> Result<Vec<u8>, StoreError> {
+    let size = fs::metadata(path).map_err(io_error(format!("{what} could not be read")))?.len();
+    if size > MAX_GUIDE_JSON_BYTES {
+        return Err(too_large(what, size));
+    }
+    fs::read(path).map_err(io_error(format!("{what} could not be read")))
 }
 
 /// Read a guide from the bytes of a `guide.json`, whether it came from a guide folder or from inside a copy shared as one file:
 /// bring it up to date and make sure it is a guide. Returns the guide and the format version it had if it was brought up to date.
 /// A guide made by a newer Express is refused. `what` names the file in the messages.
 pub fn read_guide(bytes: &[u8], what: &str) -> Result<(Guide, Option<String>), StoreError> {
+    if bytes.len() as u64 > MAX_GUIDE_JSON_BYTES {
+        return Err(too_large(what, bytes.len() as u64));
+    }
     let mut value: Value = serde_json::from_slice(bytes)
         .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: format!("it is not valid JSON ({e})") })?;
     let migrated_from = bring_up_to_date(&mut value, SCHEMA_VERSION, MIGRATIONS, what)?;
+    drop_retired_fields(&mut value);
     let guide: Guide = serde_json::from_value(value)
         .map_err(|e| StoreError::Damaged { what: what.to_string(), detail: e.to_string() })?;
     Ok((guide, migrated_from))
@@ -194,7 +222,7 @@ impl GuideFolder {
         if !guide_path.is_file() {
             return Err(StoreError::NotAGuide(root.display().to_string()));
         }
-        let bytes = fs::read(&guide_path).map_err(io_error(format!("{GUIDE_FILE} could not be read")))?;
+        let bytes = read_guide_file(&guide_path, GUIDE_FILE)?;
         let (guide, migrated_from) = read_guide(&bytes, GUIDE_FILE)?;
         let problems = guide.problems();
 
@@ -202,6 +230,7 @@ impl GuideFolder {
         let trash = if trash_path.is_file() {
             let mut value = read_json(&trash_path, "trash.json")?;
             bring_up_to_date(&mut value, SCHEMA_VERSION, MIGRATIONS, "trash.json")?;
+            drop_retired_fields(&mut value);
             serde_json::from_value(value)
                 .map_err(|e| StoreError::Damaged { what: "trash.json".to_string(), detail: e.to_string() })?
         } else {
@@ -282,12 +311,19 @@ impl GuideFolder {
         let mut report = SaveReport::default();
         let images = self.root.join(IMAGES_DIR);
         let trash = self.root.join(TRASH_DIR);
+        // A folder that is a link or a junction would move pictures to and from somewhere else, so nothing is moved through one.
+        if is_link(&images) || is_link(&trash) {
+            return Err(StoreError::Damaged {
+                what: "the guide folder".to_string(),
+                detail: "its images or trash folder is a link to another place, so no picture was moved".to_string(),
+            });
+        }
         fs::create_dir_all(&images).map_err(io_error("The images folder could not be made"))?;
         for logical in doc.live_pictures() {
             let Some(name) = picture_name(&logical) else { continue };
             let (home, away) = (images.join(name), trash.join(name));
             if !home.exists() {
-                if away.exists() {
+                if away.exists() && !is_link(&away) {
                     fs::rename(&away, &home).map_err(io_error(format!("The picture {name} could not be put back")))?;
                 } else {
                     report.missing_pictures.push(logical);
@@ -298,7 +334,7 @@ impl GuideFolder {
             let Some(name) = picture_name(&logical) else { continue };
             let (home, away) = (trash.join(name), images.join(name));
             if !home.exists() {
-                if away.exists() {
+                if away.exists() && !is_link(&away) {
                     fs::rename(&away, &home)
                         .map_err(io_error(format!("The picture {name} could not be moved to the trash")))?;
                 } else {
@@ -313,7 +349,12 @@ impl GuideFolder {
     /// not allowed or the file is missing.
     pub fn picture_path(&self, logical: &str) -> Option<PathBuf> {
         let name = picture_name(logical)?;
-        [IMAGES_DIR, TRASH_DIR].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())
+        // Only a plain file whose real place is in this guide's folder: never through a link or a junction.
+        [IMAGES_DIR, TRASH_DIR]
+            .iter()
+            .filter(|dir| !is_link(&self.root.join(dir)))
+            .map(|dir| self.root.join(dir).join(name))
+            .find(|p| is_plain_file_inside(p, &self.root))
     }
 
     /// Store a new PNG picture for a step and return its name (`images/step-0007.png`). An existing picture is never
@@ -541,6 +582,44 @@ mod tests {
         write_plain(&empty.join("guide.json"), br#"{"schemaVersion": "0.1.0", "title": "no id"}"#).unwrap();
         assert!(matches!(GuideFolder::open(&empty, &never_running), Err(StoreError::Damaged { .. })));
         assert!(!empty.join("guide.lock").exists());
+    }
+
+    /// A guide made before the security review of 2026-11-13 kept a Type step's text in a field of its own. Opened, it is gone; saved,
+    /// the file and the trash no longer hold it. Every other field is kept as before.
+    #[test]
+    fn the_typed_text_of_an_older_guide_is_gone_once_it_is_opened_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Older.osguide");
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::create_dir_all(root.join("Trash")).unwrap();
+        let mut fixture = full_fixture();
+        fixture["steps"][0]["typed"] = Value::String("hunter2-secret".to_string());
+        fs::write(root.join("guide.json"), serde_json::to_vec_pretty(&fixture).unwrap()).unwrap();
+        let opened = GuideFolder::open(&root, &never_running).unwrap();
+        assert!(!format!("{:?}", opened.doc.guide).contains("hunter2"), "not even among the fields kept unread");
+        opened.folder.save(&opened.doc).unwrap();
+        let saved = fs::read_to_string(root.join("guide.json")).unwrap();
+        assert!(!saved.contains("hunter2") && !saved.contains("\"typed\""), "{saved}");
+        let mut without = full_fixture();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        without["steps"][0].as_object_mut().unwrap().remove("typed");
+        assert_eq!(saved, without, "everything else is as it was");
+    }
+
+    /// The security review of 2026-11-13: a guide.json of any size was read whole. One over 16 MB is refused, with a message,
+    /// whether it is in a guide folder or handed over as bytes (as from inside a shared copy).
+    #[test]
+    fn a_guide_file_over_sixteen_megabytes_is_refused_in_words_before_it_is_read() {
+        let too_big = MAX_GUIDE_JSON_BYTES + 1;
+        let error = read_guide(&vec![b' '; too_big as usize], "guide.json").unwrap_err();
+        assert!(matches!(error, StoreError::Damaged { .. }) && error.to_string().contains("16 MB"), "{error}");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Huge.osguide");
+        fs::create_dir_all(&root).unwrap();
+        // A file of that size that is never read: only its length is looked at.
+        fs::File::create(root.join("guide.json")).unwrap().set_len(50 * 1024 * 1024).unwrap();
+        let error = GuideFolder::open(&root, &never_running).unwrap_err();
+        assert!(error.to_string().contains("50.0 MB") && error.to_string().contains("was not read"), "{error}");
     }
 
     #[test]

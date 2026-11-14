@@ -160,6 +160,9 @@ pub fn is_safe_picture_path(path: &str) -> bool {
         && !name.contains(['/', '\\', ':', '\0'])
         && !name.starts_with('.')
         && name.chars().all(|c| !c.is_control())
+        // Express writes PNG pictures only, and a name that is anything else is not one of its pictures.
+        && name.len() > 4
+        && name[name.len() - 4..].eq_ignore_ascii_case(".png")
 }
 
 /// What a step is.
@@ -195,8 +198,9 @@ pub struct Step {
     pub skipped: bool,
     pub click: Option<Click>,
     pub control: Option<Control>,
-    /// The text of a `Type` step. Private: exports show it only as the step title.
-    pub typed: Option<String>,
+    // A step once kept the text of a `Type` step in a field of its own, `typed`. It is no longer kept: the title already says
+    // what is shown, and the field went out in shared copies after the title was changed (the security review of 2026-11-13).
+    // A guide that still has it loses it when it is read (`migrate::drop_retired_fields`).
     /// The program's file name only. Window titles are never stored.
     pub program: Option<String>,
     /// The focused view crop, in picture pixels. None means the whole picture.
@@ -222,7 +226,6 @@ impl Step {
             skipped: false,
             click: None,
             control: None,
-            typed: None,
             program: None,
             focus: None,
             annotations: Vec::new(),
@@ -436,6 +439,21 @@ pub fn is_colour(text: &str) -> bool {
 }
 
 #[cfg(test)]
+mod picture_name_tests {
+    use super::is_safe_picture_path;
+
+    #[test]
+    fn a_picture_name_must_be_a_png_in_images() {
+        for good in ["images/step-0001.png", "images/step-0001-2.PNG", "images/a.png"] {
+            assert!(is_safe_picture_path(good), "{good}");
+        }
+        for bad in ["images/step-0001.exe", "images/.png", "images/png", "images/a.png.lnk", "images/../guide.json", "trash/a.png", "images/a/b.png"] {
+            assert!(!is_safe_picture_path(bad), "{bad}");
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use serde_json::json;
@@ -465,8 +483,7 @@ pub(crate) mod tests {
                     "skipped": false,
                     "click": {"x": 312, "y": 188, "button": "left", "pressure": 0.5},
                     "control": {"name": "Assignments", "role": "link", "automationId": "nav-3"},
-                    "typed": null,
-                    "program": "chrome.exe",
+                    "program": "browser.exe",
                     "focus": {"x": 0, "y": 0, "width": 1280, "height": 720},
                     "annotations": [
                         {"id": "a1", "type": "clickMark", "x": 312, "y": 188, "size": 40,
@@ -487,7 +504,6 @@ pub(crate) mod tests {
                     "skipped": true,
                     "click": null,
                     "control": null,
-                    "typed": null,
                     "program": null,
                     "focus": null,
                     "annotations": [],

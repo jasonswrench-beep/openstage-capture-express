@@ -17,8 +17,6 @@ echo so nothing is ever replaced. A full log is saved in this folder as
 echo export-demo-log.txt.
 echo.
 
-if not exist "%~dp0..\openstage-author\capture\crates\openstage-capture-render\Cargo.toml" goto no_capture
-
 call "%~dp0rust-setup.bat"
 if errorlevel 1 goto no_rust
 
@@ -43,15 +41,6 @@ echo ------------------------------------------------------------
 echo.
 echo The web page (the html folder) is the one to open first.
 echo Tell me what you think of how it looks and reads.
-goto done
-
-:no_capture
-echo ------------------------------------------------------------
-echo   The OpenStage code was not found next to this folder.
-echo ------------------------------------------------------------
-echo.
-echo Double-click GET OPENSTAGE CODE.bat to get it, then try again.
-echo Nothing was changed.
 goto done
 
 :no_rust

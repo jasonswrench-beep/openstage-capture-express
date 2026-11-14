@@ -47,13 +47,26 @@ pub struct DiskPictures {
     pub root: std::path::PathBuf,
 }
 
+impl DiskPictures {
+    /// The picture file of this name, in `images` and then `trash`: only a plain file whose real place is in the guide's folder,
+    /// never through a link or a junction (the security review of 2026-11-13).
+    fn find(&self, name: &str) -> Option<std::path::PathBuf> {
+        use openstage_express_core::fsutil::{is_link, is_plain_file_inside};
+        ["images", "trash"]
+            .iter()
+            .filter(|dir| !is_link(&self.root.join(dir)))
+            .map(|dir| self.root.join(dir).join(name))
+            .find(|p| is_plain_file_inside(p, &self.root))
+    }
+}
+
 impl PictureSource for DiskPictures {
     fn picture(&self, logical: &str) -> Option<Picture> {
         if !openstage_express_core::model::is_safe_picture_path(logical) {
             return None;
         }
         let name = logical.strip_prefix("images/")?;
-        let path = ["images", "trash"].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())?;
+        let path = self.find(name)?;
         decode_png(&std::fs::read(path).ok()?).ok()
     }
 
@@ -62,7 +75,7 @@ impl PictureSource for DiskPictures {
             return None;
         }
         let name = logical.strip_prefix("images/")?;
-        let path = ["images", "trash"].iter().map(|dir| self.root.join(dir).join(name)).find(|p| p.is_file())?;
+        let path = self.find(name)?;
         std::fs::read(path).ok()
     }
 }
@@ -89,11 +102,19 @@ pub fn decode_png(bytes: &[u8]) -> Result<Picture, String> {
     if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
         return Err(format!("The picture is {width} by {height} pixels, which is not a size that can be used."));
     }
-    let mut buffer = vec![0; reader.output_buffer_size()];
+    // Its size is looked at before anything is made for it (the security review of 2026-11-13).
+    if width as u64 * height as u64 > openstage_express_core::render::MAX_PICTURE_PIXELS {
+        return Err(format!("The picture is {width} by {height} pixels, which is more than a picture of a screen can be."));
+    }
+    let too_big = || "There is not enough memory to read the picture.".to_string();
+    let mut buffer: Vec<u8> = Vec::new();
+    buffer.try_reserve_exact(reader.output_buffer_size()).map_err(|_| too_big())?;
+    buffer.resize(reader.output_buffer_size(), 0);
     let frame = reader.next_frame(&mut buffer).map_err(|e| format!("The picture could not be read ({e})."))?;
     let data = &buffer[..frame.buffer_size()];
     let pixels = width as usize * height as usize;
-    let mut bgra = Vec::with_capacity(pixels * 4);
+    let mut bgra = Vec::new();
+    bgra.try_reserve_exact(pixels * 4).map_err(|_| too_big())?;
     match frame.color_type {
         png::ColorType::Rgb => {
             data.as_chunks::<3>().0.iter().for_each(|p| bgra.extend_from_slice(&[p[2], p[1], p[0], 255]))
@@ -136,6 +157,36 @@ pub fn encode_png(canvas: &Canvas) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A PNG that is only its header: it says it is `width` by `height` and holds no picture at all.
+    fn header_only_png(width: u32, height: u32) -> Vec<u8> {
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut crc = crc32fast::Hasher::new();
+            crc.update(kind);
+            crc.update(data);
+            out.extend_from_slice(kind);
+            out.extend_from_slice(data);
+            out.extend_from_slice(&crc.finalize().to_be_bytes());
+        };
+        let mut header = Vec::new();
+        header.extend_from_slice(&width.to_be_bytes());
+        header.extend_from_slice(&height.to_be_bytes());
+        header.extend_from_slice(&[8, 6, 0, 0, 0]); // 8 bits, RGBA, the usual compression, filters and no interlace
+        chunk(b"IHDR", &header);
+        chunk(b"IDAT", &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]);
+        chunk(b"IEND", &[]);
+        out
+    }
+
+    /// The security review of 2026-11-13: a picture in a shared guide that says it is 16,384 by 16,384 pixels was decoded into a
+    /// gigabyte. It is refused from its header, in words, before anything is made for it.
+    #[test]
+    fn a_png_that_says_it_is_16384_by_16384_is_refused_from_its_header() {
+        let error = decode_png(&header_only_png(16_384, 16_384)).unwrap_err();
+        assert!(error.contains("16384 by 16384") && error.contains("more than a picture of a screen can be"), "{error}");
+    }
     use openstage_capture_render::{PixelRect, Rgb};
 
     fn striped() -> Canvas {

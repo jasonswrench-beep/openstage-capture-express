@@ -141,6 +141,7 @@ ui.set_width(ui.available_width());
                 (&mut settings.show_cursor, "Draw a pointer at each click"),
                 (&mut settings.mark_clicked_area, "Draw a circle round each click"),
                 (&mut settings.capture_typing, "Make a step for what I type (never for a password)"),
+                (&mut settings.say_field_not_text, "Say which field was typed in, not what was typed"),
                 (&mut settings.focused_view_for_new_steps, "Start new steps with a close-up of the click"),
             ] {
                 let r = ui.checkbox(value, words);

@@ -20,6 +20,29 @@ pub struct Migration {
 /// Every migration this program knows, oldest first. Empty until the format changes.
 pub const MIGRATIONS: &[Migration] = &[];
 
+/// Fields a guide or trash file once had and that this program no longer keeps, taken out of every object in the file wherever
+/// it is: `typed`, the text of a `Type` step (the security review of 2026-11-13). It is taken out whatever the file's version, so
+/// that a guide made before the change, or a copy someone shared, loses it the moment it is read, and the next save writes it
+/// without it. A step's unknown fields are otherwise kept (`extra`), which would have kept this one too.
+pub const RETIRED_FIELDS: &[&str] = &["typed"];
+
+/// Take the retired fields out of `value`, everywhere in it. Returns how many were taken out.
+pub fn drop_retired_fields(value: &mut Value) -> usize {
+    match value {
+        Value::Object(map) => {
+            let mut dropped = 0;
+            for name in RETIRED_FIELDS {
+                if map.remove(*name).is_some() {
+                    dropped += 1;
+                }
+            }
+            dropped + map.values_mut().map(drop_retired_fields).sum::<usize>()
+        }
+        Value::Array(items) => items.iter_mut().map(drop_retired_fields).sum(),
+        _ => 0,
+    }
+}
+
 /// Read `1.2.3` as three numbers.
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
     let mut parts = text.split('.');
@@ -76,6 +99,18 @@ pub fn bring_up_to_date(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_retired_field_is_taken_out_wherever_it_is() {
+        let mut value = json!({"schemaVersion": "0.1.0", "steps": [{"id": "s1", "typed": "a", "title": "T"},
+            {"id": "s2", "typed": null, "extra": {"typed": "b", "kept": 1}}], "entries": [{"step": {"typed": "c"}}]});
+        assert_eq!(drop_retired_fields(&mut value), 4);
+        let text = value.to_string();
+        assert!(!text.contains("typed"), "{text}");
+        assert_eq!(value["steps"][0]["title"], "T");
+        assert_eq!(value["steps"][1]["extra"]["kept"], 1);
+        assert_eq!(drop_retired_fields(&mut value), 0, "nothing left to take");
+    }
 
     /// Pretend format 0.0.1 called the title `name`, and 0.0.2 had no `focusedView`.
     fn fake_table() -> Vec<Migration> {

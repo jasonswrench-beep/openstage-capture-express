@@ -98,6 +98,14 @@ pub fn make_copy(
     options: &CopyOptions,
 ) -> Result<CopyMade, ShareError> {
     let mut copy = guide.clone();
+    // What the JSON export leaves out is left out of a copy made for someone else too (the security review of 2026-11-13): where
+    // the person clicked, the name of the control, and the program it was in. The title, the description and the marks say what
+    // the step shows; these say more about the person's computer than the guide needs.
+    for step in &mut copy.steps {
+        step.click = None;
+        step.control = None;
+        step.program = None;
+    }
     let mut warnings = Vec::new();
     let mut left_out = 0;
     if !options.include_originals {
@@ -262,7 +270,12 @@ mod tests {
         assert_eq!((made.steps, made.pictures, made.flattened, made.left_out), (7, 6, 0, 0));
         assert!(made.warnings.is_empty(), "{:?}", made.warnings);
         let opened = read_copy(&made.zip).unwrap();
-        assert_eq!(opened.guide, d.document.guide, "the marks and the skipped step are as they were");
+        // The guide exactly, except what a copy for someone else leaves out: where each click was, the control, the program.
+        let mut want = d.document.guide.clone();
+        for step in &mut want.steps {
+            (step.click, step.control, step.program) = (None, None, None);
+        }
+        assert_eq!(opened.guide, want, "the marks and the skipped step are as they were");
         assert!(opened.warnings.is_empty(), "{:?}", opened.warnings);
         assert_eq!(opened.pictures.len(), 6);
         for (file, bytes) in &opened.pictures {
@@ -291,11 +304,42 @@ mod tests {
         let got = decode_png(&opened.pictures.iter().find(|(n, _)| n == file).unwrap().1).unwrap();
         assert_eq!(got.bgra, want.bgra);
         assert_ne!(got.bgra, original.bgra, "the marks are on it");
-        // The focused crop and the click are kept, so the crop can still be changed by whoever opens it.
+        // The focused crop is kept, and can still be moved by whoever opens it; where the click was is not in a copy for someone
+        // else (the security review of 2026-11-13).
         assert_eq!(opened.guide.steps[0].focus, first.focus);
-        assert_eq!(opened.guide.steps[0].click, first.click);
+        assert!(first.click.is_some() && opened.guide.steps[0].click.is_none());
         let readme = unzip(&made.zip).text("README.txt");
         assert!(readme.contains("not in the file") && readme.contains("Deleted steps are never included"), "{readme}");
+    }
+
+    /// The security review of 2026-11-13: a Type step's text once stayed in the guide in a field of its own, and went out in a shared
+    /// copy after the title had been changed. A guide made before then still has it; read, renamed and copied (both kinds), neither
+    /// the text nor the program it was typed in is anywhere in the file.
+    #[test]
+    fn a_renamed_type_step_and_the_program_are_nowhere_in_either_kind_of_copy() {
+        const SECRET: &str = "ann.lee@example.org pin 4417";
+        let d = demo();
+        let mut value = serde_json::to_value(&d.document.guide).unwrap();
+        let typed_at = d.document.guide.steps.iter().position(|s| s.title.contains("Week 3 reflection")).expect("the demo's typing step");
+        value["steps"][typed_at]["typed"] = serde_json::Value::String(SECRET.to_string());
+        value["steps"][typed_at]["title"] = serde_json::Value::String(format!("Type \"{SECRET}\""));
+        let old = serde_json::to_vec(&value).unwrap();
+        let (guide, _) = read_guide(&old, "guide.json").unwrap();
+        let mut doc = openstage_express_core::Document::new(guide);
+        let id = doc.guide.steps[typed_at].id.clone();
+        doc.set_title(&id, "Type the title of your work", "2026-11-13T10:00:00Z").unwrap();
+        doc.guide.steps[typed_at].image_description.clear();
+        assert!(doc.guide.steps.iter().any(|s| s.program.as_deref() == Some("browser.exe")), "the guide itself still names it");
+        for options in [CopyOptions::default(), originals()] {
+            let made = make_copy(&doc.guide, &d.pictures, &BlockText, &options).unwrap();
+            let files = unzip(&made.zip);
+            for name in &files.names {
+                let bytes = String::from_utf8_lossy(files.get(name).unwrap()).to_string();
+                for private in [SECRET, "ann.lee", "4417", "browser.exe", "\"typed\"", "\"program\": \"", "\"click\": {"] {
+                    assert!(!bytes.contains(private), "{private} is in {name} (originals: {})", options.include_originals);
+                }
+            }
+        }
     }
 
     #[test]

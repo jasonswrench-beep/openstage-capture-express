@@ -23,6 +23,7 @@ pub mod ops;
 pub mod render;
 pub mod session;
 pub mod store;
+pub mod updates;
 pub mod titles;
 
 pub use builder::{CaptureMode, Draft, DraftKind, Host, Input, StepBuilder};

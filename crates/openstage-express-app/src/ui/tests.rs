@@ -2220,7 +2220,7 @@ fn choosing_one_window_needs_a_window_chosen_before_start_and_remembers_the_kind
 #[test]
 fn the_list_of_windows_is_read_out_and_choosing_one_returns_to_the_bar_ready_to_start() {
     let dir = tempfile::tempdir().unwrap();
-    let rows = vec![window_row(7, "Untitled", "notepad.exe"), window_row(9, "Inbox", "outlook.exe")];
+    let rows = vec![window_row(7, "Untitled", "notepad.exe"), window_row(9, "Inbox", "mail.exe")];
     let (mut h, asked, _) = choosing_harness(dir.path(), rows, 1);
     h.invoke(Role::RadioButton, "One window");
     h.invoke(Role::Button, "Choose window...");
@@ -2229,13 +2229,13 @@ fn the_list_of_windows_is_read_out_and_choosing_one_returns_to_the_bar_ready_to_
     h.find(Role::Heading, "Choose a window");
     assert_eq!(h.mark_rows().len(), 0);
     h.find(Role::ListBoxOption, "notepad.exe: Untitled (800 by 600)");
-    h.find(Role::ListBoxOption, "outlook.exe: Inbox (800 by 600)");
+    h.find(Role::ListBoxOption, "mail.exe: Inbox (800 by 600)");
     assert!(h.status().starts_with("Choose a window. 2 windows are open."), "{}", h.status());
     h.key(Key::ArrowDown, NO_MODS);
     h.invoke(Role::Button, "Use this window");
     assert_eq!(h.app.screen, Screen::Bar);
     assert_eq!(h.app.window_mode(), WindowMode::Bar);
-    h.find(Role::Label, "Captures the window \"Inbox\" of outlook.exe.");
+    h.find(Role::Label, "Captures the window \"Inbox\" of mail.exe.");
     assert!(!h.node(h.find(Role::Button, "Start")).is_disabled());
     h.invoke(Role::Button, "Start");
     let target = asked.borrow()[0].clone();
@@ -4682,7 +4682,13 @@ fn a_copy_with_the_originals_keeps_the_guide_as_it_is_and_says_a_blur_can_be_tak
     let file =
         the_copy_folder(dir.path(), "How to submit an assignment").join("How to submit an assignment.osguide.zip");
     let copy = read_copy(&std::fs::read(file).unwrap()).unwrap();
-    assert_eq!(copy.guide, openstage_express_export::demo::demo().document.guide);
+    // The guide as it is, except what a copy for someone else leaves out: the clicks, the controls and the program (the security
+    // review of 2026-11-13).
+    let mut want = openstage_express_export::demo::demo().document.guide;
+    for step in &mut want.steps {
+        (step.click, step.control, step.program) = (None, None, None);
+    }
+    assert_eq!(copy.guide, want);
 }
 
 #[test]
@@ -5273,6 +5279,61 @@ fn the_picture_switches_open_a_menu_the_command_search_or_the_keys_and_a_wrong_m
     let error = DevOptions::parse(&words(&["--menu", "Format"])).unwrap_err();
     assert_eq!(error, "--menu is File, Edit, Step, Marks, View, Tools or Help, not \"Format\".");
     assert!(DevOptions::parse(&words(&["--search"])).is_err(), "--search needs its words");
+}
+
+/// Help > Check for updates (the review of 2026-11-13 asked every tool of the suite for it): it asks once, on a thread of its own, and
+/// the About screen says the answer in words; the release page is offered, and only a page of Express's releases is ever handed on.
+#[test]
+fn check_for_updates_asks_once_and_the_about_screen_offers_the_release_page() {
+    use openstage_express_core::updates::{UpdateAnswer, UpdateState, RELEASES_PAGE};
+    use super::commands::Command;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let asked = Arc::new(AtomicUsize::new(0));
+    let opened: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let mut h = Harness::new(Screen::Home);
+    let count = asked.clone();
+    let page = format!("{RELEASES_PAGE}/tag/v0.1.0-alpha.9");
+    let answer = UpdateAnswer { state: UpdateState::Newer, message: "A newer version is published: 0.1.0 alpha 9.".into(), url: Some(page.clone()) };
+    let record = opened.clone();
+    h.app.use_updates(
+        Arc::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            answer.clone()
+        }),
+        Box::new(move |url| record.borrow_mut().push(url.to_string())),
+    );
+    assert!(Command::all().contains(&Command::CheckForUpdates), "it is in a menu");
+    h.app.run_command(Command::CheckForUpdates);
+    for _ in 0..200 {
+        h.frame();
+        if h.has(Role::Label, "A newer version is published: 0.1.0 alpha 9.") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.settle();
+    assert_eq!(h.app.screen, Screen::About);
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "asked once");
+    assert!(h.status().contains("A newer version is published"), "{}", h.status());
+    h.invoke(Role::Button, "Open the release page");
+    assert_eq!(*opened.borrow(), [page], "the release page, and nothing else");
+    // An answer that offers a page that is not one of Express's releases offers no button at all.
+    let mut h = Harness::new(Screen::Home);
+    h.app.use_updates(
+        Arc::new(|| UpdateAnswer { state: UpdateState::Error, message: "Odd.".into(), url: Some("https://example.org/".into()) }),
+        Box::new(|_| panic!("nothing may be opened")),
+    );
+    h.app.run_command(Command::CheckForUpdates);
+    for _ in 0..200 {
+        h.frame();
+        if h.has(Role::Label, "Odd.") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.settle();
+    assert!(!h.has(Role::Button, "Open the release page"));
 }
 
 #[test]

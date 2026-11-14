@@ -242,7 +242,10 @@ pub fn run(out: &Path, wait_for_quiet: Duration) -> bool {
     // The real capture. Its keyboard hook is told the usual hotkeys and the one the person might change one to (section 5b).
     let mut known_hotkeys: Vec<Hotkey> = DEFAULTS.iter().map(|(_, key)| *key).collect();
     known_hotkeys.push(CHANGED_KEY);
-    let run = match CaptureRun::start(RunOptions { hotkeys: known_hotkeys, ..RunOptions::default() }) {
+    // The typing checks below are of reading a field's text, which "Say which field was typed in, not what was typed" turns off and
+    // is on unless the person changes it; this run turns it off to try the reading (the builder's tests cover the setting itself).
+    let settings = openstage_express_core::builder::Settings { say_field_not_text: false, ..Default::default() };
+    let run = match CaptureRun::start(RunOptions { hotkeys: known_hotkeys, settings, ..RunOptions::default() }) {
         Ok(run) => run,
         Err(why) => {
             report.fail("capture starts", &why);

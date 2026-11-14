@@ -103,7 +103,6 @@ struct Shot {
     alt: &'static str,
     click: (i32, i32),
     control: (&'static str, &'static str),
-    typed: Option<&'static str>,
     canvas: Canvas,
     marks: Vec<Annotation>,
 }
@@ -127,7 +126,6 @@ pub fn demo() -> Demo {
             role: shot.control.1.to_string(),
             extra: Default::default(),
         });
-        draft.typed = shot.typed.map(str::to_string);
         draft.program = Some("browser.exe".to_string());
         draft.captured_at = Some(NOW.to_string());
         draft.focus = auto_focus(WIDTH, HEIGHT, Some(shot.click), DEFAULT_ZOOM_PERCENT);
@@ -155,7 +153,6 @@ pub fn demo() -> Demo {
             alt: "The course site with the Assignments item in the left menu circled",
             click: (110, 170),
             control: ("Assignments", "link"),
-            typed: None,
             canvas: screen("", "", true),
             marks: click_marks(110, 170),
         },
@@ -182,7 +179,6 @@ pub fn demo() -> Demo {
             alt: "The New assignment button with an arrow pointing at it",
             click: (380, 132),
             control: ("New assignment", "button"),
-            typed: None,
             canvas: screen("", "", true),
             marks,
         },
@@ -202,7 +198,6 @@ pub fn demo() -> Demo {
             alt: "The Name box filled in with Week 3 reflection",
             click: (530, 240),
             control: ("Name", "edit"),
-            typed: Some("Week 3 reflection"),
             canvas: screen("Week 3 reflection", "", true),
             marks: vec![oval],
         },
@@ -220,7 +215,6 @@ pub fn demo() -> Demo {
             alt: "The Course list with Communication 360 chosen",
             click: (530, 320),
             control: ("Course", "combo box"),
-            typed: None,
             canvas: screen("Week 3 reflection", "Communication 360", true),
             marks: vec![highlight],
         },
@@ -236,7 +230,6 @@ pub fn demo() -> Demo {
             alt: "",
             click: (900, 600),
             control: ("Debug", "button"),
-            typed: None,
             canvas: screen("Week 3 reflection", "Communication 360", true),
             marks: click_marks(900, 600),
         },
@@ -260,7 +253,6 @@ pub fn demo() -> Demo {
             alt: "The Submit button, with the student's name blurred",
             click: (360, 542),
             control: ("Submit", "button"),
-            typed: None,
             canvas: screen("Week 3 reflection", "Communication 360", true),
             marks: {
                 let mut marks = vec![blur];
@@ -340,7 +332,7 @@ mod tests {
         assert!(steps.iter().any(|s| s.skipped));
         assert!(steps.iter().any(|s| s.parent.is_some()));
         assert!(steps.iter().any(|s| s.kind == StepKind::Block));
-        assert!(steps.iter().any(|s| s.typed.is_some()));
+        assert!(steps.iter().any(|s| s.title.contains("Week 3 reflection")), "a step for what was typed, in its title only");
         assert!(steps.iter().all(|s| s.image.as_ref().is_none_or(|i| d.pictures.0.contains_key(&i.file))));
     }
 

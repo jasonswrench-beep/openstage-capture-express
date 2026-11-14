@@ -109,9 +109,9 @@ impl Desktop for DemoDesktop {
             words: format!("{process}: {title} ({size})"),
         };
         Ok(vec![
-            row(1, "Course site: Assignments", "msedge.exe", "1600 by 900"),
+            row(1, "Course site: Assignments", "browser.exe", "1600 by 900"),
             row(2, "Untitled", "notepad.exe", "800 by 600"),
-            row(3, "Grades.xlsx", "excel.exe", "1280 by 720"),
+            row(3, "Grades", "spreadsheet.exe", "1280 by 720"),
         ])
     }
 

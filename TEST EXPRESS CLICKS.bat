@@ -22,8 +22,6 @@ echo pictures stay in the folder clicks-test-output on this computer.
 echo A full log is saved in this folder as clicks-test-log.txt.
 echo.
 
-if not exist "%~dp0..\openstage-author\capture\crates\openstage-capture-render\Cargo.toml" goto no_capture
-
 call "%~dp0rust-setup.bat"
 if errorlevel 1 goto no_rust
 
@@ -53,15 +51,6 @@ echo ------------------------------------------------------------
 echo   Something above says FAIL. Please send me the file
 echo   clicks-test-log.txt from this folder.
 echo ------------------------------------------------------------
-goto done
-
-:no_capture
-echo ------------------------------------------------------------
-echo   The OpenStage code was not found next to this folder.
-echo ------------------------------------------------------------
-echo.
-echo Double-click GET OPENSTAGE CODE.bat to get it, then try again.
-echo Nothing was changed.
 goto done
 
 :no_rust

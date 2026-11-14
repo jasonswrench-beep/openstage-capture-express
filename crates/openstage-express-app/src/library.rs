@@ -20,8 +20,11 @@ pub const FOLDER_VARIABLE: &str = "EXPRESS_GUIDES_FOLDER";
 /// Where guides are kept: the folder named by `EXPRESS_GUIDES_FOLDER`, else `Documents\OpenStage Express\Guides`, with Documents
 /// being wherever Windows has put it.
 pub fn default_folder() -> PathBuf {
+    // A folder on another computer is not used (`fsutil::is_network_path`): the usual place is used instead.
     if let Some(chosen) = std::env::var_os(FOLDER_VARIABLE).filter(|v| !v.is_empty()) {
-        return PathBuf::from(chosen);
+        if !openstage_express_core::fsutil::is_network_path(Path::new(&chosen)) {
+            return PathBuf::from(chosen);
+        }
     }
     #[cfg(windows)]
     let documents = openstage_express_windows::system::documents_folder();
@@ -33,7 +36,7 @@ pub fn default_folder() -> PathBuf {
 /// The guides folder to use: the one named by `EXPRESS_GUIDES_FOLDER` if that is set, else the one in the settings, else the usual
 /// place.
 pub fn guides_folder(from_settings: Option<PathBuf>) -> PathBuf {
-    if std::env::var_os(FOLDER_VARIABLE).is_some_and(|v| !v.is_empty()) {
+    if std::env::var_os(FOLDER_VARIABLE).is_some_and(|v| !v.is_empty() && !openstage_express_core::fsutil::is_network_path(Path::new(&v))) {
         return default_folder();
     }
     from_settings.unwrap_or_else(default_folder)
@@ -61,7 +64,8 @@ pub struct Entry {
 }
 
 fn read_entry(path: &Path) -> Option<Entry> {
-    let bytes = std::fs::read(path.join("guide.json")).ok()?;
+    // Over the size a guide's file can be, it is not read to be listed (the security review of 2026-11-13).
+    let bytes = openstage_express_core::store::read_guide_file(&path.join("guide.json"), "guide.json").ok()?;
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     let title = value.get("title")?.as_str()?.to_string();
     // The number of steps the editor and the exports count (a note or a skipped step is not one), when the file can be read as a
@@ -109,7 +113,9 @@ pub fn held_by(guide: &Path, is_running: &dyn Fn(u32) -> bool) -> Option<u32> {
 }
 
 fn is_guide_folder(path: &Path) -> bool {
-    path.is_dir()
+    // A guide folder that is a link or a junction is never moved: the move would act on the place it leads to.
+    !openstage_express_core::fsutil::is_link(path)
+        && path.is_dir()
         && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("osguide"))
         && path.join("guide.json").is_file()
 }
@@ -139,6 +145,9 @@ pub fn move_to_trash(guide: &Path, guides: &Path, is_running: &dyn Fn(u32) -> bo
         return Err(busy_words(pid));
     }
     let trash = trash_folder(guides);
+    if openstage_express_core::fsutil::is_link(&trash) {
+        return Err("The Trash folder is a link to another place, so the guide was left where it is.".to_string());
+    }
     fs::create_dir_all(&trash).map_err(|e| format!("The Trash folder could not be made: {e}"))?;
     let title = read_entry(guide).map(|e| e.title).unwrap_or_default();
     let target = unique_guide_folder(&trash, &title);

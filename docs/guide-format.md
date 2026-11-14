@@ -79,8 +79,7 @@ without losing a step).
   "skipped": false,
   "click": { "x": 312, "y": 188, "button": "left" },
   "control": { "name": "Assignments", "role": "link" },
-  "typed": null,
-  "program": "chrome.exe",
+  "program": "browser.exe",
   "focus": { "x": 0, "y": 0, "width": 1280, "height": 720 },
   "annotations": [],
   "capturedAt": "2026-10-31T14:32:41Z"
@@ -98,7 +97,7 @@ without losing a step).
 | `skipped` | Left out of every export. |
 | `click` | Where the click happened, in picture pixels. `button` is `left`, `right` or `middle` (default `left`). `null` for steps made by a hotkey. |
 | `control` | The control that was clicked, from UI Automation: `name` and `role`. Roles use the English names of OpenStage Capture (`button`, `link`, `edit`, and so on). `null` if unknown. |
-| `typed` | The text of a `Type` step, read from the field when typing finished (never logged key by key, never for a password field). **Private**: shown to the author, and in exports only as the step title. `null` otherwise. |
+| `typed` | **Retired** (2026-11-13). Guides made before then kept the text of a `Type` step here; it went out in a shared copy even after the title was changed. Express takes it out of every step when it reads a guide or a trash file, whatever the version, and never writes it. |
 | `program` | The program's file name only. Window titles are never stored. |
 | `focus` | The focused view crop in picture pixels, with a width and a height above zero. `null` means the whole picture. It is a stored rectangle, not an edited picture. |
 | `annotations` | Marks drawn on the picture, in drawing order. |
@@ -228,10 +227,20 @@ Which of two kinds it is shows in what is inside:
 
 * **Marks drawn in** (the default, spec P5). Each picture is the step's whole picture with its marks drawn on it (blur included, so
   the original cannot be got back), the step's `annotations` are empty, and `image.file` is `images/step-NNNN.png` where NNNN is the
-  step's own number, so two steps that shared one picture each have a picture of their own. The step's `focus` and `click` are kept.
+  step's own number, so two steps that shared one picture each have a picture of their own. The step's `focus` is kept.
   Steps that were skipped, and everything inside a skipped step, are left out. The original pictures are not in the file.
-* **With the original pictures** (the person chose it). `guide.json` is the guide exactly as it is, skipped steps and marks included,
+* **With the original pictures** (the person chose it). `guide.json` is the guide as it is, skipped steps and marks included,
   and each picture is the original PNG file unchanged, once, under the name the guide gives it. A blur is still only a mark.
+
+In both kinds every step's `click`, `control` and `program` are left out (`null`), as the JSON export leaves them out: they say more
+about the person's computer than the guide needs (the security review of 2026-11-13). The crop of a focused view is kept and can
+still be moved by whoever opens the copy.
+
+Limits when a guide or a copy is read (the same review): a `guide.json` over 16 MB is refused with a message, a picture whose
+header says it is over 64 million pixels is refused before it is decoded, a picture is never made more than four times wider than
+it was or over 64 million pixels in an export, a GIF frame is never taller than 8,192 pixels and a GIF that would be over 256
+million pixels in all is not made, a description over 20,000 characters is plain text, a picture name must end in `.png`, and a
+picture or a folder inside the guide folder that is a link or a junction is never followed.
 
 Opening one makes a **new guide folder** in the guides folder (`Title.osguide`, or the next free name; an existing folder is never
 touched). The guide gets a new `id` and a new `updatedAt`, so that it is not taken for the guide it was copied from. The file is only
@@ -262,9 +271,12 @@ A captured step has these fields filled in, and no others beyond what the format
   cursor" is on.
 - `control` is the name and kind (English role: `button`, `edit`, `combo box`, ...) Windows' accessibility information gave for the
   thing clicked. It is absent when Windows gave neither.
-- `typed` is the text of a `Type` step, **read from the field when typing finished**, never built from keys. Express's keyboard hook
-  never passes on which key was pressed. A password field never has a `typed`, a `Type` step, or any of its text anywhere; a field
-  that gives no text, or more than 500 letters (a whole document), gives `Type in "Name"` and no `typed`.
+- A typing step is `Type in "Name"` and its text is never read, unless the person turns "Say which field was typed in, not what
+  was typed" off in Settings. Then the text is **read from the field when typing finished**, never built from keys (Express's
+  keyboard hook never passes on which key was pressed), and it is only in the step's title. A password field never gives a `Type`
+  step or any of its text: a field that was a password field at the first key or at the end, a password check that fails, or
+  focus that moved to another element during the typing all count as one. A field that gives no text, or more than 500 letters
+  (a whole document), gives `Type in "Name"`.
 - `annotations` hold the marker (`clickMark`, size 56) and the cursor (`cursor`, style `pointer`, or `text` over an edit field or
   document, size 32), both scaled by the display's scaling percent, with ids `a1` and `a2` as the editor would give them. They are
   ordinary marks: the person can remove or restyle either.

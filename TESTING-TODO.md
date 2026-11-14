@@ -36,9 +36,9 @@ milestones are built; tick an item (and say on which PC and when) once it has be
       the size it is shown? The tests prove no detail survives inside a block, not that the block is big enough for your text.
 - [ ] Text marks use block letters in the tests. Windows' own text drawing comes with milestone M6; check text marks then, in English,
       German, French and one language with accents or other scripts.
-- [ ] Double-click `GET OPENSTAGE CODE.bat` on a PC that has no `openstage-author` folder next to Express. The "not found" and the
-      "stop without typing Y" branches were tried through a shell; the download itself (about 70 MB from GitHub with Git) has not been
-      run. It may ask for a GitHub sign-in if the repository is private.
+- [ ] On a PC that has never built Express, double-click `BUILD EXPRESS.bat`. The OpenStage capture code now comes from GitHub at one
+      fixed commit (a git dependency, 2026-11-13; `GET OPENSTAGE CODE.bat` is gone), fetched with the other libraries after
+      `cargo-run.bat` asks. It was built on this PC from a fresh clone; a PC with none of the libraries has not been tried.
 - [ ] The automatic focused view is 150 percent closer, centred on the click. Does that feel right on your programs? (The
       percentage is a constant, `DEFAULT_ZOOM_PERCENT` in `focus.rs`.)
 
@@ -237,7 +237,7 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 
 ## Milestone M7 (so far: the Export screen)
 
-- [ ] OneDrive: on this PC Documents is inside OneDrive (`C:\Users\Jason\OneDrive\Documents`), so the default guides folder and the
+- [ ] OneDrive: on this PC Documents is inside OneDrive (your Documents folder, inside OneDrive on the test PC), so the default guides folder and the
       default exports folder are both inside OneDrive and their pictures (screenshots of your screen, about 0.7 MB each) would be
       uploaded to it. Is that what you want? There is no settings screen yet to move them; until there is, set the environment
       variable `EXPRESS_GUIDES_FOLDER` to another folder to keep guides elsewhere.
@@ -339,8 +339,8 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
       alt text, slide titles, reading order and document language are all set, but no checker has confirmed it.
 - [ ] Read both files with a screen reader (NVDA or Narrator), in Word and in PowerPoint. Only when you are away from the
       computer: NVDA logs everything it speaks.
-- [ ] Open the files in a program other than Microsoft's (LibreOffice, Google Docs or Slides, Pages or Keynote on a Mac). They have
-      only been opened in Microsoft 365 Word and PowerPoint, so how others show the contents list, the footer and the slide
+- [ ] Open the files in another office suite (a free one, an online one, or the Mac's own). They have
+      only been opened in Word and PowerPoint, so how others show the contents list, the footer and the slide
       layout is not known.
 - [ ] Both files use Calibri without embedding it. On a computer without Calibri (some Linux machines) the text will use another
       font. Roboto, as the spec suggests, is not embedded in either yet. Say whether that matters.
@@ -353,8 +353,8 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 
 ## The OpenStage suite's look (2026-11-11)
 
-Built and checked by the window tests and by pictures (`D:\Claude Audio Test\revamp-screens\express-before` as it was,
-`express-x1` after). Not yet tried by a person.
+Built and checked by the window tests and by pictures (`revamp-screens\express-before` in a working folder on the build computer
+as it was, `express-x1` after). Not yet tried by a person.
 
 - [ ] Open the program and use it for a while: is every command where you would look for it? Write down anything you would move.
 - [ ] F10, then the arrows through the menus; Enter on an item; Escape back. Then Ctrl+K and type "export" or "dark"; Ctrl+/.
@@ -367,3 +367,24 @@ Built and checked by the window tests and by pictures (`D:\Claude Audio Test\rev
 - [ ] Dark colours (View > Colours: dark), and Windows' high-contrast themes: egui draws its own colours and does not follow a
       high-contrast theme; say whether the dark scheme is enough or a high-contrast scheme of Express's own is needed.
 - [ ] The navy bar's icon is the 64 pixel PNG drawn at 28 pixels: does it look sharp on your screen?
+
+## The security round (2026-11-13, alpha 4)
+
+Built and checked by the tests (934, all passing, and the rule checks), the network test against GitHub's real list, and a build from a
+fresh clone. Not yet tried by a person:
+
+- [ ] Capture a few steps that type into ordinary fields. With the new setting on (it is on unless turned off), each typing step
+      should say `Type in "Name"` and hold none of the text. Then turn off "Say which field was typed in, not what was typed" in
+      Settings and try again: the text is in the title, as before.
+- [ ] Try a password box that has a "show password" button: type, press the button, then Enter. The step should be only the click.
+      The builder's tests cover it with a stand-in; a real page has not been tried.
+- [ ] Make a copy to share (both kinds) of a guide with a typing step and open the zip: `guide.json` should have no `click`,
+      `control` or `program` values and none of the typed text. (Tested; not looked at by a person.)
+- [ ] Choose Help, Check for updates... It should say whether a newer Express is published, on the About screen, and Open the
+      release page should open it in your browser. Then put `update-check.txt` saying `off` beside the installed program and check
+      again: it should say checking is turned off. Take the file away afterwards.
+- [ ] Press Do not disturb... on the capture bar. Windows' notification settings should open, where Do not disturb is turned on.
+- [ ] Choose a network folder (`\\server\share`) as the guides or exports folder in Settings: Express should say it keeps them on
+      this computer and not use it. A network drive with a letter (Z:) should still work.
+- [ ] Open a folder from Express (after an export): it now opens through Windows' own way of opening a folder, not by running
+      explorer by its name. It should look the same.

@@ -176,7 +176,7 @@ enum HotkeyEvent {
 /// The window's size as the whole program, and as the strip of the capture bar.
 const NORMAL_SIZE: [f32; 2] = [1280.0, 760.0];
 const NORMAL_MIN: [f32; 2] = [900.0, 560.0];
-const BAR_SIZE: [f32; 2] = [620.0, 340.0];
+const BAR_SIZE: [f32; 2] = [620.0, 372.0];
 const TALL_SIZE: [f32; 2] = [620.0, 620.0];
 const BAR_MIN: [f32; 2] = [360.0, 150.0];
 
@@ -403,6 +403,9 @@ pub fn window_icon() -> Option<egui::IconData> {
 
 /// Open the window and run until it is closed.
 pub fn run(options: DevOptions) -> eframe::Result {
+    // Working folders an earlier PDF export left in the temporary folder are taken away, in the background.
+    #[cfg(windows)]
+    std::thread::spawn(openstage_express_windows::pdf::remove_leftover_work_folders);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("OpenStage Capture Express")
         .with_inner_size([NORMAL_SIZE[0], options.height.unwrap_or(NORMAL_SIZE[1])])
@@ -463,8 +466,16 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         Box::new(|start| {
                             openstage_express_windows::dialogs::choose_folder(start, "Choose where to put the exports")
                         }),
-                        Box::new(|folder| {
-                            let _ = std::process::Command::new("explorer").arg(folder).spawn();
+                        Box::new(|folder| openstage_express_windows::system::open_folder(folder)),
+                    )
+                    .with_notifications(Box::new(openstage_express_windows::system::open_notification_settings))
+                    .with_updates(
+                        std::sync::Arc::new(|| {
+                            let folder = std::env::current_exe().ok().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+                            openstage_express_windows::updates::check(folder.as_deref())
+                        }),
+                        Box::new(|url| {
+                            let _ = openstage_express_windows::updates::open_release_page(url);
                         }),
                     )
                     .with_file_chooser(Box::new(|start| {

@@ -132,9 +132,32 @@ fn run_job(html: &str) -> Result<Vec<u8>, RenderError> {
     result
 }
 
+/// The start of the name of each export's working folder in the temporary folder.
+const WORK_PREFIX: &str = "openstage-express-pdf-";
+
+/// Remove the working folders earlier exports left behind (the engine can hold its files a moment too long, or the program was
+/// stopped mid-export), unless the copy of Express that made one is still running. Run at start (the security review's hardening
+/// notes, 2026-11-13). A folder that is a link or a junction is never followed.
+pub fn remove_leftover_work_folders() {
+    let Ok(entries) = fs::read_dir(std::env::temp_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(WORK_PREFIX)) else { continue };
+        let pid: u32 = rest.split('-').next().and_then(|p| p.parse().ok()).unwrap_or(0);
+        if pid == std::process::id() || (pid != 0 && crate::system::process_is_running(pid)) {
+            continue;
+        }
+        let path = entry.path();
+        if openstage_express_core::fsutil::is_link(&path) || !path.is_dir() {
+            continue;
+        }
+        let _ = fs::remove_dir_all(&path);
+    }
+}
+
 fn unique_work_folder() -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    std::env::temp_dir().join(format!("openstage-express-pdf-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!("{WORK_PREFIX}{}-{nanos}", std::process::id()))
 }
 
 /// Removes our own working folder. The engine lets go of its profile a moment after it is closed, so try for a few seconds;

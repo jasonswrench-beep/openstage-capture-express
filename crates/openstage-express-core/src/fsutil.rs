@@ -9,6 +9,47 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Whether a path is a link, a junction or any other reparse point, which Express never follows inside a guide folder or the
+/// guides folder: one could lead a move, a rename or an emptied trash to files elsewhere (the security review of 2026-11-13).
+/// A path that cannot be looked at is not a link.
+pub fn is_link(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => meta.file_type().is_symlink() || is_reparse_point(&meta),
+        Err(_) => false,
+    }
+}
+
+#[cfg(windows)]
+fn is_reparse_point(meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_meta: &fs::Metadata) -> bool {
+    false
+}
+
+/// A file that is a plain file (not a link) and whose real place is inside `root`.
+pub fn is_plain_file_inside(path: &Path, root: &Path) -> bool {
+    if is_link(path) || !path.is_file() {
+        return false;
+    }
+    match (fs::canonicalize(path), fs::canonicalize(root)) {
+        (Ok(real), Ok(root)) => real.starts_with(root),
+        _ => false,
+    }
+}
+
+/// Whether a path names a folder on another computer (`\\server\share`) or is written in one of Windows' long forms (`\\?\`,
+/// `\\.\`). Reading one makes Windows connect to that server with the person's sign-in, so the guides and exports folders are
+/// never such a path (the security review of 2026-11-13). A network drive with a letter, such as Z:, is an ordinary path.
+pub fn is_network_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text.starts_with("\\\\") || text.starts_with("//")
+}
+
 fn tmp_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".tmp");
@@ -89,8 +130,9 @@ pub fn sanitise_folder_name(title: &str) -> String {
     if name.is_empty() {
         return "Untitled guide".to_string();
     }
-    let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
-    let reserved = ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+    // Windows treats a name as the device whatever follows a dot, and spaces before the dot do not count ("CON .txt" is CON).
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&stem.as_str())
         || ((stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.len() == 4
             && stem.as_bytes()[3].is_ascii_digit());
@@ -147,6 +189,36 @@ mod tests {
     }
 
     #[test]
+    fn a_network_path_is_told_from_a_folder_on_this_computer() {
+        for network in [r"\\server\share\Guides", r"\\?\UNC\server\share", r"\\?\C:\Guides", r"\\.\pipe\x", "//server/share"] {
+            assert!(is_network_path(Path::new(network)), "{network}");
+        }
+        for local in [r"C:\Users\you\Documents", r"Z:\Guides", r"D:\", "relative\\folder", ""] {
+            assert!(!is_network_path(Path::new(local)), "{local}");
+        }
+    }
+
+    #[test]
+    fn a_link_is_never_a_plain_file_inside_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Guide.osguide");
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images").join("step-0001.png"), b"x").unwrap();
+        let outside = dir.path().join("outside.png");
+        fs::write(&outside, b"y").unwrap();
+        assert!(is_plain_file_inside(&root.join("images").join("step-0001.png"), &root));
+        assert!(!is_plain_file_inside(&outside, &root), "a file outside the guide folder");
+        assert!(!is_plain_file_inside(&root.join("images").join("missing.png"), &root));
+        assert!(!is_link(&root.join("images")), "an ordinary folder");
+        // A link (where this computer lets a test make one) is never followed.
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_file(&outside, root.join("images").join("step-0002.png")).is_ok() {
+            assert!(is_link(&root.join("images").join("step-0002.png")));
+            assert!(!is_plain_file_inside(&root.join("images").join("step-0002.png"), &root));
+        }
+    }
+
+    #[test]
     fn folder_names_are_made_safe() {
         assert_eq!(sanitise_folder_name("How to submit an assignment"), "How to submit an assignment");
         assert_eq!(sanitise_folder_name("Set up: two/step <sign-in>?"), "Set up_ two_step _sign-in__");
@@ -154,7 +226,7 @@ mod tests {
         assert_eq!(sanitise_folder_name(""), "Untitled guide");
         assert_eq!(sanitise_folder_name("   "), "Untitled guide");
         assert_eq!(sanitise_folder_name("..."), "Untitled guide");
-        for reserved in ["CON", "con", "Nul.txt", "COM1", "lpt9", "AUX"] {
+        for reserved in ["CON", "con", "Nul.txt", "COM1", "lpt9", "AUX", "CONIN$", "conout$", "CON .txt", "Nul   .x"] {
             assert!(sanitise_folder_name(reserved).ends_with('_'), "{reserved}");
         }
         assert_eq!(sanitise_folder_name("COM10"), "COM10");

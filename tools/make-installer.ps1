@@ -57,6 +57,8 @@ try {
     $stage = Join-Path $work 'stage'
     New-Item -ItemType Directory -Path $stage | Out-Null
     Copy-Item -LiteralPath $exe -Destination $stage
+    # The program must not name this computer's user folder or the folder it was built in (the security review of 2026-11-13).
+    & (Join-Path $PSScriptRoot 'check-exe-paths.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Root $root
     & (Join-Path $PSScriptRoot 'set-exe-icon.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Icon $icon
     if ($Sign) {
         # Signed after the icon is added (changing the program afterwards would break its signature).
