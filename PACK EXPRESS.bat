@@ -26,7 +26,10 @@ call "%~dp0cargo-run.bat" "pack-log.txt" build --release -p openstage-express-ap
 if errorlevel 1 goto failed
 
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\pack.ps1" -OutDir "%~dp0dist" >> "%~dp0pack-log.txt" 2>&1
+rem PACK EXPRESS.bat sign signs the program in the zip (tools\sign_windows.py says what signing needs).
+set "SIGNARG="
+if /i "%~1"=="sign" set "SIGNARG=-Sign"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\pack.ps1" -OutDir "%~dp0dist" %SIGNARG% >> "%~dp0pack-log.txt" 2>&1
 set "RESULT=%ERRORLEVEL%"
 type "%~dp0pack-log.txt" | findstr /i /c:"Made the folder" /c:"and the zip" /c:"already in" /c:"is missing"
 if not "%RESULT%"=="0" goto failed

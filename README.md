@@ -384,8 +384,7 @@ and are caught now.
   file from before there was one is not welcomed again.
 
 Not built: capturing a window that has moved to another display, WebP pictures, JPG pictures inside Markdown and JSON, the capture
-format (C1) and the accessibility rules (C2), which wait on the core, and a signed portable zip (the setup file is signed by `MAKE EXPRESS INSTALLER.bat sign`, see
-`docs/installer.md`).
+format (C1) and the accessibility rules (C2), which wait on the core.
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
@@ -459,7 +458,7 @@ build fetches it with the other libraries, after asking.
    (`OpenStage-Capture-Express-<version>-x64-setup.exe`) with Inno Setup, a free program that must be installed first (see
    `docs/installer.md`). The setup file, the program file it installs, its shortcuts and its entry in Windows' list of installed
    programs all use the product icon (`assets/icon/OpenCapture_Express.ico`). It installs for one person without needing an
-   administrator, and removing it never deletes guides or settings. The zip is not signed; the setup file is signed when it is made with `MAKE EXPRESS INSTALLER.bat sign` (`docs/installer.md`).
+   administrator, and removing it never deletes guides or settings. Both are signed when they are made with `sign` (`MAKE EXPRESS INSTALLER.bat sign`, `PACK EXPRESS.bat sign`; see `docs/installer.md`).
 
 ## Decisions
 

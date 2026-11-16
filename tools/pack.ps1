@@ -1,10 +1,20 @@
 # Makes the portable folder and zip of OpenStage Capture Express: the program, its licence and notices, and a short guide.
 # Used by PACK EXPRESS.bat. It never replaces a folder or a zip that is already there.
-param([Parameter(Mandatory = $true)][string]$OutDir)
+#
+# With -Sign, the program (after its icon is added) is signed with Azure Artifact Signing, with a timestamp, by tools\sign_windows.py
+# (which says what it needs: three OPENSTAGE_SIGN_ settings and a sign-in), and START-HERE.txt says so.
+param([Parameter(Mandatory = $true)][string]$OutDir, [switch]$Sign)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'target\release\openstage-capture-express.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "The program has not been built: $exe is missing." }
+$signer = Join-Path $PSScriptRoot 'sign_windows.py'
+if ($Sign) {
+    $python = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $python) { throw 'Signing needs Python (for tools\sign_windows.py), and python was not found.' }
+    & $python $signer --ready
+    if ($LASTEXITCODE -ne 0) { throw 'Signing cannot start: see what is missing above.' }
+}
 $cargo = Get-Content -LiteralPath (Join-Path $root 'Cargo.toml') -Raw
 if ($cargo -notmatch '(?m)^version\s*=\s*"([^"]+)"') { throw 'The version could not be read from Cargo.toml.' }
 $version = $Matches[1]
@@ -19,6 +29,20 @@ Copy-Item -LiteralPath $exe -Destination $stage
 & (Join-Path $PSScriptRoot 'check-exe-paths.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Root $root
 # The product icon goes into the copy that is shipped, not into the one in target\.
 & (Join-Path $PSScriptRoot 'set-exe-icon.ps1') -Exe (Join-Path $stage 'openstage-capture-express.exe') -Icon (Join-Path $root 'assets\icon\OpenCapture_Express.ico')
+if ($Sign) {
+    # Signed after the icon is added (changing the program afterwards would break its signature).
+    & $python $signer --description 'OpenStage Capture Express' (Join-Path $stage 'openstage-capture-express.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'The program could not be signed.' }
+    $warning = @"
+  This program is signed by Jason Wrench. Because it is new, Windows SmartScreen may still say it protected your PC at first;
+  if it does, choose "More info", then "Run anyway".
+"@
+}
+else {
+    $warning = @"
+  This program is not signed yet, so Windows SmartScreen may say it protected your PC. Choose "More info", then "Run anyway".
+"@
+}
 foreach ($file in 'LICENSE', 'NOTICE', 'THIRD-PARTY.md') { Copy-Item -LiteralPath (Join-Path $root $file) -Destination $stage }
 $start = @"
 OpenStage Capture Express $version
@@ -33,7 +57,7 @@ To start
   remove it, delete this folder.
 
 If Windows warns you
-  This program is not signed yet, so Windows SmartScreen may say it protected your PC. Choose "More info", then "Run anyway".
+$warning
   Some antivirus programs are wary of any program that watches the mouse and keyboard; that is how capturing works, and the
   program reads no key (it reads the text of a field when you finish typing, never for a password field).
 

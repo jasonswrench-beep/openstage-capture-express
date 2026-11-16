@@ -1,8 +1,8 @@
 # The installer
 
 OpenStage Capture Express has two ways to be given to someone: the portable zip (`PACK EXPRESS.bat`, spec A6) and a setup file
-(`MAKE EXPRESS INSTALLER.bat`). Both put the product icon, `assets/icon/OpenCapture_Express.ico`, on the program file. The setup file can
-be signed (see Signing, below); the zip is never signed.
+(`MAKE EXPRESS INSTALLER.bat`). Both put the product icon, `assets/icon/OpenCapture_Express.ico`, on the program file. Both can
+be signed (see Signing, below).
 
 ## Making it
 
@@ -66,10 +66,11 @@ Windows SDK 10.0.22621 or later, Microsoft's signing library (`Azure.CodeSigning
 The wizard's first page then says the program is signed, and that SmartScreen may still warn at first, because the file is new.
 Without `sign`, nothing is signed and that page says so.
 
+`PACK EXPRESS.bat sign` (or `tools/pack.ps1 -Sign`) signs the program in the portable zip the same way, after its icon is added, and
+the `START-HERE.txt` in the zip says so. Without `sign` the program in the zip is unsigned and `START-HERE.txt` says that.
+
 ## Not done
 
-* **Signing the zip.** `tools/pack.ps1` has no signing step, so the program in the portable zip is unsigned, and its
-  `START-HERE.txt` says so.
 * No automatic update (spec A6: none).
 * English only.
 * The installer has been run, but not by hand through its screens: see `TESTING-TODO.md`.

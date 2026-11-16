@@ -413,10 +413,15 @@ Built and checked by the tests (1,008 passing, and the rule checks) and by the c
       uninstaller and the setup file each report signed and timestamped; the hash file matches the file; the compile log lists only those
       files; the icon step was repeated on a copy of the program and left its version and a 32-pixel icon. The setup file was not run,
       because installing changes this computer.)
-- [ ] The portable zip (`PACK EXPRESS.bat`) was not made this round: `tools/pack.ps1` has no signing step, so its program would be
-      unsigned. Say whether the zip is wanted signed; if so it needs a `-Sign` like `make-installer.ps1` has. The same check applies:
-      only `openstage-capture-express.exe`, not the `-cli` one.
-- [ ] Publishing alpha.5 (a GitHub release with this setup file and its notes) has not been done: the notes for alpha.4 are in
+- [ ] The signed portable zip `dist\0.1.0-alpha.5\OpenStage-Capture-Express-0.1.0-x64.zip` (6.7 MB, SHA-256
+      `2870AEC60E25DB6B714FB0570AE904A6D3CCD6D50C91EF0786079C819CD51F0E`): unzip it somewhere, look at Properties > Digital Signatures
+      on the program (Jason Wrench, with a timestamp), double-click the program (no console box, the icon in Explorer), and read
+      `START-HERE.txt`. The folder should hold only the program, `LICENSE`, `NOTICE`, `THIRD-PARTY.md` and `START-HERE.txt`, no `-cli`
+      program. (Checked: the zip was unzipped and the program taken out of it is valid, signed by Jason Wrench and timestamped by
+      Microsoft; its properties say 0.1.0-alpha.5 and it has a 32-pixel icon; it ran `--version` and exited cleanly; the five files
+      are the ones named, and `START-HERE.txt` says the program is signed. `PACK EXPRESS.bat sign` itself was not double-clicked:
+      `tools\pack.ps1 -Sign` was run.)
+- [ ] Publishing alpha.5 (a GitHub release with this setup file, the zip and their notes) has not been done: the notes for alpha.4 are in
       `dist\notes-v0.1.0-alpha.4.md`, and the update check reads GitHub's list of releases.
 
 ### The options of each format
