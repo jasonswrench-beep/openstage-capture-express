@@ -230,6 +230,21 @@ mod tests {
     }
 
     #[test]
+    fn opacity_scales_each_pixels_solidity_exactly_and_changes_nothing_else() {
+        let logo = Picture::new(1, 1, vec![10, 20, 30, 255]);
+        let at = |opacity: u32| {
+            let faded = Watermark { opacity_percent: opacity, ..mark(logo.clone(), Place::TopLeft) }.faded();
+            faded.bgra
+        };
+        assert_eq!(at(100), [10, 20, 30, 255]);
+        assert_eq!(at(50), [10, 20, 30, 128], "half of 255, rounded");
+        assert_eq!(at(25), [10, 20, 30, 64]);
+        assert_eq!(at(1), [10, 20, 30, 3]);
+        let clear = Picture::new(1, 1, vec![1, 2, 3, 0]);
+        assert_eq!(Watermark { opacity_percent: 50, ..mark(clear, Place::TopLeft) }.faded().bgra, [1, 2, 3, 0], "clear stays clear");
+    }
+
+    #[test]
     fn a_see_through_part_of_the_picture_lets_the_step_show_and_a_solid_part_covers_it() {
         // A 2 by 1 logo: the left pixel is clear, the right one solid blue (bgra).
         let logo = Picture::new(2, 1, vec![0, 0, 0, 0, 255, 0, 0, 255]);

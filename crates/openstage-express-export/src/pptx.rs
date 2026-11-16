@@ -741,6 +741,7 @@ mod tests {
             assert!(rels.contains("../media/logo.png"), "{name}: {rels}");
         }
         assert_eq!(z.names.iter().filter(|n| *n == "ppt/media/logo.png").count(), 1, "one file, used by every slide");
+        assert_eq!(z.names.iter().filter(|n| n.starts_with("ppt/media/logo")).count(), 1, "and no other copy of it");
         assert_eq!(z.get("ppt/media/logo.png"), Some(&logo.png[..]));
         // It sits at the foot, left of the slide number, and no bigger than the room for it.
         let cover = z.text(&slides[0]);

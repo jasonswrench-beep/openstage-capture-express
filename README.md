@@ -346,15 +346,51 @@ Tested on any computer (pure logic; run so far only on this Windows PC, nothing 
   bring them back with the Roboto page, so the real-engine bookmark test has not been seen to fail on that fault, only its
   checking function has (against the real doubled titles).
 
-Not built: M8 and everything else in the spec: capturing a window that has moved to another display, options on the
-Export screen for the GIF, PDF, Word and PowerPoint (it offers the formats and the picture width, JPG quality and preview, and the rest at their usual values), the language of the program's own words
-(English only), the program's icon on the `.exe` file that `OPEN EXPRESS.bat` runs from `target\` (the copies in the zip and the setup file have it), the program without a console box (it lets go of it when the window
-opens), first-run, WebP pictures, JPG pictures inside Markdown and JSON, the watermark, export templates, the optional logo on slides, and signing.
+**The round of 2026-11-15** (the development list's four items, on the core's capture crates at tag `capture-v0.1.0`; the three pins moved
+from OpenStage Author's commit 4c8d23f with no change to any code, checked file by file). Tested by the suite (1,008 tests) and the rule
+checks; what a person has to try is in `TESTING-TODO.md`. Nineteen deliberate faults were tried in the new code (a wrong column for
+the watermark, the logo left off every slide, a template that replaces another, a translation that takes the wrong argument, and others):
+17 were caught by a test at once, and the two that were not (the opacity arithmetic, a second copy of the logo file) got exact tests
+and are caught now.
+
+- **Packaging (item 1).** `build.rs` writes a Windows resource file by hand (no resource compiler, nothing downloaded) with the product
+  icon and the program's name and version, so `target\release\openstage-capture-express.exe` has the icon in Explorer, the taskbar and
+  Properties, not only the copies in the zip and the setup file. Read back with Windows: the icon is found, Properties says OpenStage
+  Capture Express 0.1.0-alpha.4. The program is now a window program, so no black console box appears. The scripts (`EXPORT DEMO.bat`,
+  `CHECK EXPRESS COMPUTER.bat`, `TEST EXPRESS CLICKS.bat`, `BUILD EXPRESS.bat`) run a second, console build of the same program,
+  `openstage-capture-express-cli.exe`, because a command prompt waits for a console program and for nothing else; it is not shipped.
+  Run from a batch file, its exit codes and its log redirects work, and `--version` printed into a real PowerShell tab. The Export screen
+  now has the options of each format (see `docs/guide-format.md`): the GIF's pace, width, title card, progress bar and loop; the paper,
+  turn, margins, cover, contents, page numbers, header and footer lines and a page for each step in the PDF; the same in Word; and the
+  cover, agenda, footer, slide numbers and notes of PowerPoint. They are kept in the settings.
+- **Sending to other programs (item 2).** Two new formats on the Export screen. *OpenExplainer book*: the guide as the "JSON with
+  images" file OpenExplainer documents, one chapter with the description, a numbered procedure with a picture on each step and the
+  content blocks between procedures; imported with OpenExplainer's own code (5 pictures, 6 blocks) and saved again as a project.
+  *OpenStage Author slides*: the PowerPoint file arranged for Author's PowerPoint import; Author's own deck reader read the demo's
+  file (7 slides, alt text, notes). Both are made from the finished pictures, so they carry no click positions and no control names.
+  Writing the capture format itself (C1) is not possible yet, because it is a format for recordings and a guide is pictures:
+  `CORE-REQUESTS.md` says what the core has to settle, and what Express will do when it does.
+- **The accessibility rules on the exports (item 3).** Not run: C2 is not in the core yet (priority 3, not started), and nothing of the
+  kind was built here. `CORE-REQUESTS.md` says what Express needs from it (a Rust crate or a program, the findings in WCAG 2.1 AA
+  terms, warn and never block). The exports' own tests, listed above, are not a rule engine and say nothing about WCAG criteria.
+- **Milestone 8 (item 4).** A *watermark* (a PNG over every exported picture, nine places, opacity, size, edge room; drawn into the
+  pixels, so in every format) and a *logo* in the corner of every PowerPoint slide. *Export templates*: a `.osexport` file with every
+  choice on the Export screen and a small logo inside it, saved beside the settings, used again, or sent to someone and used from a
+  file; never replaced or erased. *Interface languages*: English, German and French, chosen in Settings (or on the welcome page) and
+  shown at once; 670 texts in each catalog, the status line translated whole, and `tools/check_rules.py` fails if a text is missing a
+  translation. The words were written for this program and have not been read by someone who writes German or French as their own, and
+  a few sentences that fill in a changing part (a direction, a tool's name) still carry that part in English. *First run*: a welcome
+  page, once, with the language Windows uses chosen, the colours, where guides are kept and what the program does not do; a settings
+  file from before there was one is not welcomed again.
+
+Not built: capturing a window that has moved to another display, WebP pictures, JPG pictures inside Markdown and JSON, the capture
+format (C1) and the accessibility rules (C2), which wait on the core, and a program that is signed (the installer can be signed, see
+`docs/installer.md`).
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
 tagged (the export warns about that). The Word and PowerPoint files have not been run through Word's or PowerPoint's own
 accessibility checker or read with a screen reader, and Word and PowerPoint use Calibri without embedding it. Not yet run on an ARM64 PC. Not yet run by double-clicking from Explorer. The dark colour
-scheme of the web page has not been seen rendered. The icon files are copied in but not used by any program yet (milestone M7).
+scheme of the web page has not been seen rendered.
 `TESTING-TODO.md` lists what only a person can check.
 
 ## The window's look (the OpenStage suite's, 2026-11-11)
@@ -465,11 +501,12 @@ crates/
                                 writer); a made-up demo guide; the Roboto font files for the PDF (fonts/)
   openstage-express-windows/    Windows only: the PDF engine (WebView2); the mouse and keyboard hooks, UI Automation, pictures of the
                                 screen, hotkeys and the capture run that ties them together; the test window and synthetic input
-  openstage-express-app/        the program openstage-capture-express.exe: the egui window (Home, the capture bar and the editor, in src/ui,
+  openstage-express-app/        the program openstage-capture-express.exe (a window program) and the console build the scripts run: the egui window (Home, the capture bar and the editor, in src/ui,
                                 in the OpenStage suite's look: the navy bar, the menus and the command search),
                                 the capture bar and the saving of captured steps, the computer check, the click test,
                                 and the command-line export demo
 docs/guide-format.md            the guide format and the exports: the source of truth, kept equal to the code
+CORE-REQUESTS.md                what Express needs from the shared core and does not have yet (C1, C2)
 tools/check_rules.py            licence, header, writing-style and script checks
 assets/icon/                    the icon pack (SVG, PNG sizes, ICO)
 TESTING-TODO.md                 what only a person can check
@@ -494,6 +531,8 @@ TESTING-TODO.md                 what only a person can check
   export never replaces a file that is already there.
 - The format is the source of truth: change `docs/guide-format.md` in the same commit as any code that reads or writes it.
 - Use original code, templates, strings, artwork and file formats.
+- The words the window says are written in English in the code and go through `tr()`, `trf()`, `k()` or `tt()` (`crates/openstage-express-app/src/i18n`);
+  `tools/check_rules.py` fails if a text has no German or French translation or a translation leaves out a place the English has.- Nothing in the program, its words or its documents describes it as an alternative to a named product or compares it with one.
 - Anything Jason runs is a double-clickable `.bat`. Never say something works that has only compiled.
 
 For developers, in a shell: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,

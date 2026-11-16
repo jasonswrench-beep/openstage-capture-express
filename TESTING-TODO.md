@@ -349,7 +349,7 @@ Double-click `CHECK EXPRESS COMPUTER.bat` first, then `TEST EXPRESS CLICKS.bat`,
 - [ ] `tools/check-office.ps1` repeats the Office checks. Its Word half has not run in its final form (Word was open when it was
       tried): close Word, run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-office.ps1` from the Express folder
       after `EXPORT DEMO.bat`, and tell me if any line says FAIL.
-- [ ] The optional logo on slides (spec section 10.2) is not built.
+- [x] The optional logo on slides is built (see the round of 2026-11-15, below).
 
 ## The OpenStage suite's look (2026-11-11)
 
@@ -388,3 +388,103 @@ fresh clone. Not yet tried by a person:
       this computer and not use it. A network drive with a letter (Z:) should still work.
 - [ ] Open a folder from Express (after an export): it now opens through Windows' own way of opening a folder, not by running
       explorer by its name. It should look the same.
+
+## The round of 2026-11-15: packaging, other programs, watermark, templates, languages, first run
+
+Built and checked by the tests (1,008 passing, and the rule checks) and by the checks named below. Nothing here has been tried by a person.
+
+### Packaging (list item 1)
+
+- [ ] Double-click `OPEN EXPRESS.bat`, and double-click the program file itself in Explorer: **no black console box at all**, not even for
+      a moment. (Checked: the program file is a window program, and a command prompt started from a terminal tab showed `--version`.
+      Watching a double-click was not possible.)
+- [ ] The program's icon: in the window's title bar, the taskbar, the Start menu and on the file in Explorer at small and large sizes;
+      and Properties > Details says OpenStage Capture Express, 0.1.0-alpha.4. (Checked by reading the icon and the version out of the file
+      with Windows; how it looks was seen at 32 pixels only.)
+- [ ] Double-click `BUILD EXPRESS.bat`, `EXPORT DEMO.bat`, `CHECK EXPRESS COMPUTER.bat` and `TEST EXPRESS CLICKS.bat`. They now run
+      `openstage-capture-express-cli.exe`, a console build of the same program, so each should still show its words in its own window,
+      wait until it is done, and say PASS or what failed. (Checked: exit codes and a redirected log from a batch file; the four scripts
+      themselves were not run.)
+- [ ] Make a setup file and a zip (`MAKE EXPRESS INSTALLER.bat`, `PACK EXPRESS.bat`): they should hold only `openstage-capture-express.exe`,
+      not the `-cli` one, and its icon should still be there.
+
+### The options of each format
+
+- [ ] Open the Export screen, tick the animated GIF, the PDF, Word and PowerPoint, and look at their cards: are the words clear, is
+      the order what you would expect, is anything missing?
+- [ ] Make a PDF with Letter paper on its side, 30 mm margins, a cover page, a header and a footer line; a Word file on A5 with a new
+      page for each step; a PowerPoint file with the agenda slide and a footer line; a GIF at 5 seconds with the title card and the bar.
+      Open each in its real program. Only the default options were ever opened in Word and PowerPoint, and only the default PDF was printed
+      by the real WebView2 engine; the others are checked as XML and as the print page.
+
+### OpenExplainer and OpenStage Author (list item 2)
+
+- [ ] In OpenExplainer: Import an export, choose the `... (for OpenExplainer).zip` from an export. Is the chapter, its numbered steps, the
+      result lines and the pictures what you expect? Pictures with no description of their own should say "Needs a description". Run
+      Check the book. (Checked with OpenExplainer's own import code and by saving the result as a project, not in its window.)
+- [ ] In OpenStage Author: File > PowerPoint slides..., choose the `... (for OpenStage Author).pptx`, tick "Use speaker notes as
+      narration". (Checked with Author's own deck reader: 7 slides, alt text, notes; not in its window.)
+- [ ] Decide whether a PowerPoint file is enough for Author, or whether Author should read a guide's own folder. That needs the core's C1
+      for pictures (`CORE-REQUESTS.md`, item 1), and Author's practice lessons need the click's place, which a PowerPoint file does not carry.
+
+### The accessibility rules on the exports (list item 3)
+
+- [ ] Nothing to try: C2 is not in the core yet (`CORE-REQUESTS.md`, item 2). When it is, say how its findings should read in the Export
+      report.
+
+### Watermark, logo and templates (list item 4)
+
+- [ ] Choose a logo (a PNG, with a see-through background if you have one) with Choose a picture... (Windows' own dialog, never opened
+      by a person), turn the watermark on and look at each of the nine places, and each opacity and size, in the web page and in a PDF.
+      Is the default (bottom right, 30 percent, 20 percent wide) a good one? Is a PNG-only watermark enough, or do you want words as well?
+- [ ] Put the watermark on a guide that has a blur: the watermark should be on top of it, and it cannot be taken off afterwards. A copy
+      saved as one file should have none.
+- [ ] Tick "Put the picture in the corner of every PowerPoint slide" and open the file in PowerPoint: is the logo where it should be, and
+      does the accessibility checker read the words you typed for it?
+- [ ] Save a template, change the choices, use it, and look at what came back. Send the file to another computer (or another Windows
+      user), choose Use a template from a file..., and check the formats, the options and the logo. Open the templates folder from
+      the Export screen.
+
+### Interface languages (list item 4)
+
+- [ ] **Someone who writes German as their own, and someone who writes French as their own, should read the program's words.** They were
+      written for this program and have never been read by such a person: menus, buttons, the welcome page, the Export screen, Settings, the
+      status line. The translators flagged these: German "About and licences" is "Ueber und Lizenzen" (Info und Lizenzen may read better),
+      "the usual" is "(Standard)", crop is "Ausschnitt", close-up "Nahansicht", a run of steps "Reihe"; French "the usual" is "par defaut",
+      choose is "selectionner" for steps and "choisir" for options, crop is "recadrage", the focused view "vue rapprochee", Escape is
+      "Echap" and Shift "Maj"; key names such as Alt+Up are kept as the English.
+- [ ] Words that are still English in German and French: a few status sentences that fill in a changing part (a direction such as up or
+      down, the name of a kind of mark, on or off), the click test's own words, the licence texts, and messages that Windows itself gives.
+      Say which of them matter.
+- [ ] Settings > Language of the program: choose Deutsch and Francais and look at every screen once, at the smallest window (900 by 560)
+      and at 200 percent scaling: do longer words fit? With Narrator or NVDA and a German or French voice, are the names of the controls
+      the translated words?
+- [ ] The language of step titles (Settings > Capturing) and the language of the program are two choices, on purpose. Say whether that is
+      confusing and the two should be joined.
+
+### The first run
+
+- [ ] Rename `%APPDATA%\OpenStage Capture Express\settings.json` (or run on a PC that has never had Express): the program should start on the
+      welcome page, in German or French when Windows is set to that, else English. Press Start; close the program; open it again: no
+      welcome. Then the same with Look at the example guide first. (Checked by the window tests with a stand-in for Windows' language;
+      the real Windows language call was not tried.)
+- [ ] A person who already has a settings file from alpha 4 should not be welcomed again.
+- [ ] Is the welcome page too long or too short? It says what the program does and does not do, and asks the language, the colours and
+      the guides folder.
+
+### The shared core
+
+- [ ] The three capture crates now come from the core at tag `capture-v0.1.0`, no longer from OpenStage Author's repository. They were
+      compared file by file with the old ones (the same apart from line endings) and all 1,008 tests pass on them. Build once from a fresh
+      clone on another computer to be sure nothing beside the folder is needed.
+
+### Decisions that are mine until you say otherwise
+
+- A template holds every choice on the Export screen, not one format's; one for a single format is a template with only that format
+  ticked. The logo goes inside it when it is 2 MB or less. A template is never replaced or erased: a taken name gets `(2)`.
+- The watermark is a PNG picture only (no words), the same picture as the PowerPoint logo, and is not put on a one-file copy.
+- OpenExplainer's procedure numbering starts again after a content block; a picture's alt text is left empty when it is only the step's
+  title; click positions and control names are not sent. Author gets a PowerPoint file because that is the way in it already has.
+- The program's language is English until chosen; Windows' language is used only to pick the first choice on the welcome page.
+- Texts in the status line are translated whole after they are made, by their shape, so a few sentences keep an English word where the
+  program fills something in. Making every such part its own translated word is possible and was not done.

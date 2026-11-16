@@ -338,6 +338,24 @@ Every export is made from the same plan, so they agree about which steps are in,
 - **The words.** A picture's alt text is the author's `imageDescription`, or the step title if there is none. Words drawn on a
   picture by a `text` mark that are not also in the step's title, description or alt text produce a warning, because a screen
   reader cannot read a picture.
+- **Options of a format** (the Export screen, kept in the settings as `exportOptions`). The animated GIF: how long each step stays
+  (1, 2, 3, 5 or 8 seconds), how wide (480, 640, 800, 1024 or 1280), a first frame with the title, a bar that fills along the bottom, and
+  whether it plays again and again. The PDF and Word: the paper (A4, Letter, A3, A5 or Legal), upright or on its side, the margins (10,
+  15, 20, 25, 30 or 40 mm), the contents list, page numbers, each step on a new page; the PDF also a cover page and a line at the top and
+  one at the bottom of every page. PowerPoint: a first slide, a slide that lists the steps, slide numbers, the full description in the
+  notes and a line at the foot. A number that is not on offer is shown as, and used as, the nearest one that is; a line of text is kept to
+  120 letters.
+- **The watermark** (spec 10.2). A PNG picture of the person's own, laid over every exported picture after it is scaled and before it is
+  written, in one of nine places, at 15, 30, 50, 75 or 100 percent solid, 10 to 40 percent of the picture's width, with 0 to 8 percent
+  of the width between it and the edge. Because it is drawn into the pixels it is in every format that holds the step pictures (the web
+  page, Markdown, JSON, the pictures, the GIF, the PDF, Word, PowerPoint and the two books below) and cannot be taken off afterwards.
+  A one-file copy of a guide has none: it is the guide, not an export. A picture with see-through parts is laid over by how solid each
+  pixel is. The PowerPoint logo is the same picture in the corner of every slide, with words for a screen reader that the person types.
+- **Export templates** (spec 10.2, X9). `Name.osexport` in the folder `Export templates` beside the settings file is JSON: `format`
+  (`OpenStage Capture Express export template`), `version` (1; a newer one is refused in words), `name`, the formats ticked, the width and
+  JPG quality, the kind of picture inside documents, every option above and the watermark, and the logo picture as base64 when it is
+  2 MB or less (so it works on another computer). The folder exports go into, whether to open it afterwards and a preview are not in it.
+  A template is never replaced (`Name (2).osexport`) or erased by the program.
 - **Nothing is replaced.** An export is written into a folder and stops, without replacing anything, if a file of the same name
   is already there.
 
@@ -351,6 +369,8 @@ Every export is made from the same plan, so they agree about which steps are in,
 | PDF | `<title>.pdf`, made by the WebView2 engine on Windows. See below. |
 | Word | `<title>.docx`, written by Express as Office Open XML. See below. |
 | PowerPoint | `<title>.pptx`, one slide for each step. See below. |
+| OpenExplainer | `<title> (for OpenExplainer).zip`: `book.json` and `images/pic-NNNN.png`. See below. |
+| OpenStage Author | `<title> (for OpenStage Author).pptx`: the PowerPoint file arranged for Author's *PowerPoint slides* import. See below. |
 
 ### The PDF export
 
@@ -444,14 +464,36 @@ A `.pptx` written by Express itself, in the same way.
 - **Order for a screen reader:** title, picture, description, footer, slide number.
 - **Options.** A cover slide with the guide's title and description (on by default); agenda slides listing the top-level steps, ten
   to a slide (off by default); a footer line; slide numbers (on); speaker notes (on).
-- **Fonts and colours.** Calibri, not embedded; the theme uses the same colours as the web page. The spec's optional logo is not
-  built.
+- **Fonts and colours.** Calibri, not embedded; the theme uses the same colours as the web page. The optional logo (a PNG, in the
+  foot of every slide between the footer line and the slide number, no bigger than 1.3 by 0.33 million EMU and never enlarged) is
+  `PptxOptions::logo`; its picture is one file, `ppt/media/logo.png`, which every slide names.
 - **Checked in PowerPoint** (Microsoft 365, version 16) on 2026-11-01: it opens with no repair prompt, with seven slides at
   960 by 540 points, each with its title, the right layout, every picture's alt text, the slide numbers and the notes.
 - **`tools/check-office.ps1`** opens the demo's Word and PowerPoint files in the real programs and checks these things again. It
   skips a program that is already open, so it cannot disturb a person's work.
 
+### The OpenExplainer export
+
+The guide as the "JSON with images" file OpenExplainer documents (its `docs/exports.md`), which its *Import an export* reads:
+a ZIP (stored, not squeezed) holding `book.json` (`format` `openexplainer-export`, `exportVersion` 1, `projectVersion` 21) and
+`images/pic-0001.png` and so on. The guide is one chapter. Its description is a paragraph for each line; its steps are numbered
+procedures with a picture on each, the step's description as the result line, and substeps as steps one after the other (a procedure
+has no levels); a content block is a heading and paragraphs between two procedures (so numbering starts again after it). The pictures are
+the finished ones, marks and watermark drawn in, so OpenExplainer gets no click position and no control name and draws no circle of its
+own. A picture has alt text only when the author wrote some: OpenExplainer shows one with none as "Needs a description", which is
+truer than the step's title. The export was imported with OpenExplainer's own code on 2026-11-15 (5 pictures, 6 blocks) and saved
+again as a project without complaint; OpenExplainer upgrades older layouts and refuses newer ones in words.
+
+### The OpenStage Author export
+
+The PowerPoint file made with `author_options()`: a cover slide, no agenda, no slide numbers or footer (Author brings neither in), and the
+full description in the speaker notes, which Author can use as narration. Author's *PowerPoint slides* (File menu) brings in each slide
+as a slide with its title, the picture and its alt text. Author's own deck reader read the demo's file on 2026-11-15: 7 slides, the
+pictures with their alt text, the notes. Author's step lessons (watch, practice, test) need the click's place and the video of a
+recording, which a guide of pictures does not carry: that is what C1 is for (`CORE-REQUESTS.md`).
+
 ## Not in this document yet
 
-The settings file is written when it is built. WebP is not built (spec S3). A window that is dragged to another display while it is being
+The settings file is written when it is built (the language of the program's words is `interfaceLanguage`: `en`, `de` or `fr`, and
+`firstRunDone` says the welcome page has been seen; a settings file from before there was one means it has). WebP is not built (spec S3). A window that is dragged to another display while it is being
 captured has no picture (its steps are left out, with a message).
