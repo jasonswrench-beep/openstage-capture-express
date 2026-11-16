@@ -20,7 +20,8 @@ use openstage_express_export::picture::PictureSource;
 use openstage_express_export::plan::{
     plan as make_plan, DocumentPictures, ExportOptions, Plan, Preview, DEFAULT_IMAGE_WIDTH,
 };
-use openstage_express_export::pptx::{export_pptx, PptxOptions};
+use openstage_express_export::openexplainer::export_openexplainer;
+use openstage_express_export::pptx::{export_author, export_pptx, PptxOptions};
 use openstage_express_export::share::{make_copy, CopyOptions};
 use openstage_express_export::{Export, OutFile};
 
@@ -39,11 +40,15 @@ pub enum Format {
     Pdf,
     Word,
     PowerPoint,
+    /// A book OpenExplainer imports.
+    OpenExplainer,
+    /// A PowerPoint file arranged for OpenStage Author's PowerPoint import.
+    Author,
 }
 
 impl Format {
     /// All of them, in the order the dialog lists them.
-    pub const ALL: [Format; 9] = [
+    pub const ALL: [Format; 11] = [
         Format::Html,
         Format::Markdown,
         Format::Json,
@@ -53,6 +58,8 @@ impl Format {
         Format::Pdf,
         Format::Word,
         Format::PowerPoint,
+        Format::OpenExplainer,
+        Format::Author,
     ];
 
     /// The name on the checkbox.
@@ -67,6 +74,8 @@ impl Format {
             Format::Pdf => "PDF",
             Format::Word => "Word document",
             Format::PowerPoint => "PowerPoint presentation",
+            Format::OpenExplainer => "OpenExplainer book",
+            Format::Author => "OpenStage Author slides",
         }
     }
 
@@ -82,6 +91,8 @@ impl Format {
             Format::Pdf => "a tagged document with contents and bookmarks, made by Microsoft Edge's engine",
             Format::Word => "an editable document with headings, a contents list and the pictures",
             Format::PowerPoint => "one slide for each step, with the text in the notes",
+            Format::OpenExplainer => "the steps and pictures as a book to bring into OpenExplainer (its Import an export)",
+            Format::Author => "a PowerPoint file to bring into OpenStage Author (its PowerPoint slides), with the text in the notes",
         }
     }
 
@@ -97,6 +108,8 @@ impl Format {
             Format::Pdf => "pdf",
             Format::Word => "word",
             Format::PowerPoint => "powerpoint",
+            Format::OpenExplainer => "openexplainer",
+            Format::Author => "author",
         }
     }
 }
@@ -325,6 +338,10 @@ pub fn make_with(
             Format::PowerPoint => {
                 export_pptx(plan, &options.pptx).map_err(|e| format!("{}: {e}", format.name()))?
             }
+            Format::OpenExplainer => {
+                export_openexplainer(plan).map_err(|e| format!("{}: {e}", format.name()))?
+            }
+            Format::Author => export_author(plan).map_err(|e| format!("{}: {e}", format.name()))?,
             Format::Pdf => match pdf {
                 Some(renderer) => {
                     export_pdf(plan, &options.pdf, renderer).map_err(|e| format!("{}: {e}", format.name()))?
@@ -554,6 +571,28 @@ mod tests {
         assert!(gif.windows(6).any(|w| w[..3] == [0x21, 0xF9, 0x04] && [w[4], w[5]] == 800u16.to_le_bytes()), "8 seconds");
     }
 
+    #[test]
+    fn the_openexplainer_book_and_the_author_slides_are_made_in_folders_of_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let selection = Selection::none_then(&[Format::OpenExplainer, Format::Author]);
+        let report =
+            make(&the_plan(), &selection, &GifOptions::default(), DEFAULT_JPEG_QUALITY, &BlockText, None, dir.path())
+                .unwrap();
+        assert_eq!(report.made, [(Format::OpenExplainer, 1), (Format::Author, 1)]);
+        assert_eq!(file_names(&dir.path().join("openexplainer")), ["How to submit an assignment (for OpenExplainer).zip"]);
+        assert_eq!(file_names(&dir.path().join("author")), ["How to submit an assignment (for OpenStage Author).pptx"]);
+        assert_eq!(Format::OpenExplainer.folder(), "openexplainer");
+        assert_eq!(Format::Author.folder(), "author");
+        // Their words say who they are for.
+        assert!(Format::OpenExplainer.name().contains("OpenExplainer") && Format::Author.name().contains("OpenStage Author"));
+        // The deck for Author has no slide numbers and keeps the notes (what Author can use as narration).
+        let deck = std::fs::read(dir.path().join("author").join("How to submit an assignment (for OpenStage Author).pptx")).unwrap();
+        let parts = openstage_express_export::zip::read(&deck, &Default::default()).unwrap();
+        assert!(parts.iter().any(|(n, _)| n.starts_with("ppt/notesSlides/")), "speaker notes");
+        let slide = String::from_utf8(parts.iter().find(|(n, _)| n == "ppt/slides/slide2.xml").unwrap().1.clone()).unwrap();
+        assert!(!slide.contains("type=\"sldNum\""), "no slide number");
+    }
+
     fn the_plan() -> Plan {
         let d = demo();
         plan(&d.document.guide, &d.pictures, &BlockText, &ExportOptions::default())
@@ -664,7 +703,8 @@ mod tests {
             dir.path(),
         )
         .unwrap();
-        assert_eq!(report.made.len(), 9);
+        assert_eq!(report.made.len(), Format::ALL.len());
+        assert_eq!(Format::ALL.len(), 11, "nine formats of the guide, the book for OpenExplainer and the slides for Author");
         for format in Format::ALL {
             assert!(dir.path().join(format.folder()).is_dir(), "{}", format.folder());
         }

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Exports for OpenStage Capture Express, with no Windows code in it (spec section 10).
 //!
-//! Built so far (milestone M4): HTML ([`html`]), Markdown ([`markdown`]), JSON ([`json`]), a folder of pictures ([`images`])
-//! and an animated GIF ([`gif`]). Each one takes the same [`plan::Plan`], so they agree about which steps are exported, how
-//! they are numbered and what every picture looks like. PDF ([`pdf`]) writes a print page and hands it to a renderer, which
-//! on Windows is the WebView2 engine in `openstage-express-windows`. Still to come: Word and PowerPoint.
+//! HTML ([`html`]), Markdown ([`markdown`]), JSON ([`json`]), a folder of pictures ([`images`]) and an animated GIF ([`gif`]).
+//! Each one takes the same [`plan::Plan`], so they agree about which steps are exported, how they are numbered and what every
+//! picture looks like. PDF ([`pdf`]) writes a print page and hands it to a renderer, which on Windows is the WebView2 engine in
+//! `openstage-express-windows`. Word ([`docx`]) and PowerPoint ([`pptx`]) are written here as Office Open XML. The other OpenStage
+//! programs are reached with a book for OpenExplainer ([`openexplainer`]) and a PowerPoint file arranged for OpenStage Author
+//! ([`pptx::export_author`]).
 //!
 //! An export is a list of files in memory ([`Export`]); writing them to a folder is a separate step that refuses to
 //! replace a file that already exists, so nothing a person has is ever overwritten.
@@ -22,6 +24,7 @@ pub mod jpeg;
 pub mod json;
 pub mod markdown;
 pub mod office;
+pub mod openexplainer;
 pub mod pdf;
 pub mod picture;
 pub mod plan;

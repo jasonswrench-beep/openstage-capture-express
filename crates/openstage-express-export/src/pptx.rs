@@ -526,6 +526,31 @@ pub fn export_pptx(plan: &Plan, options: &PptxOptions) -> Result<Export, OfficeE
     })
 }
 
+/// What a deck for OpenStage Author is made with. Author's *PowerPoint slides* import brings in every slide it is given (and lets the
+/// person leave some out), a picture with its alt text, and the speaker notes if the person asks for them as narration. It brings in
+/// no slide number or footer, so none is written, and an agenda slide would be a slide of its own, so there is none.
+pub fn author_options() -> PptxOptions {
+    PptxOptions {
+        cover_slide: true,
+        agenda_slide: false,
+        footer_text: String::new(),
+        slide_numbers: false,
+        speaker_notes: true,
+    }
+}
+
+/// The PowerPoint file for OpenStage Author: [`export_pptx`] with [`author_options`], in a file whose name says who it is for.
+pub fn export_author(plan: &Plan) -> Result<Export, OfficeError> {
+    let bytes = zip::build(&pptx_parts(plan, &author_options()))?;
+    Ok(Export {
+        files: vec![OutFile {
+            path: format!("{} (for OpenStage Author).pptx", sanitise_folder_name(&plan.title)),
+            bytes,
+        }],
+        warnings: plan.warnings.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
