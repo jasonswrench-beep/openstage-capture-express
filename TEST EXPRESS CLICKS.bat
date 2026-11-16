@@ -33,7 +33,7 @@ if errorlevel 1 goto failed_build
 echo.
 echo Starting the test. Hands off the mouse and keyboard now...
 echo.
-"%~dp0target\release\openstage-capture-express.exe" test-clicks --out "%~dp0clicks-test-output" --wait 120 > "%~dp0clicks-test-log.txt" 2>&1
+"%~dp0target\release\openstage-capture-express-cli.exe" test-clicks --out "%~dp0clicks-test-output" --wait 120 > "%~dp0clicks-test-log.txt" 2>&1
 set "RESULT=%ERRORLEVEL%"
 type "%~dp0clicks-test-log.txt"
 echo.

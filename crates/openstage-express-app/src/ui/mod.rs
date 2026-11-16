@@ -466,7 +466,7 @@ pub fn run(options: DevOptions) -> eframe::Result {
                         Box::new(|start| {
                             openstage_express_windows::dialogs::choose_folder(start, "Choose where to put the exports")
                         }),
-                        Box::new(|folder| openstage_express_windows::system::open_folder(folder)),
+                        Box::new(openstage_express_windows::system::open_folder),
                     )
                     .with_notifications(Box::new(openstage_express_windows::system::open_notification_settings))
                     .with_updates(

@@ -5345,3 +5345,190 @@ fn the_about_screen_credits_the_icons_and_their_licences() {
         assert!(said.iter().any(|s| s.contains(words)), "the About screen says {words:?}");
     }
 }
+
+// ---- the Export screen's options for each format
+
+/// The text of one part of a file the export made (a Word or PowerPoint file is a ZIP file of parts).
+fn part_of(file: &std::path::Path, part: &str) -> String {
+    use openstage_express_export::zip::{read, ReadLimits};
+    let parts = read(&std::fs::read(file).unwrap(), &ReadLimits::default()).unwrap();
+    let (_, bytes) = parts.into_iter().find(|(name, _)| name == part).unwrap_or_else(|| panic!("no part {part}"));
+    String::from_utf8(bytes).unwrap()
+}
+
+/// The one run folder an export made inside `exports` for the example guide.
+fn only_run(exports: &std::path::Path) -> PathBuf {
+    let runs = files_in(&exports.join("How to submit an assignment"));
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    runs.into_iter().next().unwrap()
+}
+
+/// The one file in a format's folder of a run.
+fn only_file(run: &std::path::Path, format_folder: &str) -> PathBuf {
+    let files = files_in(&run.join(format_folder));
+    assert_eq!(files.len(), 1, "{files:?}");
+    files.into_iter().next().unwrap()
+}
+
+#[test]
+fn each_format_that_has_options_shows_them_only_while_it_is_chosen_and_names_each_for_its_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.app.export.can_pdf = true;
+    h.invoke(Role::Button, "Export");
+    // A web page and Word to begin with here; take Word away and put the PDF in: the PDF has options, the web page has none.
+    h.invoke(Role::CheckBox, "Word document");
+    h.invoke(Role::CheckBox, "PDF");
+    h.find(Role::Heading, "Options for the PDF");
+    for absent in ["Options for the animated GIF", "Options for the Word document", "Options for the PowerPoint presentation"] {
+        assert!(!h.has(Role::Heading, absent), "{absent} shows before its format is chosen");
+    }
+    assert!(is_on(&h, Role::RadioButton, "PDF paper size A4"));
+    assert!(is_on(&h, Role::RadioButton, "PDF paper turned: Upright (portrait)"));
+    assert!(is_on(&h, Role::RadioButton, "PDF margin 20 millimetres"));
+    assert!(is_on(&h, Role::CheckBox, "PDF: a contents list that links to each step"));
+    assert!(is_on(&h, Role::CheckBox, "PDF: page numbers"));
+    assert!(!is_on(&h, Role::CheckBox, "PDF: a cover page with the title and description"));
+    assert_eq!(h.node(h.find(Role::TextInput, "PDF: the line at the top of every page")).value(), Some(""));
+    h.invoke(Role::CheckBox, "Animated GIF");
+    h.invoke(Role::CheckBox, "Word document");
+    h.invoke(Role::CheckBox, "PowerPoint presentation");
+    for heading in
+        ["Options for the animated GIF", "Options for the PDF", "Options for the Word document", "Options for the PowerPoint presentation"]
+    {
+        h.find(Role::Heading, heading);
+    }
+    // The same words on two formats are two controls, each named for its format.
+    h.find(Role::CheckBox, "Word: page numbers");
+    h.find(Role::CheckBox, "PDF: page numbers");
+    assert!(is_on(&h, Role::RadioButton, "GIF: each step stays 3 seconds"));
+    assert!(is_on(&h, Role::RadioButton, "GIF: 800 pixels across"));
+    assert!(is_on(&h, Role::CheckBox, "GIF: play again and again"));
+    assert!(!is_on(&h, Role::CheckBox, "GIF: start with a picture of the guide's title"));
+    assert!(is_on(&h, Role::RadioButton, "Word margin 25 millimetres"));
+    assert!(is_on(&h, Role::CheckBox, "PowerPoint: slide numbers"));
+    assert!(is_on(&h, Role::CheckBox, "PowerPoint: the whole description of each step in its speaker notes"));
+    assert!(!is_on(&h, Role::CheckBox, "PowerPoint: a slide that lists the steps"));
+    // Un-choosing a format takes its options away.
+    h.invoke(Role::CheckBox, "Animated GIF");
+    assert!(!h.has(Role::Heading, "Options for the animated GIF"));
+    // They sit under the formats and above the picture choices, in reading order.
+    let at = |role: Role, words: &str| h.order.iter().position(|id| *id == h.find(role, words)).unwrap();
+    let order = [
+        at(Role::CheckBox, "PowerPoint presentation"),
+        at(Role::Heading, "Options for the PDF"),
+        at(Role::Heading, "Options for the Word document"),
+        at(Role::Heading, "Options for the PowerPoint presentation"),
+        at(Role::Heading, "How wide the pictures are"),
+    ];
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+}
+
+#[test]
+fn every_option_can_be_reached_and_changed_with_the_keyboard_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    h.invoke(Role::CheckBox, "PowerPoint presentation");
+    h.focus_on(Role::Button, "Back to the guide");
+    let mut seen = Vec::new();
+    for _ in 0..140 {
+        h.key(Key::Tab, NO_MODS);
+        seen.extend(h.focused_words());
+    }
+    for name in [
+        "Word paper size Legal",
+        "Word margin 40 millimetres",
+        "Word: start every step on a new page",
+        "PowerPoint: a slide that lists the steps",
+        "PowerPoint: the line at the foot of every slide",
+    ] {
+        assert!(seen.iter().any(|s| s == name), "the keyboard never reached {name:?}: {seen:?}");
+    }
+    h.focus_on(Role::RadioButton, "Word paper size Letter");
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::RadioButton, "Word paper size Letter") && !is_on(&h, Role::RadioButton, "Word paper size A4"));
+    assert_eq!(h.focused_words().as_deref(), Some("Word paper size Letter"), "the keyboard stays where it was");
+    h.focus_on(Role::CheckBox, "PowerPoint: a slide that lists the steps");
+    h.key(Key::Space, NO_MODS);
+    assert!(is_on(&h, Role::CheckBox, "PowerPoint: a slide that lists the steps"));
+}
+
+#[test]
+fn the_options_chosen_on_the_screen_reach_the_word_file_the_presentation_and_the_gif() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut h, _) = export_harness(dir.path(), None);
+    h.invoke(Role::Button, "Export");
+    for name in ["Web page", "Animated GIF", "PowerPoint presentation"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    // Word is on to begin with (this computer pretends to have no PDF engine).
+    h.invoke(Role::RadioButton, "Word paper size Letter");
+    h.invoke(Role::RadioButton, "Word paper turned: On its side (landscape)");
+    h.invoke(Role::CheckBox, "Word: page numbers");
+    h.invoke(Role::CheckBox, "PowerPoint: a first slide with the title and description");
+    h.invoke(Role::CheckBox, "PowerPoint: a slide that lists the steps");
+    type_in_box(&mut h, "PowerPoint: the line at the foot of every slide", "  Team   guide ");
+    h.invoke(Role::RadioButton, "GIF: each step stays 5 seconds");
+    h.invoke(Role::RadioButton, "GIF: 640 pixels across");
+    h.invoke(Role::CheckBox, "GIF: start with a picture of the guide's title");
+    h.invoke(Role::CheckBox, "GIF: play again and again");
+    h.invoke(Role::Button, "Export 3 formats");
+    wait_for_export(&mut h);
+    let said = h.status();
+    assert!(said.starts_with("Exported 3 formats to "), "{said}");
+    let run = only_run(dir.path());
+    // Word: Letter paper on its side, and no page numbers.
+    let word = only_file(&run, "word");
+    let document = part_of(&word, "word/document.xml");
+    assert!(document.contains("<w:pgSz w:w=\"15840\" w:h=\"12240\" w:orient=\"landscape\"/>"), "{document}");
+    assert!(!document.contains("footerReference"), "page numbers were turned off");
+    // PowerPoint: no cover slide, an agenda slide first, and the footer line, tidied.
+    let deck = only_file(&run, "powerpoint");
+    let first = part_of(&deck, "ppt/slides/slide1.xml");
+    assert!(first.contains("<a:t>Contents</a:t>"), "the agenda comes first now there is no cover: {first}");
+    assert!(first.contains("<a:t>Team guide</a:t>"), "the footer line, with its spaces tidied: {first}");
+    // The GIF: every frame stays 5 seconds, there is a title card as well as the steps, and it does not loop.
+    let gif = std::fs::read(only_file(&run, "gif")).unwrap();
+    let delays: Vec<[u8; 2]> =
+        gif.windows(6).filter(|w| w[..3] == [0x21, 0xF9, 0x04]).map(|w| [w[4], w[5]]).collect();
+    let d = openstage_express_export::demo::demo();
+    let frames = openstage_express_export::plan::plan(
+        &d.document.guide,
+        &d.pictures,
+        &openstage_capture_render::BlockText,
+        &openstage_express_export::ExportOptions::default(),
+    )
+    .steps
+    .len();
+    assert_eq!(delays.len(), frames + 1, "a frame for each step (a card when it has no picture) and one for the title");
+    assert!(delays.iter().all(|d| *d == 500u16.to_le_bytes()), "5 seconds is 500 hundredths: {delays:?}");
+    assert_eq!(u16::from_le_bytes([gif[6], gif[7]]), 640, "640 pixels across");
+    assert!(!gif.windows(11).any(|w| w == b"NETSCAPE2.0"), "it plays once");
+}
+
+#[test]
+fn the_options_chosen_are_kept_in_the_settings_and_are_there_the_next_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = picture_harness(dir.path(), AppSettings::default());
+    h.invoke(Role::Button, "Export");
+    for name in ["Animated GIF", "PowerPoint presentation"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::RadioButton, "GIF: each step stays 8 seconds");
+    h.invoke(Role::CheckBox, "PowerPoint: a slide that lists the steps");
+    type_in_box(&mut h, "PowerPoint: the line at the foot of every slide", "Team");
+    h.settle();
+    let path = dir.path().join("settings.json");
+    let kept = crate::settings::load(&path).0;
+    assert_eq!(kept.export_options.gif.seconds, 8);
+    assert!(kept.export_options.powerpoint.agenda_slide);
+    assert_eq!(kept.export_options.powerpoint.footer_text, "Team");
+    // Another run of the program, from the saved settings.
+    let mut again = picture_harness(dir.path(), kept);
+    again.invoke(Role::Button, "Export");
+    assert!(is_on(&again, Role::RadioButton, "GIF: each step stays 8 seconds"));
+    assert!(!is_on(&again, Role::RadioButton, "GIF: each step stays 3 seconds"));
+    assert!(is_on(&again, Role::CheckBox, "PowerPoint: a slide that lists the steps"));
+    assert_eq!(again.node(again.find(Role::TextInput, "PowerPoint: the line at the foot of every slide")).value(), Some("Team"));
+}

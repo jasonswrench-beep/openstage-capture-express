@@ -24,6 +24,7 @@ use openstage_express_export::pptx::{export_pptx, PptxOptions};
 use openstage_express_export::share::{make_copy, CopyOptions};
 use openstage_express_export::{Export, OutFile};
 
+use crate::export_options::ExportChoices;
 use crate::settings::DocumentPicturesChoice;
 
 /// One kind of export the person can choose.
@@ -196,6 +197,27 @@ impl PictureChoices {
     }
 }
 
+/// The options of the four formats that have any, as the export crate wants them.
+#[derive(Debug, Clone, Default)]
+pub struct FormatOptions {
+    pub gif: GifOptions,
+    pub pdf: PdfOptions,
+    pub docx: DocxOptions,
+    pub pptx: PptxOptions,
+}
+
+impl FormatOptions {
+    /// What the Export screen chose.
+    pub fn from_choices(choices: &ExportChoices) -> FormatOptions {
+        FormatOptions {
+            gif: choices.gif_options(),
+            pdf: choices.pdf_options(),
+            docx: choices.docx_options(),
+            pptx: choices.pptx_options(),
+        }
+    }
+}
+
 /// What a run made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
@@ -272,6 +294,20 @@ pub fn make(
     pdf: Option<&dyn PdfRenderer>,
     folder: &Path,
 ) -> Result<Report, String> {
+    let options = FormatOptions { gif: gif.clone(), ..FormatOptions::default() };
+    make_with(plan, selection, &options, jpg_quality, text, pdf, folder)
+}
+
+/// [`make`] with the options of every format that has any (the paper of a PDF, the pace of a GIF, the first slide of a presentation).
+pub fn make_with(
+    plan: &Plan,
+    selection: &Selection,
+    options: &FormatOptions,
+    jpg_quality: u8,
+    text: &dyn TextRenderer,
+    pdf: Option<&dyn PdfRenderer>,
+    folder: &Path,
+) -> Result<Report, String> {
     let mut skipped = Vec::new();
     let mut made = Vec::new();
     let mut warnings: Vec<String> = plan.warnings.clone();
@@ -282,16 +318,16 @@ pub fn make(
             Format::Json => export_json(plan),
             Format::Images => export_images(plan),
             Format::Jpg => export_images_as(plan, ImageFormat::Jpeg { quality: jpg_quality }),
-            Format::Gif => export_gif(plan, gif, text),
+            Format::Gif => export_gif(plan, &options.gif, text),
             Format::Word => {
-                export_docx(plan, &DocxOptions::default()).map_err(|e| format!("{}: {e}", format.name()))?
+                export_docx(plan, &options.docx).map_err(|e| format!("{}: {e}", format.name()))?
             }
             Format::PowerPoint => {
-                export_pptx(plan, &PptxOptions::default()).map_err(|e| format!("{}: {e}", format.name()))?
+                export_pptx(plan, &options.pptx).map_err(|e| format!("{}: {e}", format.name()))?
             }
             Format::Pdf => match pdf {
                 Some(renderer) => {
-                    export_pdf(plan, &PdfOptions::default(), renderer).map_err(|e| format!("{}: {e}", format.name()))?
+                    export_pdf(plan, &options.pdf, renderer).map_err(|e| format!("{}: {e}", format.name()))?
                 }
                 None => {
                     skipped.push((format, NO_PDF_ENGINE.to_string()));
@@ -313,6 +349,8 @@ pub struct Job {
     pub selection: Selection,
     /// How wide the pictures are, how good the JPGs are, and whether this is a preview.
     pub choices: PictureChoices,
+    /// What was chosen for the GIF, the PDF, Word and PowerPoint.
+    pub options: ExportChoices,
     /// The new folder everything goes into.
     pub folder: PathBuf,
 }
@@ -336,10 +374,10 @@ pub fn spawn(job: Job) -> Receiver<Result<Report, String>> {
         let text = crate::text::renderer();
         let the_plan = make_plan(&job.guide, &*job.pictures, text, &job.choices.export_options());
         let pdf = if job.selection.contains(Format::Pdf) { system_pdf() } else { None };
-        let result = make(
+        let result = make_with(
             &the_plan,
             &job.selection,
-            &GifOptions::default(),
+            &FormatOptions::from_choices(&job.options),
             job.choices.jpg_quality,
             text,
             pdf.as_deref().map(|p| p as &dyn PdfRenderer),
@@ -462,6 +500,60 @@ mod tests {
         }
     }
 
+    /// A PDF engine that keeps the print page it was given.
+    struct Recording(std::cell::RefCell<String>);
+
+    impl PdfRenderer for Recording {
+        fn render(&self, page: &PrintPage<'_>) -> Result<Vec<u8>, RenderError> {
+            *self.0.borrow_mut() = page.html.to_string();
+            StandIn.render(page)
+        }
+    }
+
+    #[test]
+    fn the_options_chosen_for_each_format_reach_the_print_page_the_word_file_the_deck_and_the_gif() {
+        use crate::export_options::{Paper, Turn};
+        let mut choices = ExportChoices::default();
+        choices.pdf.paper = Paper::Legal;
+        choices.pdf.turn = Turn::Landscape;
+        choices.pdf.margin_mm = 30;
+        choices.pdf.cover_page = true;
+        choices.pdf.header_text = "Help desk".to_string();
+        choices.pdf.footer_text = "Draft".to_string();
+        choices.word.paper = Paper::A5;
+        choices.powerpoint.agenda_slide = true;
+        choices.gif.seconds = 8;
+        let recording = Recording(Default::default());
+        let dir = tempfile::tempdir().unwrap();
+        let selection = Selection::none_then(&[Format::Pdf, Format::Word, Format::PowerPoint, Format::Gif]);
+        let report = make_with(
+            &the_plan(),
+            &selection,
+            &FormatOptions::from_choices(&choices),
+            DEFAULT_JPEG_QUALITY,
+            &BlockText,
+            Some(&recording),
+            dir.path(),
+        )
+        .unwrap();
+        assert_eq!(report.made.len(), 4, "{report:?}");
+        let page = recording.0.borrow().clone();
+        assert!(page.contains("@page{size:legal landscape;margin:30mm;"), "the paper, its turn and its margin");
+        assert!(page.contains("class=\"cover\""), "the cover page");
+        assert!(page.contains("\"Help desk\"") && page.contains("\"Draft\""), "the header and the footer lines");
+        let word = std::fs::read_dir(dir.path().join("word")).unwrap().next().unwrap().unwrap().path();
+        let word_bytes = std::fs::read(word).unwrap();
+        let parts = openstage_express_export::zip::read(&word_bytes, &Default::default()).unwrap();
+        let document = String::from_utf8(parts.into_iter().find(|(n, _)| n == "word/document.xml").unwrap().1).unwrap();
+        assert!(document.contains("<w:pgSz w:w=\"8391\" w:h=\"11906\"/>"), "A5 upright: {document}");
+        let deck = std::fs::read_dir(dir.path().join("powerpoint")).unwrap().next().unwrap().unwrap().path();
+        let parts = openstage_express_export::zip::read(&std::fs::read(deck).unwrap(), &Default::default()).unwrap();
+        let slide2 = String::from_utf8(parts.into_iter().find(|(n, _)| n == "ppt/slides/slide2.xml").unwrap().1).unwrap();
+        assert!(slide2.contains("<a:t>Contents</a:t>"), "the agenda follows the cover: {slide2}");
+        let gif = std::fs::read(std::fs::read_dir(dir.path().join("gif")).unwrap().next().unwrap().unwrap().path()).unwrap();
+        assert!(gif.windows(6).any(|w| w[..3] == [0x21, 0xF9, 0x04] && [w[4], w[5]] == 800u16.to_le_bytes()), "8 seconds");
+    }
+
     fn the_plan() -> Plan {
         let d = demo();
         plan(&d.document.guide, &d.pictures, &BlockText, &ExportOptions::default())
@@ -511,6 +603,7 @@ mod tests {
             pictures: Arc::new(d.pictures),
             selection: Selection::none_then(&[Format::Images]),
             choices: PictureChoices::default(),
+            options: ExportChoices::default(),
             folder: dir.path().to_path_buf(),
         };
         spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -685,6 +778,7 @@ mod tests {
             pictures: Arc::new(d.pictures),
             selection: Selection::none_then(&[Format::Images]),
             choices: PictureChoices { width: 800, jpg_quality: 90, first_steps: Some(2), ..Default::default() },
+            options: ExportChoices::default(),
             folder: dir.path().to_path_buf(),
         };
         let report = spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -722,6 +816,7 @@ mod tests {
             pictures: Arc::new(d.pictures),
             selection: Selection::none_then(formats),
             choices,
+            options: ExportChoices::default(),
             folder: dir.path().to_path_buf(),
         };
         let report = spawn(job).recv_timeout(std::time::Duration::from_secs(120)).unwrap().unwrap();

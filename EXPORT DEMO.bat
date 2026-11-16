@@ -27,7 +27,7 @@ if errorlevel 1 goto failed
 
 echo.
 set "OUT=%~dp0export-demo-output"
-"%~dp0target\release\openstage-capture-express.exe" export-demo --out "%OUT%"
+"%~dp0target\release\openstage-capture-express-cli.exe" export-demo --out "%OUT%"
 if errorlevel 1 goto failed
 
 if defined EXPRESS_NO_OPEN goto opened

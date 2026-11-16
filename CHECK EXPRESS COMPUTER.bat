@@ -25,7 +25,7 @@ call "%~dp0cargo-run.bat" "check-build-log.txt" build --release -p openstage-exp
 if errorlevel 1 goto failed_build
 
 echo.
-"%~dp0target\release\openstage-capture-express.exe" check-computer > "%~dp0check-log.txt" 2>&1
+"%~dp0target\release\openstage-capture-express-cli.exe" check-computer > "%~dp0check-log.txt" 2>&1
 set "RESULT=%ERRORLEVEL%"
 type "%~dp0check-log.txt"
 echo.

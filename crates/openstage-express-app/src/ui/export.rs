@@ -7,8 +7,10 @@ use std::path::PathBuf;
 use eframe::egui::{self, RichText};
 
 use super::widgets::{self, palette};
+use crate::export_options::{ExportChoices, Paper, Turn, GIF_WIDTH_CHOICES, MARGIN_CHOICES, MAX_LINE_CHARS};
 use crate::export_run::{Format, PictureChoices, Selection};
 use crate::settings::DocumentPicturesChoice;
+use openstage_express_export::gif::ALLOWED_SECONDS;
 use openstage_express_export::images::{DEFAULT_JPEG_QUALITY, JPEG_QUALITY_CHOICES};
 use openstage_express_export::plan::{DEFAULT_IMAGE_WIDTH, DEFAULT_PREVIEW_STEPS, IMAGE_WIDTH_CHOICES};
 
@@ -62,6 +64,8 @@ pub struct ExportState {
     /// The number of steps in a preview, last chosen or typed (kept in the settings), and what is typed in its box.
     pub preview_steps: usize,
     pub preview_text: String,
+    /// What is chosen for the GIF, the PDF, Word and PowerPoint (kept in the settings).
+    pub options: ExportChoices,
 }
 
 impl ExportState {
@@ -87,6 +91,7 @@ impl ExportState {
             preview: false,
             preview_steps: DEFAULT_PREVIEW_STEPS,
             preview_text: String::new(),
+            options: ExportChoices::default(),
         };
         state.set_pictures(DEFAULT_IMAGE_WIDTH, u32::from(DEFAULT_JPEG_QUALITY), DEFAULT_PREVIEW_STEPS);
         state
@@ -141,6 +146,220 @@ fn choice(ui: &mut egui::Ui, selected: bool, shown: &str, name: &str) -> egui::R
     let name = name.to_string();
     ui.ctx().accesskit_node_builder(response.id, move |node| node.set_label(name));
     response
+}
+
+/// A tick box with a name for a screen reader that says which format it belongs to, because the same words (`Contents list`) are on
+/// the PDF's and the Word document's.
+fn option_check(ui: &mut egui::Ui, value: &mut bool, shown: &str, name: &str) {
+    let response = ui.add(egui::Checkbox::new(value, shown));
+    widgets::ring(ui, &response);
+    let name = name.to_string();
+    ui.ctx().accesskit_node_builder(response.id, move |node| node.set_label(name));
+}
+
+/// A row of radio buttons for one setting: `heading` says what is being chosen, each item is the short words on the button and the
+/// longer name a screen reader says.
+fn option_radios<T: Copy + PartialEq>(ui: &mut egui::Ui, heading: &str, value: &mut T, items: &[(T, String, String)]) {
+    let p = palette(ui);
+    ui.label(RichText::new(heading).family(super::fonts::bold_family()).color(p.text));
+    ui.horizontal_wrapped(|ui| {
+        for (which, shown, name) in items {
+            if choice(ui, *value == *which, shown, name).clicked() {
+                *value = *which;
+            }
+        }
+    });
+}
+
+/// A box for one line of text, labelled, kept to [`MAX_LINE_CHARS`] letters.
+fn option_line(ui: &mut egui::Ui, label: &str, text: &mut String, name: &str) {
+    ui.horizontal_wrapped(|ui| {
+        let words = ui.label(label);
+        let field = ui.add(egui::TextEdit::singleline(text).desired_width(320.0).char_limit(MAX_LINE_CHARS));
+        let field = field.labelled_by(words.id);
+        widgets::ring(ui, &field);
+        let name = name.to_string();
+        ui.ctx().accesskit_node_builder(field.id, move |node| node.set_label(name));
+    });
+}
+
+fn paper_items(format: &str) -> Vec<(Paper, String, String)> {
+    Paper::ALL
+        .iter()
+        .map(|p| {
+            let shown = if *p == Paper::A4 { format!("{} (the usual)", p.name()) } else { p.name().to_string() };
+            (*p, shown, format!("{format} paper size {}", p.name()))
+        })
+        .collect()
+}
+
+fn turn_items(format: &str) -> Vec<(Turn, String, String)> {
+    [Turn::Portrait, Turn::Landscape]
+        .iter()
+        .map(|t| (*t, t.name().to_string(), format!("{format} paper turned: {}", t.name())))
+        .collect()
+}
+
+fn margin_items(format: &str, usual: u32) -> Vec<(u32, String, String)> {
+    MARGIN_CHOICES
+        .iter()
+        .map(|m| {
+            let shown = if *m == usual { format!("{m} mm (the usual)") } else { format!("{m} mm") };
+            (*m, shown, format!("{format} margin {m} millimetres"))
+        })
+        .collect()
+}
+
+fn seconds_words(seconds: u32) -> String {
+    format!("{seconds} second{}", if seconds == 1 { "" } else { "s" })
+}
+
+/// The cards for the formats that have choices of their own: one for each of those that is ticked above.
+fn format_option_cards(ui: &mut egui::Ui, state: &mut ExportState) {
+    let p = palette(ui);
+    if state.selection.contains(Format::Gif) {
+        ui.add_space(12.0);
+        widgets::card_frame(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            widgets::subheading(ui, "Options for the animated GIF");
+            ui.label(
+                RichText::new("A GIF cannot be read by a screen reader. Make the web page too if anyone needs that.")
+                    .color(p.muted),
+            );
+            let seconds: Vec<(u32, String, String)> = ALLOWED_SECONDS
+                .iter()
+                .map(|s| {
+                    let shown = if *s == 3 { "3 seconds (the usual)".to_string() } else { seconds_words(*s) };
+                    (*s, shown, format!("GIF: each step stays {}", seconds_words(*s)))
+                })
+                .collect();
+            option_radios(ui, "How long each step stays", &mut state.options.gif.seconds, &seconds);
+            let widths: Vec<(u32, String, String)> = GIF_WIDTH_CHOICES
+                .iter()
+                .map(|w| {
+                    let shown = if *w == 800 { "800 (the usual)".to_string() } else { w.to_string() };
+                    (*w, shown, format!("GIF: {w} pixels across"))
+                })
+                .collect();
+            option_radios(ui, "How wide it is, in pixels", &mut state.options.gif.width, &widths);
+            option_check(
+                ui,
+                &mut state.options.gif.title_card,
+                "Start with a picture of the guide's title",
+                "GIF: start with a picture of the guide's title",
+            );
+            option_check(
+                ui,
+                &mut state.options.gif.progress_bar,
+                "Show a bar along the bottom that fills as the steps go by",
+                "GIF: a bar along the bottom that fills as the steps go by",
+            );
+            option_check(ui, &mut state.options.gif.loop_forever, "Play again and again", "GIF: play again and again");
+        });
+    }
+    if state.selection.contains(Format::Pdf) {
+        ui.add_space(12.0);
+        widgets::card_frame(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            widgets::subheading(ui, "Options for the PDF");
+            option_radios(ui, "Paper", &mut state.options.pdf.paper, &paper_items("PDF"));
+            option_radios(ui, "Which way the paper is turned", &mut state.options.pdf.turn, &turn_items("PDF"));
+            option_radios(ui, "Margins", &mut state.options.pdf.margin_mm, &margin_items("PDF", 20));
+            option_check(
+                ui,
+                &mut state.options.pdf.cover_page,
+                "A cover page with the title and description",
+                "PDF: a cover page with the title and description",
+            );
+            option_check(
+                ui,
+                &mut state.options.pdf.contents,
+                "A contents list that links to each step",
+                "PDF: a contents list that links to each step",
+            );
+            option_check(ui, &mut state.options.pdf.page_numbers, "Page numbers", "PDF: page numbers");
+            option_check(
+                ui,
+                &mut state.options.pdf.new_page_per_step,
+                "Start every step on a new page",
+                "PDF: start every step on a new page",
+            );
+            option_line(
+                ui,
+                "A line at the top of every page",
+                &mut state.options.pdf.header_text,
+                "PDF: the line at the top of every page",
+            );
+            option_line(
+                ui,
+                "A line at the bottom of every page",
+                &mut state.options.pdf.footer_text,
+                "PDF: the line at the bottom of every page",
+            );
+            ui.label(
+                RichText::new(
+                    "The page numbers and these two lines are not read by a screen reader, and the export says so when it is done.",
+                )
+                .size(13.5)
+                .color(p.muted),
+            );
+        });
+    }
+    if state.selection.contains(Format::Word) {
+        ui.add_space(12.0);
+        widgets::card_frame(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            widgets::subheading(ui, "Options for the Word document");
+            option_radios(ui, "Paper", &mut state.options.word.paper, &paper_items("Word"));
+            option_radios(ui, "Which way the paper is turned", &mut state.options.word.turn, &turn_items("Word"));
+            option_radios(ui, "Margins", &mut state.options.word.margin_mm, &margin_items("Word", 25));
+            option_check(
+                ui,
+                &mut state.options.word.contents,
+                "A contents list that links to each step",
+                "Word: a contents list that links to each step",
+            );
+            option_check(ui, &mut state.options.word.page_numbers, "Page numbers", "Word: page numbers");
+            option_check(
+                ui,
+                &mut state.options.word.new_page_per_step,
+                "Start every step on a new page",
+                "Word: start every step on a new page",
+            );
+        });
+    }
+    if state.selection.contains(Format::PowerPoint) {
+        ui.add_space(12.0);
+        widgets::card_frame(ui).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            widgets::subheading(ui, "Options for the PowerPoint presentation");
+            option_check(
+                ui,
+                &mut state.options.powerpoint.cover_slide,
+                "A first slide with the title and description",
+                "PowerPoint: a first slide with the title and description",
+            );
+            option_check(
+                ui,
+                &mut state.options.powerpoint.agenda_slide,
+                "A slide that lists the steps",
+                "PowerPoint: a slide that lists the steps",
+            );
+            option_check(ui, &mut state.options.powerpoint.slide_numbers, "Slide numbers", "PowerPoint: slide numbers");
+            option_check(
+                ui,
+                &mut state.options.powerpoint.speaker_notes,
+                "The whole description of each step in its speaker notes",
+                "PowerPoint: the whole description of each step in its speaker notes",
+            );
+            option_line(
+                ui,
+                "A line at the foot of every slide",
+                &mut state.options.powerpoint.footer_text,
+                "PowerPoint: the line at the foot of every slide",
+            );
+        });
+    }
 }
 
 /// What a quality number means in words.
@@ -198,6 +417,7 @@ ui.set_width(ui.available_width());
                 });
             }
 });
+            format_option_cards(ui, state);
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());

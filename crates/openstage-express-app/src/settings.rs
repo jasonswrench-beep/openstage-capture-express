@@ -17,6 +17,7 @@ use openstage_express_export::plan::{DEFAULT_IMAGE_WIDTH, DEFAULT_PREVIEW_STEPS}
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::export_options::{lenient, ExportChoices};
 use crate::target::{AreaChoice, TargetKind};
 
 pub const SCHEMA_VERSION: &str = "0.1.0";
@@ -235,6 +236,10 @@ pub struct AppSettings {
     pub export_preview_steps: usize,
     /// How the web page, Word, PowerPoint and PDF keep their pictures: PNG, JPG, or whichever is smaller for each picture.
     pub export_document_pictures: DocumentPicturesChoice,
+    /// What the Export screen chose for the GIF, PDF, Word and PowerPoint. Anything in it that cannot be read means the usual choices,
+    /// and costs no other setting.
+    #[serde(deserialize_with = "lenient")]
+    pub export_options: ExportChoices,
     /// Fields this program does not know, kept and written back.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -270,6 +275,7 @@ impl Default for AppSettings {
             export_jpg_quality: u32::from(DEFAULT_JPEG_QUALITY),
             export_preview_steps: DEFAULT_PREVIEW_STEPS,
             export_document_pictures: DocumentPicturesChoice::Png,
+            export_options: ExportChoices::default(),
             extra: Map::new(),
         }
     }
@@ -465,6 +471,22 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("futureThing"), "{text}");
         assert!(AppSettings::default().extra.is_empty());
+    }
+
+    #[test]
+    fn export_options_that_cannot_be_read_mean_the_usual_ones_and_cost_no_other_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, br#"{"showCursor": false, "exportOptions": {"pdf": {"marginMm": "wide"}}}"#).unwrap();
+        let (s, note) = load(&path);
+        assert!(note.is_none(), "{note:?}");
+        assert!(!s.show_cursor, "the rest of the file is kept");
+        assert_eq!(s.export_options, ExportChoices::default());
+        std::fs::write(&path, br#"{"exportOptions": {"pdf": {"paper": "letter", "headerText": "Top"}}}"#).unwrap();
+        let (s, _) = load(&path);
+        assert_eq!((s.export_options.pdf.paper, s.export_options.pdf.header_text.as_str()), (crate::export_options::Paper::Letter, "Top"));
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path).0.export_options, s.export_options);
     }
 
     #[test]

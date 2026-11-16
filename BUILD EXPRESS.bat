@@ -34,12 +34,12 @@ echo.
 echo It is here:
 echo   %~dp0target\release\openstage-capture-express.exe
 echo.
-echo At this early stage the program has no window and does not capture
-echo anything yet. This is what it says when it starts:
+echo This is what it says when it is asked its version:
 echo.
-"%~dp0target\release\openstage-capture-express.exe"
+"%~dp0target\release\openstage-capture-express-cli.exe" --version
 echo.
-echo Next, double-click TEST EXPRESS.bat.
+echo Next, double-click TEST EXPRESS.bat. To open the window, double-click
+echo OPEN EXPRESS.bat.
 goto done
 
 :no_rust

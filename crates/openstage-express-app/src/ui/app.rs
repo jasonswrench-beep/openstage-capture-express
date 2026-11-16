@@ -351,6 +351,7 @@ impl App {
             settings.export_preview_steps,
         );
         self.export.documents = settings.export_document_pictures;
+        self.export.options = settings.export_options.normalised();
         self.home.set_sort(settings.home_sort);
         self.settings = settings;
         self.settings_path = path;
@@ -382,10 +383,12 @@ impl App {
             || chosen != self.settings.export_formats
             || pictures != kept
             || self.export.documents != self.settings.export_document_pictures
+            || self.export.options != self.settings.export_options
         {
             self.settings.open_folder_after_export = self.export.open_after;
             self.settings.export_formats = chosen;
             self.settings.export_document_pictures = self.export.documents;
+            self.settings.export_options = self.export.options.clone();
             (
                 self.settings.export_picture_width,
                 self.settings.export_jpg_quality,
@@ -798,7 +801,14 @@ impl App {
             None => export_run::run_folder_name(&when),
         };
         let folder = self.export.folder.join(sanitise_folder_name(&guide.title)).join(run_name);
-        let job = Job { guide, pictures: editor.pictures(), selection: self.export.selection.clone(), choices, folder };
+        let job = Job {
+            guide,
+            pictures: editor.pictures(),
+            selection: self.export.selection.clone(),
+            choices,
+            options: self.export.options.normalised(),
+            folder,
+        };
         let n = job.selection.count();
         self.export_job = Some(export_run::spawn(job));
         self.export.working = true;
