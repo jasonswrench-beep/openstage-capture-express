@@ -247,7 +247,7 @@ Written and type-checked, not yet run on Windows:
   files, the installed program starting, the icon found on the setup file and on the installed program, both shortcuts' icons, the
   list entry (name, version, publisher, icon), then uninstalling: the entry, both shortcuts and the folder were gone and nothing
   of the person's was touched. Jason clicked through the wizard once (it installed, and started the program) and said it looked good;
-  Narrator has not read it, and it has not been tried on another PC. Not signed, so SmartScreen will warn.
+  Narrator has not read it, and it has not been tried on another PC. It was not signed then; the setup file can be signed now (`docs/installer.md`).
 
 - Moving and duplicating several chosen steps (spec E1, written and tested 2026-11-01). Alt+Up and Alt+Down, or the new "Move these
   steps up" and "Move these steps down" buttons, move every chosen step one place among its neighbours as one change: steps that
@@ -356,7 +356,7 @@ and are caught now.
 - **Packaging (item 1).** `build.rs` writes a Windows resource file by hand (no resource compiler, nothing downloaded) with the product
   icon and the program's name and version, so `target\release\openstage-capture-express.exe` has the icon in Explorer, the taskbar and
   Properties, not only the copies in the zip and the setup file. Read back with Windows: the icon is found, Properties says OpenStage
-  Capture Express 0.1.0-alpha.4. The program is now a window program, so no black console box appears. The scripts (`EXPORT DEMO.bat`,
+  Capture Express 0.1.0-alpha.5. The program is now a window program, so no black console box appears. The scripts (`EXPORT DEMO.bat`,
   `CHECK EXPRESS COMPUTER.bat`, `TEST EXPRESS CLICKS.bat`, `BUILD EXPRESS.bat`) run a second, console build of the same program,
   `openstage-capture-express-cli.exe`, because a command prompt waits for a console program and for nothing else; it is not shipped.
   Run from a batch file, its exit codes and its log redirects work, and `--version` printed into a real PowerShell tab. The Export screen
@@ -384,7 +384,7 @@ and are caught now.
   file from before there was one is not welcomed again.
 
 Not built: capturing a window that has moved to another display, WebP pictures, JPG pictures inside Markdown and JSON, the capture
-format (C1) and the accessibility rules (C2), which wait on the core, and a program that is signed (the installer can be signed, see
+format (C1) and the accessibility rules (C2), which wait on the core, and a signed portable zip (the setup file is signed by `MAKE EXPRESS INSTALLER.bat sign`, see
 `docs/installer.md`).
 
 PDFs are tagged but have not been run through an accessibility checker, and the page numbers, the header and the footer are not
@@ -459,7 +459,7 @@ build fetches it with the other libraries, after asking.
    (`OpenStage-Capture-Express-<version>-x64-setup.exe`) with Inno Setup, a free program that must be installed first (see
    `docs/installer.md`). The setup file, the program file it installs, its shortcuts and its entry in Windows' list of installed
    programs all use the product icon (`assets/icon/OpenCapture_Express.ico`). It installs for one person without needing an
-   administrator, and removing it never deletes guides or settings. Neither the zip nor the setup file is signed.
+   administrator, and removing it never deletes guides or settings. The zip is not signed; the setup file is signed when it is made with `MAKE EXPRESS INSTALLER.bat sign` (`docs/installer.md`).
 
 ## Decisions
 

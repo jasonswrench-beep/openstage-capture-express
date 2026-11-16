@@ -399,14 +399,25 @@ Built and checked by the tests (1,008 passing, and the rule checks) and by the c
       a moment. (Checked: the program file is a window program, and a command prompt started from a terminal tab showed `--version`.
       Watching a double-click was not possible.)
 - [ ] The program's icon: in the window's title bar, the taskbar, the Start menu and on the file in Explorer at small and large sizes;
-      and Properties > Details says OpenStage Capture Express, 0.1.0-alpha.4. (Checked by reading the icon and the version out of the file
+      and Properties > Details says OpenStage Capture Express, 0.1.0-alpha.5. (Checked by reading the icon and the version out of the file
       with Windows; how it looks was seen at 32 pixels only.)
 - [ ] Double-click `BUILD EXPRESS.bat`, `EXPORT DEMO.bat`, `CHECK EXPRESS COMPUTER.bat` and `TEST EXPRESS CLICKS.bat`. They now run
       `openstage-capture-express-cli.exe`, a console build of the same program, so each should still show its words in its own window,
       wait until it is done, and say PASS or what failed. (Checked: exit codes and a redirected log from a batch file; the four scripts
       themselves were not run.)
-- [ ] Make a setup file and a zip (`MAKE EXPRESS INSTALLER.bat`, `PACK EXPRESS.bat`): they should hold only `openstage-capture-express.exe`,
-      not the `-cli` one, and its icon should still be there.
+- [ ] The signed setup file `dist\0.1.0-alpha.5\OpenStage-Capture-Express-0.1.0-x64-setup.exe` (6.8 MB, SHA-256
+      `8265601B3A68BF7DE683CEB8FC36E719B91CCFC3F2C6C5D67C8BD55BADD47311`): install it by hand through its screens, and look at
+      Properties > Digital Signatures (Jason Wrench, with a timestamp), the program's icon and Properties > Details (0.1.0-alpha.5), the
+      Start menu shortcut, and the install folder: the program, the licence files, `START-HERE.txt` and the icon, and no `-cli`
+      program. (Checked: Windows says the signature is valid, from Jason Wrench, timestamped by Microsoft; the program, the
+      uninstaller and the setup file each report signed and timestamped; the hash file matches the file; the compile log lists only those
+      files; the icon step was repeated on a copy of the program and left its version and a 32-pixel icon. The setup file was not run,
+      because installing changes this computer.)
+- [ ] The portable zip (`PACK EXPRESS.bat`) was not made this round: `tools/pack.ps1` has no signing step, so its program would be
+      unsigned. Say whether the zip is wanted signed; if so it needs a `-Sign` like `make-installer.ps1` has. The same check applies:
+      only `openstage-capture-express.exe`, not the `-cli` one.
+- [ ] Publishing alpha.5 (a GitHub release with this setup file and its notes) has not been done: the notes for alpha.4 are in
+      `dist\notes-v0.1.0-alpha.4.md`, and the update check reads GitHub's list of releases.
 
 ### The options of each format
 

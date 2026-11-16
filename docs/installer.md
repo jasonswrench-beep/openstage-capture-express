@@ -1,8 +1,8 @@
 # The installer
 
 OpenStage Capture Express has two ways to be given to someone: the portable zip (`PACK EXPRESS.bat`, spec A6) and a setup file
-(`MAKE EXPRESS INSTALLER.bat`). Both put the product icon, `assets/icon/OpenCapture_Express.ico`, on the program file. Neither is
-signed yet.
+(`MAKE EXPRESS INSTALLER.bat`). Both put the product icon, `assets/icon/OpenCapture_Express.ico`, on the program file. The setup file can
+be signed (see Signing, below); the zip is never signed.
 
 ## Making it
 
@@ -16,7 +16,8 @@ Double-click `MAKE EXPRESS INSTALLER.bat`. It builds the program, then runs `too
 4. has Inno Setup's compiler make `dist/OpenStage-Capture-Express-<version>-x64-setup.exe` from `installer/express.iss`, and writes
    its SHA-256 beside it (`...-setup.exe.sha256.txt`).
 
-It never replaces a setup file that is already there; move the old one away first. The full log is `installer-log.txt`.
+It never replaces a setup file that is already there; move the old one away first, or make the new one in another folder (`tools/make-installer.ps1 -OutDir dist\0.1.0-alpha.5`):
+its name holds the version in `Cargo.toml`, not the release label. The full log is `installer-log.txt`.
 
 ## Inno Setup
 
@@ -54,11 +55,21 @@ as a second program.
 For a quiet install by a person who manages computers: `setup.exe /VERYSILENT /CURRENTUSER /NORESTART` (add `/DIR="C:\Some folder"`
 to choose the folder, `/TASKS="desktopicon"` for the desktop shortcut, and `/LOG="C:\file.txt"` for a log).
 
+## Signing
+
+`MAKE EXPRESS INSTALLER.bat sign` (or `tools/make-installer.ps1 -Sign`) signs the program, then the uninstaller and the setup file,
+with Azure Artifact Signing, each signature timestamped by Microsoft's timestamp service (`tools/sign_windows.py`). The program is
+signed after its icon is added, because changing a program file breaks its signature, and the SHA-256 is worked out last, so it is
+the hash of the signed setup file. `python tools/sign_windows.py --ready` says what signing needs: the three `OPENSTAGE_SIGN_`
+settings (account, profile and endpoint, kept in the person's own Windows environment and never in the repository), SignTool from
+Windows SDK 10.0.22621 or later, Microsoft's signing library (`Azure.CodeSigning.Dlib.dll`), the .NET 8 runtime, and `az login`.
+The wizard's first page then says the program is signed, and that SmartScreen may still warn at first, because the file is new.
+Without `sign`, nothing is signed and that page says so.
+
 ## Not done
 
-* **Signing.** The setup file and the program are unsigned, so Windows SmartScreen may warn when the setup file is run, and the
-  wizard's first page says so. Signing is spec A10 and a separate step with its own costs; sign the program first and the setup file
-  after, because adding the icon changes a program file and breaks its signature.
+* **Signing the zip.** `tools/pack.ps1` has no signing step, so the program in the portable zip is unsigned, and its
+  `START-HERE.txt` says so.
 * No automatic update (spec A6: none).
 * English only.
 * The installer has been run, but not by hand through its screens: see `TESTING-TODO.md`.
