@@ -421,8 +421,10 @@ Built and checked by the tests (1,008 passing, and the rule checks) and by the c
       Microsoft; its properties say 0.1.0-alpha.5 and it has a 32-pixel icon; it ran `--version` and exited cleanly; the five files
       are the ones named, and `START-HERE.txt` says the program is signed. `PACK EXPRESS.bat sign` itself was not double-clicked:
       `tools\pack.ps1 -Sign` was run.)
-- [ ] Publishing alpha.5 (a GitHub release with this setup file, the zip and their notes) has not been done: the notes for alpha.4 are in
-      `dist\notes-v0.1.0-alpha.4.md`, and the update check reads GitHub's list of releases.
+- [ ] Publishing alpha.5: a draft release is on GitHub with only the signed setup file. The rule is that GitHub carries signed
+      installers and nothing else, so the zip and the checksum file are not there (the checksum is in the notes). The notes are
+      `dist\0.1.0-alpha.5\notes-v0.1.0-alpha.5.md`. Read them and the draft, then publish it: that makes the tag `v0.1.0-alpha.5` and
+      tells alpha.4 users, through Check for updates, that a newer release exists.
 
 ### The options of each format
 
