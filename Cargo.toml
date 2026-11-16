@@ -23,14 +23,16 @@ base64 = "0.22"
 sha2 = "0.10"
 flate2 = "1"
 crc32fast = "1"
-# OpenStage Capture's crates, from the public openstage-author repository at one fixed commit, so that a clone of this repository
-# anywhere builds the same capture code that was shipped, with nothing beside it (the security review of 2026-11-13). To move to
-# newer capture code, change the rev in all three lines together, build, run TEST EXPRESS.bat, and name the commit in the release notes.
-openstage-capture-project = { git = "https://github.com/jasonswrench-beep/openstage-author", rev = "4c8d23f36772edf8002574556def9de2e3018642" }
-openstage-capture-render = { git = "https://github.com/jasonswrench-beep/openstage-author", rev = "4c8d23f36772edf8002574556def9de2e3018642" }
+# OpenStage Capture's crates, from the shared core (openstage-core, public) at one fixed tag, so that a clone of this repository
+# anywhere builds the same capture code that was shipped, with nothing beside it. It is the code this program pinned to OpenStage
+# Author's repository (commit 4c8d23f), moved to the core unchanged (checked file by file, line endings aside). A change to it is
+# made in the core first and gets a new tag; to move to it, change the tag in all three lines together, build, run TEST EXPRESS.bat,
+# and name the tag in the release notes.
+openstage-capture-project = { git = "https://github.com/jasonswrench-beep/openstage-core", tag = "capture-v0.1.0" }
+openstage-capture-render = { git = "https://github.com/jasonswrench-beep/openstage-core", tag = "capture-v0.1.0" }
 # Windows Graphics Capture (the display frames behind the frame ring), reached through its Platform and FrameSource traits. The
 # hooks and the field reading are Express's own, so that no typed character ever leaves the keyboard hook (spec 8.4).
-openstage-capture-windows = { git = "https://github.com/jasonswrench-beep/openstage-author", rev = "4c8d23f36772edf8002574556def9de2e3018642" }
+openstage-capture-windows = { git = "https://github.com/jasonswrench-beep/openstage-core", tag = "capture-v0.1.0" }
 
 # Pictures are big, so tests that draw and export them run far faster with a little optimisation.
 [profile.dev]

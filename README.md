@@ -447,13 +447,14 @@ Use an original design and implementation.
 ## Layout on every computer
 
 The spec is `docs\capture-express\spec.md` in the OpenStage repo (`https://github.com/jasonswrench-beep/openstage-author`, branch
-`feature/capture-express`). Express reads OpenStage Capture's crates (drawing, text layout, the edit types) from that repository at
-one fixed commit, named in `Cargo.toml` (a git dependency with `rev`, since the security review of 2026-11-13; before that, a path
-link to a clone beside this folder, which made a release impossible to rebuild from GitHub alone). A clone of this repository
-anywhere builds the same capture code that was shipped, with nothing beside it. The first build fetches it with the other
-libraries, after asking (`cargo-run.bat`). To move to newer capture code, change the commit in all three lines of `Cargo.toml`,
-build, run `TEST EXPRESS.bat`, and name the commit in the release notes. Choose a folder that OneDrive does not sync, and extract
-each new copy into a new, empty folder.
+`feature/capture-express`). Express reads OpenStage Capture's crates (drawing, text layout, the edit types) from the shared core
+(`https://github.com/jasonswrench-beep/openstage-core`, public) at one fixed tag, `capture-v0.1.0`, named in `Cargo.toml` (a git
+dependency with `tag`). Until 2026-11-15 it pinned the same code in OpenStage Author's repository at commit 4c8d23f; the core's copy was
+checked file by file against it (the same, line endings aside) and the three lines moved with no change to any code. A clone of this
+repository anywhere builds the same capture code that was shipped, with nothing beside it. The first build fetches it with the other
+libraries, after asking (`cargo-run.bat`). A change to the capture code is made in the core first and gets a new tag; to move to it,
+change the tag in all three lines of `Cargo.toml`, build, run `TEST EXPRESS.bat`, and name the tag in the release notes. Choose a
+folder that OneDrive does not sync, and extract each new copy into a new, empty folder.
 
 ## How the pieces fit
 

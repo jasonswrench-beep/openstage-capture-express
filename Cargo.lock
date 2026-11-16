@@ -1941,7 +1941,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "openstage-capture"
 version = "0.1.0"
-source = "git+https://github.com/jasonswrench-beep/openstage-author?rev=4c8d23f36772edf8002574556def9de2e3018642#4c8d23f36772edf8002574556def9de2e3018642"
+source = "git+https://github.com/jasonswrench-beep/openstage-core?tag=capture-v0.1.0#3c5db168dd7631db3bb166877ddf77c84ffc4378"
 dependencies = [
  "openstage-capture-project",
  "openstage-capture-protocol",
@@ -1952,7 +1952,7 @@ dependencies = [
 [[package]]
 name = "openstage-capture-project"
 version = "0.1.0"
-source = "git+https://github.com/jasonswrench-beep/openstage-author?rev=4c8d23f36772edf8002574556def9de2e3018642#4c8d23f36772edf8002574556def9de2e3018642"
+source = "git+https://github.com/jasonswrench-beep/openstage-core?tag=capture-v0.1.0#3c5db168dd7631db3bb166877ddf77c84ffc4378"
 dependencies = [
  "crc32fast",
  "serde",
@@ -1964,7 +1964,7 @@ dependencies = [
 [[package]]
 name = "openstage-capture-protocol"
 version = "0.1.0"
-source = "git+https://github.com/jasonswrench-beep/openstage-author?rev=4c8d23f36772edf8002574556def9de2e3018642#4c8d23f36772edf8002574556def9de2e3018642"
+source = "git+https://github.com/jasonswrench-beep/openstage-core?tag=capture-v0.1.0#3c5db168dd7631db3bb166877ddf77c84ffc4378"
 dependencies = [
  "serde",
  "serde_json",
@@ -1974,7 +1974,7 @@ dependencies = [
 [[package]]
 name = "openstage-capture-render"
 version = "0.1.0"
-source = "git+https://github.com/jasonswrench-beep/openstage-author?rev=4c8d23f36772edf8002574556def9de2e3018642#4c8d23f36772edf8002574556def9de2e3018642"
+source = "git+https://github.com/jasonswrench-beep/openstage-core?tag=capture-v0.1.0#3c5db168dd7631db3bb166877ddf77c84ffc4378"
 dependencies = [
  "openstage-capture-project",
 ]
@@ -1982,7 +1982,7 @@ dependencies = [
 [[package]]
 name = "openstage-capture-windows"
 version = "0.1.0"
-source = "git+https://github.com/jasonswrench-beep/openstage-author?rev=4c8d23f36772edf8002574556def9de2e3018642#4c8d23f36772edf8002574556def9de2e3018642"
+source = "git+https://github.com/jasonswrench-beep/openstage-core?tag=capture-v0.1.0#3c5db168dd7631db3bb166877ddf77c84ffc4378"
 dependencies = [
  "openstage-capture",
  "openstage-capture-project",
