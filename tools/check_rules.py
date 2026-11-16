@@ -373,6 +373,45 @@ def write_third_party(packages):
     print(f"Wrote {ROOT / 'THIRD-PARTY.md'} ({len(rows)} crates)")
 
 
+def check_i18n():
+    """Every text the window puts in tr(), trf(), k() or tt(format!()) has a German and a French translation, and a translation keeps
+    every place (`{1}`, `{2}`...) the English has. Sentences the status line says are candidates and only counted (see tools/i18n_keys.py)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("i18n_keys", ROOT / "tools" / "i18n_keys.py")
+    keys = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(keys)
+    found = keys.collect()
+    lit = keys.LIT
+    tuple_rx = re.compile(r"\(\s*(" + lit + r")\s*,\s*(" + lit + r")\s*,?\s*\)", re.S)
+    problems = []
+    for code, name in (("de", "German"), ("fr", "French")):
+        path = ROOT / "crates" / "openstage-express-app" / "src" / "i18n" / f"{code}.rs"
+        text = path.read_text(encoding="utf-8")
+        catalog = {}
+        for m in tuple_rx.finditer(text):
+            catalog[keys.wrap.unescape(m.group(1))] = keys.wrap.unescape(m.group(2))
+        for key, kind in sorted(found.items()):
+            if kind == "status":
+                continue
+            if key not in catalog:
+                problems.append(f"{name} has no translation of {key[:60]!r}")
+                continue
+            places = len(re.findall(r"\{[^{}]*\}", key.replace("{{", "").replace("}}", "")))
+            used = {int(n) for n in re.findall(r"\{(\d+)\}", catalog[key])}
+            if places and (not set(range(1, places + 1)) <= used or max(used or {0}) > places):
+                problems.append(f"{name}: {key[:50]!r} has {places} place(s) but its translation uses {sorted(used)}")
+            if not places and used:
+                problems.append(f"{name}: {key[:50]!r} has no places but its translation has {sorted(used)}")
+            if not catalog[key].strip():
+                problems.append(f"{name}: the translation of {key[:50]!r} is empty")
+    status = sum(1 for v in found.values() if v == "status")
+    words = sum(1 for v in found.values() if v != "status")
+    if problems:
+        record("FAIL", "interface languages: every text is translated", "; ".join(problems[:6]) + (f" (and {len(problems) - 6} more)" if len(problems) > 6 else ""))
+    else:
+        record("PASS", "interface languages: every text is translated", f"{words} texts, each in German and French ({status} status sentences are candidates)")
+
+
 def main():
     packages = cargo_packages()
     if packages:
@@ -384,6 +423,7 @@ def main():
     check_style()
     check_batch_files()
     check_batch_rust()
+    check_i18n()
     if "--write-third-party" in sys.argv and packages:
         write_third_party(packages)
 

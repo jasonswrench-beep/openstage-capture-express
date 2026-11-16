@@ -11,6 +11,7 @@ use super::widgets::{self, palette};
 use crate::settings::{
     AppSettings, Appearance, KeyChoice, ModeChoice, TitleLanguage, SCREENSHOT_DELAYS_MS, TYPING_DELAYS_MS,
 };
+use crate::i18n::{k, tr, tt};
 
 /// What the screen shows besides the settings themselves.
 pub struct SettingsInfo {
@@ -71,9 +72,13 @@ fn seconds_words(ms: u64) -> String {
     if ms == 0 {
         "None".to_string()
     } else if ms.is_multiple_of(1000) {
-        format!("{} second{}", ms / 1000, if ms == 1000 { "" } else { "s" })
+        if ms == 1000 {
+            tr("1 second")
+        } else {
+            crate::i18n::trf("{1} seconds", &[&(ms / 1000)])
+        }
     } else {
-        format!("{ms} milliseconds")
+        tt(format!("{ms} milliseconds"))
     }
 }
 
@@ -85,7 +90,7 @@ pub fn show(
 ) -> SettingsAction {
     let before = settings.clone();
     let mut action = SettingsAction::None;
-    if super::shell::screen_header(ui, "settings-top", "Back to guides", "Settings", false) {
+    if super::shell::screen_header(ui, "settings-top", tr("Back to guides"), tr("Settings"), false) {
         action = SettingsAction::Back;
     }
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
@@ -103,11 +108,28 @@ pub fn show(
 
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Appearance");
+            widgets::subheading(ui, tr("Language of the program"));
+            ui.label(
+                RichText::new(tr("The words on the buttons, in the menus and in the status line. It changes at once. Words not translated yet stay in English."))
+                    .color(p.muted),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for lang in crate::i18n::Lang::ALL {
+                    let r = ui.radio_value(&mut settings.interface_language, lang, lang.own_name());
+                    let name = tt(format!("Language of the program: {}", lang.own_name()));
+                    ui.ctx().accesskit_node_builder(r.id, move |node| node.set_label(name));
+                    widgets::ring(ui, &r);
+                }
+            });
+});
+ui.add_space(12.0);
+widgets::card_frame(ui).show(ui, |ui| {
+ui.set_width(ui.available_width());
+            widgets::subheading(ui, tr("Appearance"));
             for (value, words) in
-                [(Appearance::System, "Follow Windows"), (Appearance::Light, "Light"), (Appearance::Dark, "Dark")]
+                [(Appearance::System, k("Follow Windows")), (Appearance::Light, k("Light")), (Appearance::Dark, k("Dark"))]
             {
-                let r = ui.radio_value(&mut settings.appearance, value, words);
+                let r = ui.radio_value(&mut settings.appearance, value, tr(words));
                 widgets::ring(ui, &r);
             }
 
@@ -115,19 +137,19 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Capturing");
-            ui.label(RichText::new("A click makes a step:").color(p.muted));
+            widgets::subheading(ui, tr("Capturing"));
+            ui.label(RichText::new(tr("A click makes a step:")).color(p.muted));
             for (value, words) in [
-                (ModeChoice::OnClick, "every time"),
-                (ModeChoice::WithKey, "only when I hold a key while I click"),
-                (ModeChoice::ExceptKey, "every time except when I hold a key while I click"),
-                (ModeChoice::HotkeyOnly, "never. Only the capture now hotkey makes a step"),
+                (ModeChoice::OnClick, k("every time")),
+                (ModeChoice::WithKey, k("only when I hold a key while I click")),
+                (ModeChoice::ExceptKey, k("every time except when I hold a key while I click")),
+                (ModeChoice::HotkeyOnly, k("never. Only the capture now hotkey makes a step")),
             ] {
-                let r = ui.radio_value(&mut settings.capture_mode, value, words);
+                let r = ui.radio_value(&mut settings.capture_mode, value, tr(words));
                 widgets::ring(ui, &r);
             }
             let uses_key = matches!(settings.capture_mode, ModeChoice::WithKey | ModeChoice::ExceptKey);
-            ui.label(RichText::new("The key to hold:").color(p.muted));
+            ui.label(RichText::new(tr("The key to hold:")).color(p.muted));
             ui.horizontal(|ui| {
                 for key in [KeyChoice::Ctrl, KeyChoice::Shift, KeyChoice::Alt] {
                     let r = ui.add_enabled(uses_key, egui::RadioButton::new(settings.capture_key == key, key.name()));
@@ -138,24 +160,24 @@ ui.set_width(ui.available_width());
                 }
             });
             for (value, words) in [
-                (&mut settings.show_cursor, "Draw a pointer at each click"),
-                (&mut settings.mark_clicked_area, "Draw a circle round each click"),
-                (&mut settings.capture_typing, "Make a step for what I type (never for a password)"),
-                (&mut settings.say_field_not_text, "Say which field was typed in, not what was typed"),
-                (&mut settings.focused_view_for_new_steps, "Start new steps with a close-up of the click"),
+                (&mut settings.show_cursor, k("Draw a pointer at each click")),
+                (&mut settings.mark_clicked_area, k("Draw a circle round each click")),
+                (&mut settings.capture_typing, k("Make a step for what I type (never for a password)")),
+                (&mut settings.say_field_not_text, k("Say which field was typed in, not what was typed")),
+                (&mut settings.focused_view_for_new_steps, k("Start new steps with a close-up of the click")),
             ] {
-                let r = ui.checkbox(value, words);
+                let r = ui.checkbox(value, tr(words));
                 widgets::ring(ui, &r);
             }
-            ui.label(RichText::new("The language of step titles:").color(p.muted));
+            ui.label(RichText::new(tr("The language of step titles:")).color(p.muted));
             ui.horizontal(|ui| {
                 for language in [TitleLanguage::En, TitleLanguage::De, TitleLanguage::Fr] {
-                    let r = ui.radio_value(&mut settings.title_language, language, language.name());
+                    let r = ui.radio_value(&mut settings.title_language, language, tr(language.name()));
                     widgets::ring(ui, &r);
                 }
             });
             ui.label(
-                RichText::new("Changes to capturing apply the next time you start capturing.")
+                RichText::new(tr("Changes to capturing apply the next time you start capturing."))
                     .size(13.5)
                     .color(p.muted),
             );
@@ -164,17 +186,17 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Folders");
+            widgets::subheading(ui, tr("Folders"));
             let guides = ui.label(RichText::new(&info.guides_folder).color(p.text));
-            let name = format!("Guides folder: {}", info.guides_folder);
+            let name = tt(format!("Guides folder: {}", info.guides_folder));
             ui.ctx().accesskit_node_builder(guides.id, |node| node.set_label(name));
-            if widgets::button(ui, "Choose guides folder...").clicked() {
+            if widgets::button(ui, tr("Choose guides folder...")).clicked() {
                 action = SettingsAction::ChooseGuidesFolder;
             }
             let exports = ui.label(RichText::new(&info.exports_folder).color(p.text));
-            let name = format!("Exports folder: {}", info.exports_folder);
+            let name = tt(format!("Exports folder: {}", info.exports_folder));
             ui.ctx().accesskit_node_builder(exports.id, |node| node.set_label(name));
-            if widgets::button(ui, "Choose exports folder...").clicked() {
+            if widgets::button(ui, tr("Choose exports folder...")).clicked() {
                 action = SettingsAction::ChooseExportsFolder;
             }
             let r = ui.checkbox(&mut settings.open_folder_after_export, "Open the folder when an export is done");
@@ -184,15 +206,15 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Hotkeys");
+            widgets::subheading(ui, tr("Hotkeys"));
             let words = if info.hotkeys.is_empty() { "No hotkeys could be set." } else { info.hotkeys.as_str() };
             ui.label(RichText::new(words).color(p.text));
             ui.label(
                 RichText::new(
-                    "To change one, write its keys joined with plus signs, such as Ctrl+Shift+Q. Use a letter, a digit or F1 to F24 \
+                    tr("To change one, write its keys joined with plus signs, such as Ctrl+Shift+Q. Use a letter, a digit or F1 to F24 \
                      with at least two of Ctrl, Alt, Shift and Windows (one is enough with a function key). Ctrl and Alt together \
                      with a letter are not allowed, because some keyboards type characters with them. The change is made when you \
-                     leave the box with Tab or Enter.",
+                     leave the box with Tab or Enter."),
                 )
                 .size(13.5)
                 .color(p.muted),
@@ -218,7 +240,7 @@ ui.set_width(ui.available_width());
                                 }
                             }
                             Err(why) => {
-                                edit.said = Some(format!("{} was not changed. {why}", hotkey.label()));
+                                edit.said = Some(tt(format!("{} was not changed. {why}", hotkey.label())));
                                 edit.problems[i] = Some(why);
                             }
                         }
@@ -228,7 +250,7 @@ ui.set_width(ui.available_width());
                     ui.label(RichText::new(problem).color(p.text));
                 }
             }
-            if widgets::button(ui, "Use the usual hotkeys").clicked() {
+            if widgets::button(ui, tr("Use the usual hotkeys")).clicked() {
                 // Whatever is typed in the boxes, good or not, goes back to the keys in use.
                 edit.problems = Default::default();
                 edit.filled_for = None;
@@ -242,8 +264,8 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Sounds");
-            ui.label(RichText::new("A quiet sound, off unless you turn it on:").color(p.muted));
+            widgets::subheading(ui, tr("Sounds"));
+            ui.label(RichText::new(tr("A quiet sound, off unless you turn it on:")).color(p.muted));
             for (value, words) in [
                 (&mut settings.sounds.start_and_stop, "When capturing starts or resumes, and when it pauses or finishes"),
                 (&mut settings.sounds.step, "When a step is captured"),
@@ -254,7 +276,7 @@ ui.set_width(ui.available_width());
             }
             ui.horizontal_wrapped(|ui| {
                 for cue in Cue::ALL {
-                    if widgets::button(ui, &format!("Hear the {} sound", cue.name())).clicked() {
+                    if widgets::button(ui, tt(format!("Hear the {} sound", cue.name()))).clicked() {
                         action = SettingsAction::Hear(cue);
                     }
                 }
@@ -265,17 +287,17 @@ ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
             let header =
-                egui::CollapsingHeader::new(RichText::new("Advanced").size(19.0).family(super::fonts::bold_family()))
+                egui::CollapsingHeader::new(RichText::new(tr("Advanced")).size(19.0).family(super::fonts::bold_family()))
                     .default_open(false)
                     .show(ui, |ui| {
-                        ui.label(RichText::new("Wait before taking a picture after a click:").color(p.muted));
+                        ui.label(RichText::new(tr("Wait before taking a picture after a click:")).color(p.muted));
                         ui.horizontal_wrapped(|ui| {
                             for ms in SCREENSHOT_DELAYS_MS {
                                 let r = ui.radio_value(&mut settings.screenshot_delay_ms, ms, seconds_words(ms));
                                 widgets::ring(ui, &r);
                             }
                         });
-                        ui.label(RichText::new("Typing ends after this long without a key:").color(p.muted));
+                        ui.label(RichText::new(tr("Typing ends after this long without a key:")).color(p.muted));
                         ui.horizontal_wrapped(|ui| {
                             for ms in TYPING_DELAYS_MS {
                                 let r = ui.radio_value(&mut settings.typing_delay_ms, ms, seconds_words(ms));

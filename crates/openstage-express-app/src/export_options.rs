@@ -11,6 +11,7 @@ use openstage_express_export::pdf::{self, Orientation, PageSize, PdfOptions};
 use openstage_express_export::picture::decode_png;
 use openstage_express_export::pptx::{LogoPicture, PptxOptions};
 use openstage_express_export::watermark::{Place, Watermark};
+use crate::i18n::k;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -84,8 +85,8 @@ pub enum Turn {
 impl Turn {
     pub fn name(self) -> &'static str {
         match self {
-            Turn::Portrait => "Upright (portrait)",
-            Turn::Landscape => "On its side (landscape)",
+            Turn::Portrait => k("Upright (portrait)"),
+            Turn::Landscape => k("On its side (landscape)"),
         }
     }
 
@@ -266,15 +267,15 @@ impl Spot {
 
     pub fn name(self) -> &'static str {
         match self {
-            Spot::TopLeft => "Top left",
-            Spot::TopCentre => "Top centre",
-            Spot::TopRight => "Top right",
-            Spot::MiddleLeft => "Middle left",
-            Spot::Centre => "Centre",
-            Spot::MiddleRight => "Middle right",
-            Spot::BottomLeft => "Bottom left",
-            Spot::BottomCentre => "Bottom centre",
-            Spot::BottomRight => "Bottom right",
+            Spot::TopLeft => k("Top left"),
+            Spot::TopCentre => k("Top centre"),
+            Spot::TopRight => k("Top right"),
+            Spot::MiddleLeft => k("Middle left"),
+            Spot::Centre => k("Centre"),
+            Spot::MiddleRight => k("Middle right"),
+            Spot::BottomLeft => k("Bottom left"),
+            Spot::BottomCentre => k("Bottom centre"),
+            Spot::BottomRight => k("Bottom right"),
         }
     }
 

@@ -12,6 +12,7 @@ use super::commands::{self, Command};
 use super::fonts::bold_family;
 use super::icon::{self, UiIcon};
 use super::widgets::{self, palette, ring};
+use crate::i18n::{k, tr, trf};
 
 /// The height of the navy bar and of the menu bar under it.
 pub const BAR_HEIGHT: f32 = 52.0;
@@ -40,8 +41,8 @@ pub enum Saved {
 impl Saved {
     pub fn words(self) -> &'static str {
         match self {
-            Saved::Saved => "Saved",
-            Saved::Example => "Example, not saved",
+            Saved::Saved => k("Saved"),
+            Saved::Example => k("Example, not saved"),
         }
     }
 }
@@ -118,7 +119,7 @@ fn bar_button(ui: &mut Ui, button: &BarButton, compact: bool) -> egui::Response 
     let widget = if compact {
         egui::Button::new(icon).min_size(egui::vec2(36.0, 34.0))
     } else {
-        egui::Button::new((icon, RichText::new(button.words).strong())).min_size(egui::vec2(0.0, 34.0))
+        egui::Button::new((icon, RichText::new(tr(button.words)).strong())).min_size(egui::vec2(0.0, 34.0))
     };
     let widget =
         if button.primary { widget.fill(p.accent_fill).stroke(Stroke::new(1.0, p.accent_fill)) } else { widget };
@@ -134,7 +135,7 @@ fn bar_button(ui: &mut Ui, button: &BarButton, compact: bool) -> egui::Response 
         ui.add_enabled(button.enabled, widget)
     });
     let response = response.inner;
-    let words = button.words.to_string();
+    let words = tr(button.words);
     if compact {
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(words));
     }
@@ -220,7 +221,7 @@ pub fn top_bar(ui: &mut Ui, view: &TopBarView) -> Option<Command> {
             if let Some((title, saved, heading)) = &view.guide {
                 let room = (ui.available_width() - right_width - 16.0).max(80.0);
                 let saved_text = ui.painter().layout_no_wrap(
-                    saved.words().into(),
+                    tr(saved.words()),
                     egui::TextStyle::Small.resolve(ui.style()),
                     p.on_shell_muted,
                 );
@@ -253,16 +254,16 @@ pub fn top_bar(ui: &mut Ui, view: &TopBarView) -> Option<Command> {
                 let (at, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), Sense::hover());
                 let mark = if *saved == Saved::Saved { UiIcon::CircleCheck } else { UiIcon::CircleDot };
                 icon::paint(ui.painter(), at, mark, p.on_shell_muted);
-                ui.label(RichText::new(saved.words()).size(13.5).color(p.on_shell_muted));
+                ui.label(RichText::new(tr(saved.words())).size(13.5).color(p.on_shell_muted));
             }
             let gap = (ui.available_width() - right_width - ui.spacing().item_spacing.x - 2.0).max(0.0);
             ui.add_space(gap);
-            let search = BarButton { command: Command::SearchCommands, words: "Search", primary: false, enabled: true };
+            let search = BarButton { command: Command::SearchCommands, words: k("Search"), primary: false, enabled: true };
             let response = bar_button(ui, &search, compact_buttons);
             let first = response.rect.min.x;
             let mut last = response.rect.max.x;
             ui.ctx().accesskit_node_builder(response.id, |node| {
-                node.set_label("Search for a command".to_string());
+                node.set_label(tr("Search for a command"));
                 node.set_keyboard_shortcut("Ctrl+K".to_string());
                 node.set_has_popup(accesskit::HasPopup::Dialog);
             });
@@ -311,7 +312,9 @@ pub fn page_frame(ui: &Ui) -> egui::Frame {
 }
 
 /// The top of a screen under the menus (Settings, Export, the Trash...): a way back and the screen's first heading, on a white strip.
-pub fn screen_header(ui: &mut Ui, id: &str, back: &str, title: &str, back_first_focus: bool) -> bool {
+pub fn screen_header(ui: &mut Ui, id: &str, back: impl AsRef<str>, title: impl AsRef<str>, back_first_focus: bool) -> bool {
+    let back = back.as_ref();
+    let title = title.as_ref();
     let p = palette(ui);
     let mut went_back = false;
     egui::Panel::top(id.to_string())
@@ -345,10 +348,11 @@ pub fn section(
     ui: &mut Ui,
     id_salt: &str,
     icon_name: UiIcon,
-    title: &str,
+    title: impl AsRef<str>,
     starts_open: bool,
     add: impl FnOnce(&mut Ui),
 ) -> bool {
+    let title = title.as_ref();
     let p = palette(ui);
     let id = Id::unique(("express-section", id_salt));
     let open = ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(starts_open);
@@ -406,7 +410,8 @@ pub fn section(
 
 /// A dialog of the suite's: a white panel with rounded corners over a darker window, its title, a Close button in its corner that
 /// does what Escape does, and its content. Returns what `add` returned, and whether it should close.
-pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, add: impl FnOnce(&mut Ui) -> R) -> (R, bool) {
+pub fn dialog<R>(ctx: &egui::Context, id: &str, title: impl AsRef<str>, width: f32, add: impl FnOnce(&mut Ui) -> R) -> (R, bool) {
+    let title = title.as_ref();
     let p = super::theme::palette(ctx.theme());
     let screen = ctx.content_rect();
     let width = width.min(screen.width() - 32.0).max(200.0);
@@ -442,7 +447,7 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, title: &str, width: f32, add: im
                         egui::Button::new(icon::atom(UiIcon::X, 18.0)).min_size(egui::vec2(34.0, 34.0)).frame(false),
                     );
                     ui.ctx().accesskit_node_builder(x.id, |node| node.set_label("Close".to_string()));
-                    let x = x.on_hover_text("Close (Escape)");
+                    let x = x.on_hover_text(tr("Close (Escape)"));
                     ring(ui, &x);
                     if x.clicked() {
                         close = true;
@@ -489,7 +494,7 @@ pub fn command_search(
         state.chosen = state.chosen.min(found.len() - 1);
     }
     let mut run = None;
-    let (_, close) = dialog(ctx, "command-search", "Search for a command", 560.0, |ui| {
+    let (_, close) = dialog(ctx, "command-search", tr("Search for a command"), 560.0, |ui| {
         let p = palette(ui);
         let list_id = Id::unique("express-command-results");
         let (up, down, enter) = ui.input_mut(|i| {
@@ -507,12 +512,12 @@ pub fn command_search(
                 state.chosen = (state.chosen + 1) % found.len();
             }
         }
-        let label = ui.label("Type what you want to do");
+        let label = ui.label(tr("Type what you want to do"));
         let before = state.typed.clone();
         let response = ui
             .add(
                 egui::TextEdit::singleline(&mut state.typed)
-                    .hint_text("For example: export, undo, dark")
+                    .hint_text(tr("For example: export, undo, dark"))
                     .desired_width(f32::INFINITY),
             )
             .labelled_by(label.id);
@@ -525,7 +530,7 @@ pub fn command_search(
         let chosen_id = list_id.with(("row", state.chosen));
         let count = found.len();
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label("Search for a command".to_string());
+            node.set_label(tr("Search for a command"));
             if count > 0 {
                 node.set_active_descendant(chosen_id.accesskit_id());
             }
@@ -539,9 +544,9 @@ pub fn command_search(
         }
         ui.label(
             RichText::new(match count {
-                0 => "No command matches what you typed.".to_string(),
-                1 => "1 command. Up and Down choose, Enter does it.".to_string(),
-                n => format!("{n} commands. Up and Down choose, Enter does it."),
+                0 => tr("No command matches what you typed."),
+                1 => tr("1 command. Up and Down choose, Enter does it."),
+                n => trf("{1} commands. Up and Down choose, Enter does it.", &[&n]),
             })
             .size(13.5)
             .color(p.muted),
@@ -549,7 +554,7 @@ pub fn command_search(
         let list = egui::UiBuilder::new()
             .id_salt(list_id)
             .accessibility_role(accesskit::Role::ListBox)
-            .accessibility_label("Commands");
+            .accessibility_label(tr("Commands"));
         egui::ScrollArea::vertical().max_height((ui.available_height() - 8.0).clamp(120.0, 380.0)).show(ui, |ui| {
             ui.scope_builder(list, |ui| {
                 let list_ui_id = ui.unique_id();
@@ -594,7 +599,7 @@ pub fn command_search(
                             galley,
                             words,
                         );
-                        let menu = format!("{} menu", command.menu());
+                        let menu = trf("{1} menu", &[&command.menu()]);
                         ui.painter().text(
                             egui::pos2(rect.left() + 52.0 + name_width, rect.center().y),
                             egui::Align2::LEFT_CENTER,
@@ -613,7 +618,7 @@ pub fn command_search(
                         }
                     }
                     let name = command.words();
-                    let place_words = format!("{} menu", command.menu());
+                    let place_words = trf("{1} menu", &[&command.menu()]);
                     let keys = command.keys().map(str::to_string);
                     ui.ctx().accesskit_node_builder(row_id, |node| {
                         node.set_bounds(super::menubar::bounds_of(rect));
@@ -646,63 +651,63 @@ pub fn command_search(
 pub fn keyboard_keys(ctx: &egui::Context, hotkeys: &str) -> bool {
     let groups: [(&str, &[(&str, &str)]); 6] = [
         (
-            "Everywhere",
+            k("Everywhere"),
             &[
-                ("Ctrl+K", "Search for a command"),
-                ("Ctrl+/", "This list of keys"),
+                ("Ctrl+K", k("Search for a command")),
+                ("Ctrl+/", k("This list of keys")),
                 (
                     "F10",
-                    "Go to the menus (then the arrows move along them and in them, Enter chooses, Escape goes back)",
+                    k("Go to the menus (then the arrows move along them and in them, Enter chooses, Escape goes back)"),
                 ),
-                ("Tab, Shift+Tab", "Go to the next or the last control"),
+                ("Tab, Shift+Tab", k("Go to the next or the last control")),
             ],
         ),
         (
-            "The steps list",
+            k("The steps list"),
             &[
-                ("Up, Down", "Choose the step above or below"),
-                ("Shift+Up, Shift+Down", "Choose a run of steps"),
-                ("Ctrl+click, Shift+click", "Add a step to the chosen ones, or choose a run"),
-                ("Ctrl+A", "Choose every step"),
+                ("Up, Down", k("Choose the step above or below")),
+                ("Shift+Up, Shift+Down", k("Choose a run of steps")),
+                ("Ctrl+click, Shift+click", k("Add a step to the chosen ones, or choose a run")),
+                ("Ctrl+A", k("Choose every step")),
             ],
         ),
         (
-            "Working with steps",
+            k("Working with steps"),
             &[
-                ("Alt+Up, Alt+Down", "Move the chosen steps up or down"),
-                ("Ctrl+Shift+Up, Ctrl+Shift+Down", "Choose the step before or after, from anywhere"),
-                ("Ctrl+Shift+Delete", "Delete the chosen steps (they can be put back)"),
-                ("F2", "Go to the step's title"),
-                ("Ctrl+Z", "Undo (in a text box, undo the typing)"),
-                ("Ctrl+Y, Ctrl+Shift+Z", "Redo"),
+                ("Alt+Up, Alt+Down", k("Move the chosen steps up or down")),
+                ("Ctrl+Shift+Up, Ctrl+Shift+Down", k("Choose the step before or after, from anywhere")),
+                ("Ctrl+Shift+Delete", k("Delete the chosen steps (they can be put back)")),
+                ("F2", k("Go to the step's title")),
+                ("Ctrl+Z", k("Undo (in a text box, undo the typing)")),
+                ("Ctrl+Y, Ctrl+Shift+Z", k("Redo")),
             ],
         ),
         (
-            "Marks and the picture",
+            k("Marks and the picture"),
             &[
-                ("Up, Down", "In the marks list, choose the mark above or below"),
-                ("Delete", "In the marks list, delete the chosen mark"),
-                ("Escape", "Stop drawing a shape, or put the drawing tool away"),
-                ("Space while dragging", "Move the close-up even over a mark"),
+                ("Up, Down", k("In the marks list, choose the mark above or below")),
+                ("Delete", k("In the marks list, delete the chosen mark")),
+                ("Escape", k("Stop drawing a shape, or put the drawing tool away")),
+                ("Space while dragging", k("Move the close-up even over a mark")),
             ],
         ),
         (
-            "Rename and questions",
-            &[("Enter", "Save the name typed"), ("Escape", "Cancel, or keep (say no to the question)")],
+            k("Rename and questions"),
+            &[("Enter", k("Save the name typed")), ("Escape", k("Cancel, or keep (say no to the question)"))],
         ),
-        ("Capturing (anywhere in Windows)", &[]),
+        (k("Capturing (anywhere in Windows)"), &[]),
     ];
-    let (_, close) = dialog(ctx, "keyboard-keys", "Keyboard keys", 720.0, |ui| {
+    let (_, close) = dialog(ctx, "keyboard-keys", tr("Keyboard keys"), 720.0, |ui| {
         let p = palette(ui);
         egui::ScrollArea::vertical().max_height((ui.available_height() - 4.0).max(160.0)).show(ui, |ui| {
             for (title, rows) in groups {
-                widgets::subheading(ui, title);
+                widgets::subheading(ui, tr(title));
                 if rows.is_empty() {
                     ui.label(
-                        RichText::new(if hotkeys.is_empty() { "No hotkeys are set." } else { hotkeys }).color(p.text),
+                        RichText::new(if hotkeys.is_empty() { tr("No hotkeys are set.") } else { hotkeys.to_string() }).color(p.text),
                     );
                     ui.label(
-                        RichText::new("Change them in Tools > Settings, under Hotkeys.").size(13.5).color(p.muted),
+                        RichText::new(tr("Change them in Tools > Settings, under Hotkeys.")).size(13.5).color(p.muted),
                     );
                     continue;
                 }
@@ -713,7 +718,7 @@ pub fn keyboard_keys(ctx: &egui::Context, hotkeys: &str) -> bool {
                     .show(ui, |ui| {
                         for (keys, what) in rows.iter() {
                             ui.label(RichText::new(*keys).family(bold_family()).color(p.text));
-                            ui.label(RichText::new(*what).color(p.text));
+                            ui.label(RichText::new(tr(what)).color(p.text));
                             ui.end_row();
                         }
                     });

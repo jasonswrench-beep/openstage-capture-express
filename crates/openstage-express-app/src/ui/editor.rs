@@ -23,6 +23,7 @@ use super::icon::{self, UiIcon};
 use super::menubar::{self, Entry, Line};
 use super::shell;
 use super::widgets::{self, palette, Status};
+use crate::i18n::{tr, tt};
 
 /// Whether the person left the editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,12 +249,12 @@ fn steps_list(
     // The pane's heading, with its Add button and its "..." menu (the suite's panes all have the two).
     // Laid out left to right after a space, so the Tab key meets Add before "..." as the eye does.
     ui.horizontal(|ui| {
-        widgets::subheading(ui, "Steps");
+        widgets::subheading(ui, tr("Steps"));
         let room = ui.available_width() - 136.0;
         ui.add_space(room.max(4.0));
         let add = ui.add(egui::Button::new((icon::atom(UiIcon::Plus, 16.0), "Add".to_string())));
         ui.ctx().accesskit_node_builder(add.id, |node| node.set_label("Add a step".to_string()));
-        let add = add.on_hover_text("Add a step");
+        let add = add.on_hover_text(tr("Add a step"));
         widgets::ring(ui, &add);
         if add.clicked() {
             status.say_opt(state.add_step());
@@ -347,12 +348,12 @@ fn steps_list(
     ui.add_space(4.0);
     // Only when there is something deleted, so a guide that has lost nothing has no extra control to stop at.
     let deleted = state.deleted_count();
-    if deleted > 0 && widgets::icon_button(ui, UiIcon::ArchiveRestore, &format!("Deleted steps ({deleted})")).clicked()
+    if deleted > 0 && widgets::icon_button(ui, UiIcon::ArchiveRestore, tt(format!("Deleted steps ({deleted})"))).clicked()
     {
         *to_deleted = true;
     }
     if rows.len() > 1 {
-        ui.label(RichText::new("Ctrl+click or Shift+click chooses several.").size(13.5).color(palette(ui).muted));
+        ui.label(RichText::new(tr("Ctrl+click or Shift+click chooses several.")).size(13.5).color(palette(ui).muted));
     }
 }
 
@@ -360,45 +361,45 @@ fn steps_list(
 fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
     let ids = state.chosen_ids();
-    ui.label(RichText::new(format!("{} steps are chosen:", ids.len())).color(p.text));
+    ui.label(RichText::new(tt(format!("{} steps are chosen:", ids.len()))).color(p.text));
     let rows = state.rows();
     let shown = 8;
     for row in rows.iter().filter(|r| ids.contains(&r.id)).take(shown) {
         ui.label(RichText::new(row.label()).color(p.muted));
     }
     if ids.len() > shown {
-        ui.label(RichText::new(format!("and {} more", ids.len() - shown)).color(p.muted));
+        ui.label(RichText::new(tt(format!("and {} more", ids.len() - shown))).color(p.muted));
     }
     ui.add_space(6.0);
     let any_skipped = rows.iter().any(|r| ids.contains(&r.id) && r.skipped);
     let any_in = rows.iter().any(|r| ids.contains(&r.id) && !r.skipped);
-    if widgets::button_enabled(ui, any_in, "Skip these steps in export").clicked() {
+    if widgets::button_enabled(ui, any_in, tr("Skip these steps in export")).clicked() {
         status.say_opt(state.skip_chosen(true));
     }
-    if widgets::button_enabled(ui, any_skipped, "Put these steps back in export").clicked() {
+    if widgets::button_enabled(ui, any_skipped, tr("Put these steps back in export")).clicked() {
         status.say_opt(state.skip_chosen(false));
     }
     // Always pressable, like Alt+Up and Alt+Down: at the end of the list they say so, and the keyboard is not left on a button
     // that has just been switched off.
-    if widgets::button(ui, "Move these steps up").clicked() {
+    if widgets::button(ui, tr("Move these steps up")).clicked() {
         status.say_opt(state.move_selected(-1));
     }
-    if widgets::button(ui, "Move these steps down").clicked() {
+    if widgets::button(ui, tr("Move these steps down")).clicked() {
         status.say_opt(state.move_selected(1));
     }
-    if widgets::button(ui, "Duplicate these steps").clicked() {
+    if widgets::button(ui, tr("Duplicate these steps")).clicked() {
         status.say_opt(state.duplicate_selected());
     }
-    if widgets::button(ui, "Delete these steps").clicked() {
+    if widgets::button(ui, tr("Delete these steps")).clicked() {
         status.say_opt(state.delete_chosen());
     }
     let only = state.selected_row().map(|r| r.label()).unwrap_or_default();
-    if widgets::button_named(ui, "Choose just one", &format!("Choose just one step: {only}")).clicked() {
+    if widgets::button_named(ui, tr("Choose just one"), tt(format!("Choose just one step: {only}"))).clicked() {
         status.say_opt(state.choose_only_selected());
         state.focus_row_next = true;
     }
     ui.label(
-        RichText::new("Alt+Up and Alt+Down move them too. Undo takes back any of these, all the steps at once.")
+        RichText::new(tr("Alt+Up and Alt+Down move them too. Undo takes back any of these, all the steps at once."))
             .size(13.5)
             .color(p.muted),
     );
@@ -406,28 +407,28 @@ fn several_chosen(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Statu
 
 fn details(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, chosen: &mut Option<Command>) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        shell::section(ui, "guide", UiIcon::BookOpen, "Guide", true, |ui| guide_section(ui, state, status));
+        shell::section(ui, "guide", UiIcon::BookOpen, tr("Guide"), true, |ui| guide_section(ui, state, status));
         if state.selected_step().is_none() {
-            widgets::subheading(ui, "Step details");
+            widgets::subheading(ui, tr("Step details"));
             let p = palette(ui);
-            ui.label(RichText::new("No step is chosen. Add a step, or choose one from the list.").color(p.muted));
+            ui.label(RichText::new(tr("No step is chosen. Add a step, or choose one from the list.")).color(p.muted));
             return;
         }
         if state.chosen_count() > 1 {
-            shell::section(ui, "several", UiIcon::ListChecks, "Several steps chosen", true, |ui| {
+            shell::section(ui, "several", UiIcon::ListChecks, tr("Several steps chosen"), true, |ui| {
                 several_chosen(ui, state, status)
             });
             return;
         }
-        shell::section(ui, "step", UiIcon::FileText, "Step details", true, |ui| step_section(ui, state, status));
-        shell::section(ui, "marks", UiIcon::Shapes, "Marks", true, |ui| marks_panel(ui, state, status, chosen));
+        shell::section(ui, "step", UiIcon::FileText, tr("Step details"), true, |ui| step_section(ui, state, status));
+        shell::section(ui, "marks", UiIcon::Shapes, tr("Marks"), true, |ui| marks_panel(ui, state, status, chosen));
     });
 }
 
 /// The guide as a whole: its title, and the focused view for every step.
 fn guide_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
-    let label = ui.label("Guide title");
+    let label = ui.label(tr("Guide title"));
     let guide_title = ui
         .add(egui::TextEdit::singleline(&mut state.buffer.guide_title).desired_width(f32::INFINITY))
         .labelled_by(label.id);
@@ -436,7 +437,7 @@ fn guide_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status
         let before = state.doc().guide.title.clone();
         state.commit_pending();
         if state.doc().guide.title != before {
-            status.say(format!("The guide is now called {}.", state.doc().guide.title));
+            status.say(tt(format!("The guide is now called {}.", state.doc().guide.title)));
         }
     }
     // The focused view for the whole guide: how many steps have it, and one press to turn it on or off for all of them. Like the other
@@ -444,10 +445,10 @@ fn guide_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status
     ui.add_space(4.0);
     ui.label(RichText::new(state.focus_summary()).size(13.5).color(p.muted));
     ui.horizontal_wrapped(|ui| {
-        if widgets::icon_button(ui, UiIcon::ZoomIn, "Focused view on for every step").clicked() {
+        if widgets::icon_button(ui, UiIcon::ZoomIn, tr("Focused view on for every step")).clicked() {
             status.say_opt(state.set_focused_for_all(true));
         }
-        if widgets::icon_button(ui, UiIcon::ZoomOut, "Focused view off for every step").clicked() {
+        if widgets::icon_button(ui, UiIcon::ZoomOut, tr("Focused view off for every step")).clicked() {
             status.say_opt(state.set_focused_for_all(false));
         }
     });
@@ -457,7 +458,7 @@ fn guide_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status
 fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
     {
-        let label = ui.label("Title");
+        let label = ui.label(tr("Title"));
         let title = ui
             .add(egui::TextEdit::singleline(&mut state.buffer.title).desired_width(f32::INFINITY))
             .labelled_by(label.id);
@@ -470,7 +471,7 @@ fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status)
             state.commit_pending();
         }
 
-        let label = ui.label("Description");
+        let label = ui.label(tr("Description"));
         let description = ui
             .add(egui::TextEdit::multiline(&mut state.buffer.description).desired_rows(5).desired_width(f32::INFINITY))
             .labelled_by(label.id);
@@ -479,14 +480,14 @@ fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status)
             state.commit_pending();
         }
         ui.label(
-            RichText::new("Marks you can use: **bold**, *italic*, [text](https://address) and - for a list item.")
+            RichText::new(tr("Marks you can use: **bold**, *italic*, [text](https://address) and - for a list item."))
                 .size(13.5)
                 .color(p.muted),
         );
 
         let has_picture = state.selected_step().is_some_and(|s| s.image.is_some());
         if has_picture {
-            let label = ui.label("Picture description, for people who cannot see the picture");
+            let label = ui.label(tr("Picture description, for people who cannot see the picture"));
             let words = ui
                 .add(
                     egui::TextEdit::multiline(&mut state.buffer.picture_description)
@@ -503,13 +504,13 @@ fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status)
         ui.add_space(6.0);
         let mut focused = state.is_focused();
         let can_focus = state.can_focus();
-        let focus_box = ui.add_enabled(can_focus, egui::Checkbox::new(&mut focused, "Focused view"));
+        let focus_box = ui.add_enabled(can_focus, egui::Checkbox::new(&mut focused, tr("Focused view")));
         widgets::ring(ui, &focus_box);
         if focus_box.changed() {
             status.say_opt(state.set_focused(focused));
         }
         if !can_focus {
-            ui.label(RichText::new("Needs a picture with a click in it.").size(13.5).color(p.muted));
+            ui.label(RichText::new(tr("Needs a picture with a click in it.")).size(13.5).color(p.muted));
         }
         // The crop's own buttons come right under the box that turns it on.
         if state.is_focused() {
@@ -517,7 +518,7 @@ fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status)
         }
 
         let mut skipped = state.selected_step().is_some_and(|s| s.skipped);
-        let skip_box = ui.add(egui::Checkbox::new(&mut skipped, "Skip in export"));
+        let skip_box = ui.add(egui::Checkbox::new(&mut skipped, tr("Skip in export")));
         widgets::ring(ui, &skip_box);
         if skip_box.changed() {
             status.say_opt(state.set_skipped(skipped));
@@ -525,14 +526,14 @@ fn step_section(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status)
 
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            if widgets::icon_button(ui, UiIcon::ArrowUp, "Move step up").clicked() {
+            if widgets::icon_button(ui, UiIcon::ArrowUp, tr("Move step up")).clicked() {
                 status.say_opt(state.move_selected(-1));
             }
-            if widgets::icon_button(ui, UiIcon::ArrowDown, "Move step down").clicked() {
+            if widgets::icon_button(ui, UiIcon::ArrowDown, tr("Move step down")).clicked() {
                 status.say_opt(state.move_selected(1));
             }
         });
-        ui.label(RichText::new("Alt+Up and Alt+Down do the same.").size(13.5).color(p.muted));
+        ui.label(RichText::new(tr("Alt+Up and Alt+Down do the same.")).size(13.5).color(p.muted));
     }
 }
 
@@ -552,18 +553,18 @@ fn crop_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
         }
     });
     ui.horizontal_wrapped(|ui| {
-        if widgets::button(ui, "Zoom crop in").clicked() {
+        if widgets::button(ui, tr("Zoom crop in")).clicked() {
             status.say_opt(state.zoom_crop(true));
         }
-        if widgets::button(ui, "Zoom crop out").clicked() {
+        if widgets::button(ui, tr("Zoom crop out")).clicked() {
             status.say_opt(state.zoom_crop(false));
         }
-        if widgets::button(ui, "Reset crop").clicked() {
+        if widgets::button(ui, tr("Reset crop")).clicked() {
             status.say_opt(state.reset_crop());
         }
     });
     ui.label(
-        RichText::new("Or drag the picture to move the crop (hold Space to drag over a mark).")
+        RichText::new(tr("Or drag the picture to move the crop (hold Space to drag over a mark)."))
             .size(13.5)
             .color(p.muted),
     );
@@ -575,7 +576,7 @@ fn crop_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
 fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, chosen: &mut Option<Command>) {
     let p = palette(ui);
     let Some((_, picture_h)) = state.picture_size() else {
-        ui.label(RichText::new("Marks need a picture.").size(13.5).color(p.muted));
+        ui.label(RichText::new(tr("Marks need a picture.")).size(13.5).color(p.muted));
         return;
     };
     // The nine kinds of mark are one menu (and the Marks menu at the top), not nine buttons.
@@ -585,17 +586,17 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
     }
     // Drawing with the mouse is a convenience on top of the buttons, so its ten choices are folded away behind one heading: a person
     // using the keyboard passes one stop, not ten.
-    let draw_header = egui::CollapsingHeader::new(RichText::new("Draw a shape with the mouse").size(15.0))
+    let draw_header = egui::CollapsingHeader::new(RichText::new(tr("Draw a shape with the mouse")).size(15.0))
         .default_open(state.drawing_tool().is_some())
         .show(ui, |ui| {
             ui.label(
-                RichText::new("Choose a shape, then drag on the picture. A click places a usual-sized one.")
+                RichText::new(tr("Choose a shape, then drag on the picture. A click places a usual-sized one."))
                     .size(13.5)
                     .color(p.muted),
             );
             ui.horizontal_wrapped(|ui| {
                 let off =
-                    ui.add(egui::RadioButton::new(state.drawing_tool().is_none(), "Do not draw (pick and move marks)"));
+                    ui.add(egui::RadioButton::new(state.drawing_tool().is_none(), tr("Do not draw (pick and move marks)")));
                 widgets::ring(ui, &off);
                 if off.clicked() {
                     status.say_opt(state.choose_drawing_tool(None));
@@ -603,7 +604,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
                 for tool in Tool::ALL {
                     let r = ui.add(egui::RadioButton::new(
                         state.drawing_tool() == Some(tool),
-                        format!("Draw {}", tool.with_article()),
+                        tt(format!("Draw {}", tool.with_article())),
                     ));
                     widgets::ring(ui, &r);
                     if r.clicked() {
@@ -615,7 +616,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
     widgets::ring(ui, &draw_header.header_response);
     let rows = state.mark_rows();
     if rows.is_empty() {
-        ui.label(RichText::new("No marks yet. Add one with a button above.").size(13.5).color(p.muted));
+        ui.label(RichText::new(tr("No marks yet. Add one with a button above.")).size(13.5).color(p.muted));
         return;
     }
     ui.add_space(4.0);
@@ -662,7 +663,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
     state.sync_mark_words();
 
     ui.add_space(6.0);
-    ui.label(RichText::new("Move the chosen mark:").color(p.muted));
+    ui.label(RichText::new(tr("Move the chosen mark:")).color(p.muted));
     ui.horizontal_wrapped(|ui| {
         for (words, dx, dy) in [("Move left", -10, 0), ("Move right", 10, 0), ("Move up", 0, -10), ("Move down", 0, 10)]
         {
@@ -672,7 +673,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
         }
     });
     if marks::can_resize(mark.kind) {
-        ui.label(RichText::new("Change its size:").color(p.muted));
+        ui.label(RichText::new(tr("Change its size:")).color(p.muted));
         ui.horizontal_wrapped(|ui| {
             let round =
                 matches!(mark.kind, AnnotationKind::Number | AnnotationKind::ClickMark | AnnotationKind::Cursor);
@@ -695,7 +696,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
         });
     }
     if marks::colour_field(mark.kind).is_some() {
-        ui.label(RichText::new("Colour:").color(p.muted));
+        ui.label(RichText::new(tr("Colour:")).color(p.muted));
         ui.horizontal_wrapped(|ui| {
             let have = marks::colour_name(&mark);
             for (name, hex) in COLOURS {
@@ -708,10 +709,10 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
         });
     }
     if marks::has_width(mark.kind) {
-        ui.label(RichText::new("Line width:").color(p.muted));
+        ui.label(RichText::new(tr("Line width:")).color(p.muted));
         ui.horizontal_wrapped(|ui| {
             for width in WIDTHS {
-                let r = ui.add(egui::RadioButton::new(mark.stroke_width == Some(width), format!("{width} pixels")));
+                let r = ui.add(egui::RadioButton::new(mark.stroke_width == Some(width), tt(format!("{width} pixels"))));
                 widgets::ring(ui, &r);
                 if r.clicked() {
                     status.say_opt(state.set_mark_width(width));
@@ -720,7 +721,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
         });
     }
     if mark.kind == AnnotationKind::Text {
-        let label = ui.label("Words in the text mark");
+        let label = ui.label(tr("Words in the text mark"));
         let words = ui
             .add(egui::TextEdit::singleline(&mut state.mark_words).desired_width(f32::INFINITY))
             .labelled_by(label.id);
@@ -732,18 +733,18 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
     }
     if mark.kind == AnnotationKind::Number {
         let number = mark.number.unwrap_or(1);
-        ui.label(format!("Step number {number}"));
+        ui.label(tt(format!("Step number {number}")));
         ui.horizontal(|ui| {
-            if widgets::button(ui, "Number up").clicked() {
+            if widgets::button(ui, tr("Number up")).clicked() {
                 status.say_opt(state.set_mark_number(number + 1));
             }
-            if widgets::button_enabled(ui, number > 1, "Number down").clicked() {
+            if widgets::button_enabled(ui, number > 1, tr("Number down")).clicked() {
                 status.say_opt(state.set_mark_number(number - 1));
             }
         });
     }
     ui.add_space(4.0);
-    if widgets::icon_button(ui, UiIcon::Trash, "Delete mark").clicked() {
+    if widgets::icon_button(ui, UiIcon::Trash, tr("Delete mark")).clicked() {
         status.say_opt(state.delete_mark());
     }
     let _ = picture_h;
@@ -756,7 +757,7 @@ fn marks_panel(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status, 
 fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let p = palette(ui);
     let Some(step) = state.selected_step() else {
-        ui.label(RichText::new("Nothing to show.").color(p.muted));
+        ui.label(RichText::new(tr("Nothing to show.")).color(p.muted));
         return;
     };
     let has_picture = step.image.is_some();
@@ -764,7 +765,7 @@ fn picture(ui: &mut egui::Ui, state: &mut EditorState, status: &mut Status) {
     let focus = state.crop();
     let words = state.picture_words();
     let Some(texture) = (if has_picture { state.texture(ui.ctx()) } else { None }) else {
-        ui.label(RichText::new("This step has no picture.").color(p.muted));
+        ui.label(RichText::new(tr("This step has no picture.")).color(p.muted));
         return;
     };
     let available = ui.available_size();

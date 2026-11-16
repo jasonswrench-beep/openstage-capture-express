@@ -6,6 +6,7 @@
 use eframe::egui::{self, RichText};
 
 use super::widgets::{self, palette};
+use crate::i18n::tr;
 
 /// What the screen holds between frames.
 #[derive(Debug, Default)]
@@ -41,20 +42,20 @@ pub enum OpenCopyAction {
 
 pub fn show(ui: &mut egui::Ui, state: &mut OpenCopyState) -> OpenCopyAction {
     let mut action = OpenCopyAction::None;
-    if super::shell::screen_header(ui, "open-copy-top", "Back to guides", "Open a copy", false) {
+    if super::shell::screen_header(ui, "open-copy-top", tr("Back to guides"), tr("Open a copy"), false) {
         action = OpenCopyAction::Back;
     }
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         ui.label(
             RichText::new(
-                "A copy is one file ending .osguide.zip that someone sent you, or that you saved with Save a copy as one file. Opening it \
-                 makes a new guide of your own in your guides folder. The file itself is not changed.",
+                tr("A copy is one file ending .osguide.zip that someone sent you, or that you saved with Save a copy as one file. Opening it \
+                 makes a new guide of your own in your guides folder. The file itself is not changed."),
             )
             .color(p.muted),
         );
         ui.add_space(8.0);
-        let label = ui.label("File to open");
+        let label = ui.label(tr("File to open"));
         let field = ui
             .add(
                 egui::TextEdit::singleline(&mut state.path)
@@ -71,17 +72,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut OpenCopyState) -> OpenCopyAction {
             action = OpenCopyAction::Open;
         }
         ui.horizontal(|ui| {
-            if widgets::button(ui, "Browse...").clicked() {
+            if widgets::button(ui, tr("Browse...")).clicked() {
                 action = OpenCopyAction::Browse;
             }
             let ready = !state.clean_path().is_empty();
-            let go = ui.add_enabled_ui(ready, |ui| widgets::primary_button(ui, "Open the copy"));
+            let go = ui.add_enabled_ui(ready, |ui| widgets::primary_button(ui, tr("Open the copy")));
             if go.inner.clicked() {
                 action = OpenCopyAction::Open;
             }
         });
         if state.clean_path().is_empty() {
-            ui.label(RichText::new("Type or paste the file's place, or choose it with Browse.").size(13.5).color(p.muted));
+            ui.label(RichText::new(tr("Type or paste the file's place, or choose it with Browse.")).size(13.5).color(p.muted));
         }
         if let Some(said) = &state.said {
             ui.add_space(8.0);

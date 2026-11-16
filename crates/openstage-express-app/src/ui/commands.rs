@@ -7,6 +7,7 @@
 use openstage_express_core::marks::Tool;
 
 use super::icon::UiIcon;
+use crate::i18n::{k, tr, trf};
 use crate::settings::Appearance;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +76,7 @@ const MARKS: [Option<Command>; 11] = [
 /// The menu bar: File, Edit, Step, Marks, View, Tools, Help.
 pub const MENUS: [MenuPlan; 7] = [
     MenuPlan {
-        title: "File",
+        title: k("File"),
         items: &[
             Some(Command::StartCapturing),
             Some(Command::OpenCopy),
@@ -87,7 +88,7 @@ pub const MENUS: [MenuPlan; 7] = [
         ],
     },
     MenuPlan {
-        title: "Edit",
+        title: k("Edit"),
         items: &[
             Some(Command::Undo),
             Some(Command::Redo),
@@ -99,7 +100,7 @@ pub const MENUS: [MenuPlan; 7] = [
         ],
     },
     MenuPlan {
-        title: "Step",
+        title: k("Step"),
         items: &[
             Some(Command::AddStep),
             Some(Command::DuplicateStep),
@@ -115,9 +116,9 @@ pub const MENUS: [MenuPlan; 7] = [
             Some(Command::FocusedView),
         ],
     },
-    MenuPlan { title: "Marks", items: &MARKS },
+    MenuPlan { title: k("Marks"), items: &MARKS },
     MenuPlan {
-        title: "View",
+        title: k("View"),
         items: &[
             Some(Command::FocusedAllOn),
             Some(Command::FocusedAllOff),
@@ -127,9 +128,9 @@ pub const MENUS: [MenuPlan; 7] = [
             Some(Command::Colours(Appearance::Dark)),
         ],
     },
-    MenuPlan { title: "Tools", items: &[Some(Command::Settings)] },
+    MenuPlan { title: k("Tools"), items: &[Some(Command::Settings)] },
     MenuPlan {
-        title: "Help",
+        title: k("Help"),
         items: &[Some(Command::SearchCommands), Some(Command::KeyboardKeys), None, Some(Command::CheckForUpdates), Some(Command::About)],
     },
 ];
@@ -182,38 +183,38 @@ impl Command {
     /// Its words in a menu and in the command search. A command that opens a screen of choices ends in "...".
     pub fn words(self) -> String {
         match self {
-            Command::StartCapturing => "Start capturing".into(),
-            Command::OpenCopy => "Open a copy...".into(),
-            Command::ExportScreen => "Export...".into(),
-            Command::BackToGuides => "Back to guides".into(),
-            Command::Trash => "Trash...".into(),
-            Command::Undo => "Undo".into(),
-            Command::Redo => "Redo".into(),
-            Command::ChooseAll => "Choose all steps".into(),
-            Command::ChooseOne => "Choose just one step".into(),
-            Command::DeletedSteps => "Deleted steps...".into(),
-            Command::AddStep => "Add a step".into(),
-            Command::DuplicateStep => "Duplicate step".into(),
-            Command::DeleteStep => "Delete step".into(),
-            Command::MoveUp => "Move step up".into(),
-            Command::MoveDown => "Move step down".into(),
-            Command::PreviousStep => "Previous step".into(),
-            Command::NextStep => "Next step".into(),
-            Command::EditTitle => "Edit the step's title".into(),
-            Command::SkipInExport => "Skip in export".into(),
-            Command::FocusedView => "Focused view".into(),
-            Command::AddMark(tool) => format!("Add {}", tool.name()),
-            Command::DeleteMark => "Delete mark".into(),
-            Command::FocusedAllOn => "Focused view on for every step".into(),
-            Command::FocusedAllOff => "Focused view off for every step".into(),
-            Command::Colours(Appearance::System) => "Colours: follow Windows".into(),
-            Command::Colours(Appearance::Light) => "Colours: light".into(),
-            Command::Colours(Appearance::Dark) => "Colours: dark".into(),
-            Command::Settings => "Settings...".into(),
-            Command::SearchCommands => "Search for a command".into(),
-            Command::KeyboardKeys => "Keyboard keys".into(),
-            Command::CheckForUpdates => "Check for updates...".into(),
-            Command::About => "About and licences".into(),
+            Command::StartCapturing => tr("Start capturing"),
+            Command::OpenCopy => tr("Open a copy..."),
+            Command::ExportScreen => tr("Export..."),
+            Command::BackToGuides => tr("Back to guides"),
+            Command::Trash => tr("Trash..."),
+            Command::Undo => tr("Undo"),
+            Command::Redo => tr("Redo"),
+            Command::ChooseAll => tr("Choose all steps"),
+            Command::ChooseOne => tr("Choose just one step"),
+            Command::DeletedSteps => tr("Deleted steps..."),
+            Command::AddStep => tr("Add a step"),
+            Command::DuplicateStep => tr("Duplicate step"),
+            Command::DeleteStep => tr("Delete step"),
+            Command::MoveUp => tr("Move step up"),
+            Command::MoveDown => tr("Move step down"),
+            Command::PreviousStep => tr("Previous step"),
+            Command::NextStep => tr("Next step"),
+            Command::EditTitle => tr("Edit the step's title"),
+            Command::SkipInExport => tr("Skip in export"),
+            Command::FocusedView => tr("Focused view"),
+            Command::AddMark(tool) => trf("Add {1}", &[&tool_words(tool)]),
+            Command::DeleteMark => tr("Delete mark"),
+            Command::FocusedAllOn => tr("Focused view on for every step"),
+            Command::FocusedAllOff => tr("Focused view off for every step"),
+            Command::Colours(Appearance::System) => tr("Colours: follow Windows"),
+            Command::Colours(Appearance::Light) => tr("Colours: light"),
+            Command::Colours(Appearance::Dark) => tr("Colours: dark"),
+            Command::Settings => tr("Settings..."),
+            Command::SearchCommands => tr("Search for a command"),
+            Command::KeyboardKeys => tr("Keyboard keys"),
+            Command::CheckForUpdates => tr("Check for updates..."),
+            Command::About => tr("About and licences"),
         }
     }
 
@@ -273,44 +274,44 @@ impl Command {
     }
 
     /// A few words on what it does or where it is, which the command search also looks in.
-    pub fn what_for(self) -> &'static str {
+    pub fn what_for(self) -> String {
         match self {
-            Command::StartCapturing => "record a new guide from what you do on screen, capture bar",
-            Command::OpenCopy => "open a guide saved as one file, zip, import",
-            Command::ExportScreen => "make a web page, Word, PowerPoint, PDF, pictures, GIF, Markdown, JSON, share",
-            Command::BackToGuides => "home, the list of guides, close the guide",
-            Command::Trash => "guides that were deleted, bring one back, restore",
-            Command::Undo => "take back the last change",
-            Command::Redo => "do again what was undone",
-            Command::ChooseAll => "select every step",
-            Command::ChooseOne => "select only the step with the keyboard",
-            Command::DeletedSteps => "put a deleted step back, restore, empty the trash",
-            Command::AddStep => "a new step after the chosen one, new",
-            Command::DuplicateStep => "copy the step",
-            Command::DeleteStep => "remove the chosen steps, they can be put back",
-            Command::MoveUp => "earlier in the guide",
-            Command::MoveDown => "later in the guide",
-            Command::PreviousStep => "choose the step before",
-            Command::NextStep => "choose the step after",
-            Command::EditTitle => "rename the step, go to its title",
-            Command::SkipInExport => "leave the step out of exports",
-            Command::FocusedView => "close-up of the click, crop, zoom",
-            Command::AddMark(_) => "draw on the picture, annotate, mark",
-            Command::DeleteMark => "remove the chosen mark",
-            Command::FocusedAllOn => "close-up for the whole guide, crop, zoom",
-            Command::FocusedAllOff => "whole pictures for the whole guide",
-            Command::Colours(_) => "appearance, theme, dark mode, light mode",
-            Command::Settings => "hotkeys, folders, sounds, appearance, capturing, preferences, options",
-            Command::SearchCommands => "find a command by its name",
-            Command::KeyboardKeys => "shortcuts, every key",
-            Command::CheckForUpdates => "new version, release, upgrade, asks GitHub once, installs nothing",
-            Command::About => "version, licence, notices, what it is built from",
+            Command::StartCapturing => tr("record a new guide from what you do on screen, capture bar"),
+            Command::OpenCopy => tr("open a guide saved as one file, zip, import"),
+            Command::ExportScreen => tr("make a web page, Word, PowerPoint, PDF, pictures, GIF, Markdown, JSON, share"),
+            Command::BackToGuides => tr("home, the list of guides, close the guide"),
+            Command::Trash => tr("guides that were deleted, bring one back, restore"),
+            Command::Undo => tr("take back the last change"),
+            Command::Redo => tr("do again what was undone"),
+            Command::ChooseAll => tr("select every step"),
+            Command::ChooseOne => tr("select only the step with the keyboard"),
+            Command::DeletedSteps => tr("put a deleted step back, restore, empty the trash"),
+            Command::AddStep => tr("a new step after the chosen one, new"),
+            Command::DuplicateStep => tr("copy the step"),
+            Command::DeleteStep => tr("remove the chosen steps, they can be put back"),
+            Command::MoveUp => tr("earlier in the guide"),
+            Command::MoveDown => tr("later in the guide"),
+            Command::PreviousStep => tr("choose the step before"),
+            Command::NextStep => tr("choose the step after"),
+            Command::EditTitle => tr("rename the step, go to its title"),
+            Command::SkipInExport => tr("leave the step out of exports"),
+            Command::FocusedView => tr("close-up of the click, crop, zoom"),
+            Command::AddMark(_) => tr("draw on the picture, annotate, mark"),
+            Command::DeleteMark => tr("remove the chosen mark"),
+            Command::FocusedAllOn => tr("close-up for the whole guide, crop, zoom"),
+            Command::FocusedAllOff => tr("whole pictures for the whole guide"),
+            Command::Colours(_) => tr("appearance, theme, dark mode, light mode"),
+            Command::Settings => tr("hotkeys, folders, sounds, appearance, capturing, preferences, options"),
+            Command::SearchCommands => tr("find a command by its name"),
+            Command::KeyboardKeys => tr("shortcuts, every key"),
+            Command::CheckForUpdates => tr("new version, release, upgrade, asks GitHub once, installs nothing"),
+            Command::About => tr("version, licence, notices, what it is built from"),
         }
     }
 
     /// The menu it is in, for the command search ("Step menu").
-    pub fn menu(self) -> &'static str {
-        MENUS.iter().find(|m| m.items.contains(&Some(self))).map(|m| m.title).unwrap_or("")
+    pub fn menu(self) -> String {
+        MENUS.iter().find(|m| m.items.contains(&Some(self))).map(|m| tr(m.title)).unwrap_or_default()
     }
 
     pub fn kind(self) -> ItemKind {
@@ -319,6 +320,21 @@ impl Command {
             Command::Colours(_) => ItemKind::OneOf,
             _ => ItemKind::Plain,
         }
+    }
+}
+
+/// The name of a kind of mark, in the language in use (`rectangle`, `step number`).
+pub fn tool_words(tool: Tool) -> String {
+    match tool {
+        Tool::Rectangle => tr("rectangle"),
+        Tool::Oval => tr("oval"),
+        Tool::Line => tr("line"),
+        Tool::Arrow => tr("arrow"),
+        Tool::Text => tr("text"),
+        Tool::Number => tr("step number"),
+        Tool::Highlight => tr("highlight"),
+        Tool::Blur => tr("blur"),
+        Tool::Spotlight => tr("spotlight"),
     }
 }
 

@@ -10,6 +10,7 @@ use openstage_express_core::marks;
 
 use super::capture::DisplayRow;
 use super::widgets::{self, palette};
+use crate::i18n::{tr, tt};
 
 /// What the screen holds between frames.
 pub struct AreaScreen {
@@ -96,19 +97,19 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
     let mut action = AreaAction::None;
     egui::Panel::top("area-top").show(ui, |ui| {
         ui.horizontal(|ui| {
-            if widgets::button(ui, "Back").clicked() {
+            if widgets::button(ui, tr("Back")).clicked() {
                 action = AreaAction::Back;
             }
-            widgets::heading(ui, "Draw the area to capture");
+            widgets::heading(ui, tr("Draw the area to capture"));
         });
     });
     egui::Panel::right("area-controls").resizable(false).exact_size(330.0).show(ui, |ui| {
         let p = palette(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
-            ui.label(RichText::new(format!("The area is {}.", state.editor.words())).color(p.text));
+            ui.label(RichText::new(tt(format!("The area is {}.", state.editor.words()))).color(p.text));
             if state.displays.len() > 1 {
-                widgets::subheading(ui, "Display");
+                widgets::subheading(ui, tr("Display"));
                 for row in state.displays.clone() {
                     let r = ui.add(egui::RadioButton::new(state.display == row.number, row.words.clone()));
                     widgets::ring(ui, &r);
@@ -117,7 +118,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
                     }
                 }
             }
-            widgets::subheading(ui, "Numbers");
+            widgets::subheading(ui, tr("Numbers"));
             if state.fields_for != Some(state.editor.rect()) && !ui.ctx().text_edit_focused() {
                 state.refill_fields();
             }
@@ -157,15 +158,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
             if let Some(problem) = &state.problem {
                 ui.label(RichText::new(problem).color(p.text));
             }
-            widgets::subheading(ui, "Move it");
+            widgets::subheading(ui, tr("Move it"));
             ui.horizontal_wrapped(|ui| {
                 for (words, dx, dy) in [("Left", -10, 0), ("Right", 10, 0), ("Up", 0, -10), ("Down", 0, 10)] {
-                    if widgets::button(ui, &format!("Move {}", words.to_lowercase())).clicked() {
+                    if widgets::button(ui, tt(format!("Move {}", words.to_lowercase()))).clicked() {
                         state.editor.nudge(dx, dy);
                     }
                 }
             });
-            widgets::subheading(ui, "Change its size");
+            widgets::subheading(ui, tr("Change its size"));
             ui.horizontal_wrapped(|ui| {
                 for (words, dw, dh) in [("Wider", 10, 0), ("Narrower", -10, 0), ("Taller", 0, 10), ("Shorter", 0, -10)]
                 {
@@ -174,11 +175,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
                     }
                 }
             });
-            if widgets::button(ui, "Use the whole display").clicked() {
+            if widgets::button(ui, tr("Use the whole display")).clicked() {
                 state.editor.use_whole_display();
             }
             ui.add_space(8.0);
-            if widgets::primary_button(ui, "Use this area").clicked() {
+            if widgets::primary_button(ui, tr("Use this area")).clicked() {
                 action = AreaAction::Use;
             }
         });
@@ -186,7 +187,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
     egui::CentralPanel::default().show(ui, |ui| {
         let p = palette(ui);
         let Some(texture) = state.texture(ui.ctx()) else {
-            ui.label(RichText::new("There is no picture of the display.").color(p.muted));
+            ui.label(RichText::new(tr("There is no picture of the display.")).color(p.muted));
             return;
         };
         let available = ui.available_size();
@@ -196,7 +197,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AreaScreen) -> AreaAction {
             .vertical_centered(|ui| {
                 ui.add(
                     egui::Image::from_texture((texture.id(), natural * scale))
-                        .alt_text(format!("A picture of the display. The area is {}.", state.editor.words())),
+                        .alt_text(tt(format!("A picture of the display. The area is {}.", state.editor.words()))),
                 )
                 .rect
             })

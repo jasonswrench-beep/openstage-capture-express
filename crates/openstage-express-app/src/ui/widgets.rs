@@ -31,7 +31,8 @@ pub fn ring(ui: &Ui, response: &Response) {
 }
 
 /// An ordinary button.
-pub fn button(ui: &mut Ui, text: &str) -> Response {
+pub fn button(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let response = ui.button(text);
     ring(ui, &response);
     response
@@ -39,7 +40,9 @@ pub fn button(ui: &mut Ui, text: &str) -> Response {
 
 /// A button with short words on it (`Rename`) whose name for a screen reader says what it is for (`Rename How to sign in`), so that
 /// a list of them is not a list of buttons all called Rename.
-pub fn button_named(ui: &mut Ui, text: &str, name: &str) -> Response {
+pub fn button_named(ui: &mut Ui, text: impl AsRef<str>, name: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
+    let name = name.as_ref();
     let response = ui.button(text);
     let name = name.to_string();
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
@@ -48,14 +51,16 @@ pub fn button_named(ui: &mut Ui, text: &str, name: &str) -> Response {
 }
 
 /// An ordinary button that may be switched off. A switched-off button is still read by a screen reader, as unavailable.
-pub fn button_enabled(ui: &mut Ui, enabled: bool, text: &str) -> Response {
+pub fn button_enabled(ui: &mut Ui, enabled: bool, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let response = ui.add_enabled(enabled, egui::Button::new(text));
     ring(ui, &response);
     response
 }
 
 /// The one main button of a screen: indigo, with text that keeps its contrast.
-pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
+pub fn primary_button(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let p = palette(ui);
     let label = RichText::new(text).color(p.on_accent).family(bold_family());
     let response = ui.add(
@@ -69,7 +74,8 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 }
 
 /// The one main button of a screen, with an icon before its words.
-pub fn primary_icon_button(ui: &mut Ui, icon_name: UiIcon, text: &str) -> Response {
+pub fn primary_icon_button(ui: &mut Ui, icon_name: UiIcon, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let p = palette(ui);
     let label = RichText::new(text).color(p.on_accent).family(bold_family());
     let button = egui::Button::new((icon::atom(icon_name, 18.0), label))
@@ -92,7 +98,8 @@ pub fn primary_icon_button(ui: &mut Ui, icon_name: UiIcon, text: &str) -> Respon
 }
 
 /// A first-level heading in a colour of its own (the capture bar's, on navy).
-pub fn heading_in(ui: &mut Ui, text: &str, colour: egui::Color32) -> Response {
+pub fn heading_in(ui: &mut Ui, text: impl AsRef<str>, colour: egui::Color32) -> Response {
+    let text = text.as_ref();
     let response = ui.label(RichText::new(text).heading().color(colour));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(accesskit::Role::Heading);
@@ -103,14 +110,17 @@ pub fn heading_in(ui: &mut Ui, text: &str, colour: egui::Color32) -> Response {
 }
 
 /// An ordinary button with an icon before its words (the icon takes the words' colour).
-pub fn icon_button(ui: &mut Ui, icon_name: UiIcon, text: &str) -> Response {
+pub fn icon_button(ui: &mut Ui, icon_name: UiIcon, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let response = ui.add(egui::Button::new((icon::atom(icon_name, 16.0), text.to_string())));
     ring(ui, &response);
     response
 }
 
 /// A button with an icon and short words (`Rename`) whose name for a screen reader says what it is for (`Rename How to sign in`).
-pub fn icon_button_named(ui: &mut Ui, icon_name: UiIcon, text: &str, name: &str) -> Response {
+pub fn icon_button_named(ui: &mut Ui, icon_name: UiIcon, text: impl AsRef<str>, name: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
+    let name = name.as_ref();
     let response = ui.add(egui::Button::new((icon::atom(icon_name, 16.0), text.to_string())));
     let name = name.to_string();
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
@@ -199,7 +209,10 @@ pub fn list_row_of_many(
 
 /// A card that opens something (a guide on Home): the title on the left, a few words on the right. A button for a screen reader,
 /// named `name`. It is as wide as the room allows, but no wider than `most` (to leave room for buttons beside it).
-pub fn card(ui: &mut Ui, title: &str, trailing: &str, name: &str, most: f32) -> Response {
+pub fn card(ui: &mut Ui, title: impl AsRef<str>, trailing: impl AsRef<str>, name: impl AsRef<str>, most: f32) -> Response {
+    let title = title.as_ref();
+    let trailing = trailing.as_ref();
+    let name = name.as_ref();
     let p = palette(ui);
     let width = ui.available_width().min(most);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 56.0), egui::Sense::click());
@@ -236,7 +249,8 @@ pub fn card(ui: &mut Ui, title: &str, trailing: &str, name: &str, most: f32) -> 
 }
 
 /// A second-level heading (the screen's own title uses `ui.heading`).
-pub fn subheading(ui: &mut Ui, text: &str) -> Response {
+pub fn subheading(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let response = ui.label(RichText::new(text).size(19.0).family(bold_family()));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(accesskit::Role::Heading);
@@ -247,7 +261,8 @@ pub fn subheading(ui: &mut Ui, text: &str) -> Response {
 }
 
 /// The first-level heading of a screen.
-pub fn heading(ui: &mut Ui, text: &str) -> Response {
+pub fn heading(ui: &mut Ui, text: impl AsRef<str>) -> Response {
+    let text = text.as_ref();
     let response = ui.heading(text);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(accesskit::Role::Heading);
@@ -266,7 +281,7 @@ pub struct Status {
 
 impl Status {
     pub fn say(&mut self, text: impl Into<String>) {
-        self.text = text.into();
+        self.text = crate::i18n::translate_text(&text.into());
         self.serial += 1;
     }
 
@@ -281,7 +296,8 @@ impl Status {
 /// without taking the keyboard away from where it is.
 pub fn status_line(ui: &mut Ui, status: &Status) {
     let p = palette(ui);
-    let words = if status.text.is_empty() { "Ready." } else { status.text.as_str() };
+    let ready = crate::i18n::tr("Ready.");
+    let words = if status.text.is_empty() { ready.as_str() } else { status.text.as_str() };
     let response = ui.label(RichText::new(words).color(p.muted));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(accesskit::Role::Status);

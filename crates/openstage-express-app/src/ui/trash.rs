@@ -9,6 +9,7 @@ use crate::library::Entry;
 
 use super::rows::steps_words;
 use super::widgets::{self, palette};
+use crate::i18n::{tr, tt};
 
 /// The guides in the Trash.
 #[derive(Debug, Default)]
@@ -29,29 +30,29 @@ pub enum TrashAction {
 
 pub fn show(ui: &mut egui::Ui, state: &TrashState) -> TrashAction {
     let mut action = TrashAction::None;
-    if super::shell::screen_header(ui, "trash-top", "Back to guides", "Trash", false) {
+    if super::shell::screen_header(ui, "trash-top", tr("Back to guides"), tr("Trash"), false) {
         action = TrashAction::Back;
     }
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         ui.label(
             RichText::new(
-                "Guides you delete are moved here, not erased. They stay until you delete them yourself in Explorer.",
+                tr("Guides you delete are moved here, not erased. They stay until you delete them yourself in Explorer."),
             )
             .color(p.muted),
         );
-        if widgets::button(ui, "Show the Trash folder").clicked() {
+        if widgets::button(ui, tr("Show the Trash folder")).clicked() {
             action = TrashAction::ShowFolder;
         }
         ui.add_space(10.0);
         if state.entries.is_empty() {
-            ui.label(RichText::new("The Trash is empty.").color(p.text));
+            ui.label(RichText::new(tr("The Trash is empty.")).color(p.text));
         }
         for (index, entry) in state.entries.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&entry.title).strong().color(p.text));
                 ui.label(RichText::new(steps_words(entry.steps)).color(p.muted));
-                if widgets::button_named(ui, "Restore", &format!("Restore {}", entry.title)).clicked() {
+                if widgets::button_named(ui, tr("Restore"), tt(format!("Restore {}", entry.title))).clicked() {
                     action = TrashAction::Restore(index);
                 }
             });

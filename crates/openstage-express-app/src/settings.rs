@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::export_options::{lenient, ExportChoices};
+use crate::i18n::{k, Lang};
 use crate::target::{AreaChoice, TargetKind};
 
 pub const SCHEMA_VERSION: &str = "0.1.0";
@@ -89,9 +90,9 @@ pub enum TitleLanguage {
 impl TitleLanguage {
     pub fn name(self) -> &'static str {
         match self {
-            TitleLanguage::En => "English",
-            TitleLanguage::De => "German",
-            TitleLanguage::Fr => "French",
+            TitleLanguage::En => k("English"),
+            TitleLanguage::De => k("German"),
+            TitleLanguage::Fr => k("French"),
         }
     }
 
@@ -136,10 +137,10 @@ impl HomeSort {
     /// For the button: what the list is sorted by now.
     pub fn name(self) -> &'static str {
         match self {
-            HomeSort::Newest => "newest first",
-            HomeSort::Oldest => "oldest first",
-            HomeSort::NameAz => "name, A to Z",
-            HomeSort::NameZa => "name, Z to A",
+            HomeSort::Newest => k("newest first"),
+            HomeSort::Oldest => k("oldest first"),
+            HomeSort::NameAz => k("name, A to Z"),
+            HomeSort::NameZa => k("name, Z to A"),
         }
     }
 
@@ -214,6 +215,10 @@ pub struct AppSettings {
     pub capture_target: TargetKind,
     pub last_area: Option<AreaChoice>,
     pub title_language: TitleLanguage,
+    /// The language of the program's own words (not of the guide).
+    pub interface_language: Lang,
+    /// Whether the welcome page has been seen. A settings file made before there was one means it has.
+    pub first_run_done: bool,
     /// How long to wait after a click before taking its picture (so an animation can finish).
     pub screenshot_delay_ms: u64,
     pub typing_delay_ms: u64,
@@ -262,6 +267,8 @@ impl Default for AppSettings {
             capture_target: TargetKind::Screen,
             last_area: None,
             title_language: TitleLanguage::En,
+            interface_language: Lang::En,
+            first_run_done: false,
             screenshot_delay_ms: 0,
             typing_delay_ms: 1000,
             capture_outside_clicks: false,
@@ -368,8 +375,13 @@ pub fn load(path: &Path) -> (AppSettings, Option<String>) {
         }
     };
     let newer = value.get("schemaVersion").and_then(Value::as_str).is_some_and(|v| version_is_newer(v, SCHEMA_VERSION));
+    let had_first_run = value.get("firstRunDone").is_some();
     match serde_json::from_value::<AppSettings>(value) {
-        Ok(settings) => {
+        Ok(mut settings) => {
+            // A settings file from before the welcome page was made: the person has used the program, and is not welcomed again.
+            if !had_first_run {
+                settings.first_run_done = true;
+            }
             let note = newer.then(|| {
                 "The settings were saved by a newer Express. Settings this one does not know are kept.".to_string()
             });

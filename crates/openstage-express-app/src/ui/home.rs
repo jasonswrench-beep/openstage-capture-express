@@ -14,6 +14,7 @@ use crate::settings::HomeSort;
 use super::icon::UiIcon;
 use super::rows::{step_count, steps_words};
 use super::widgets::{self, palette};
+use crate::i18n::{tr, tt};
 
 /// One guide in the list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,11 +220,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         let p = palette(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         ui.set_max_width(ui.available_width().min(MOST_WIDTH));
-        widgets::heading(ui, "Your guides");
-        ui.label(RichText::new("Step-by-step guides from what you do on screen. Start capturing is at the top right.").color(p.muted));
+        widgets::heading(ui, tr("Your guides"));
+        ui.label(RichText::new(tr("Step-by-step guides from what you do on screen. Start capturing is at the top right.")).color(p.muted));
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
-            let label = ui.label("Search");
+            let label = ui.label(tr("Search"));
             let search = ui
                 .add(egui::TextEdit::singleline(&mut state.search).hint_text("Search your guides").desired_width(300.0))
                 .labelled_by(label.id);
@@ -231,8 +232,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
             // Ordering one guide is not a thing, so the button is there when there are two or more.
             if state.guides.len() > 1 {
                 ui.add_space(12.0);
-                let shown = format!("Sort: {}", state.sort.name());
-                let spoken = format!("{shown}. Press to change the order.");
+                let shown = tt(format!("Sort: {}", tr(state.sort.name())));
+                let spoken = tt(format!("{shown}. Press to change the order."));
                 if widgets::icon_button_named(ui, UiIcon::ArrowUpDown, &shown, &spoken).clicked() {
                     action = Action::Sort;
                 }
@@ -241,10 +242,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         ui.add_space(6.0);
         if let Some(rename) = state.renaming.as_mut() {
             widgets::card_frame(ui).show(ui, |ui| {
-            let shown = format!("Rename \"{}\"", rename.title);
+            let shown = tt(format!("Rename \"{}\"", rename.title));
             widgets::subheading(ui, &shown);
             ui.horizontal_wrapped(|ui| {
-                let label = ui.label(format!("New name for {}", rename.title));
+                let label = ui.label(tt(format!("New name for {}", rename.title)));
                 let field = ui
                     .add(egui::TextEdit::singleline(&mut rename.text).desired_width(360.0))
                     .labelled_by(label.id);
@@ -259,10 +260,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
                 } else if field.lost_focus() && escape {
                     action = Action::CancelRename;
                 }
-                if widgets::primary_button(ui, "Save name").clicked() {
+                if widgets::primary_button(ui, tr("Save name")).clicked() {
                     action = Action::SaveName;
                 }
-                if widgets::button(ui, "Cancel").clicked() {
+                if widgets::button(ui, tr("Cancel")).clicked() {
                     action = Action::CancelRename;
                 }
             });
@@ -271,21 +272,21 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         }
         if let Some(delete) = state.deleting.as_mut() {
             widgets::card_frame(ui).show(ui, |ui| {
-            let shown = format!("Move \"{}\" to the Trash?", delete.title);
+            let shown = tt(format!("Move \"{}\" to the Trash?", delete.title));
             widgets::subheading(ui, &shown);
             ui.label(
-                RichText::new("Nothing is erased. You can bring it back from the Trash, which is a folder next to your guides.")
+                RichText::new(tr("Nothing is erased. You can bring it back from the Trash, which is a folder next to your guides."))
                     .color(p.muted),
             );
             ui.horizontal_wrapped(|ui| {
-                let keep = widgets::button(ui, "Keep it");
+                let keep = widgets::button(ui, tr("Keep it"));
                 if std::mem::take(&mut delete.focus_next) {
                     keep.request_focus();
                 }
                 if keep.clicked() {
                     action = Action::KeepGuide;
                 }
-                if widgets::button(ui, "Move to the Trash").clicked() {
+                if widgets::button(ui, tr("Move to the Trash")).clicked() {
                     action = Action::ConfirmDelete;
                 }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -297,22 +298,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         }
         let visible = state.visible();
         if visible.is_empty() {
-            ui.label(RichText::new("No guide matches what you typed.").color(p.muted));
+            ui.label(RichText::new(tr("No guide matches what you typed.")).color(p.muted));
         }
         for index in visible {
             let card = &state.guides[index];
             ui.horizontal(|ui| {
                 let most = if card.path.is_some() { (ui.available_width() - BUTTONS_WIDTH).clamp(240.0, MOST_WIDTH) } else { MOST_WIDTH };
-                let response = widgets::card(ui, &card.title, &steps_words(card.steps), &card.label(), most);
+                let response = widgets::card(ui, &card.title, steps_words(card.steps), card.label(), most);
                 if response.clicked() {
                     action = Action::Open(index);
                 }
                 // A guide on disk can be renamed or deleted; the example cannot. Each button says whose it is.
                 if card.path.is_some() {
-                    if widgets::icon_button_named(ui, UiIcon::Pencil, "Rename", &format!("Rename {}", card.title)).clicked() {
+                    if widgets::icon_button_named(ui, UiIcon::Pencil, "Rename", tt(format!("Rename {}", card.title))).clicked() {
                         action = Action::Rename(index);
                     }
-                    if widgets::icon_button_named(ui, UiIcon::Trash, "Delete", &format!("Delete {}", card.title)).clicked() {
+                    if widgets::icon_button_named(ui, UiIcon::Trash, "Delete", tt(format!("Delete {}", card.title))).clicked() {
                         action = Action::Delete(index);
                     }
                 }
@@ -322,7 +323,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState) -> Action {
         if state.shows_example() {
             ui.label(
                 RichText::new(
-                    "This guide is an example made up for trying the editor. Click Start capturing, then do the task you want to explain.",
+                    tr("This guide is an example made up for trying the editor. Click Start capturing, then do the task you want to explain."),
                 )
                 .color(p.muted),
             );

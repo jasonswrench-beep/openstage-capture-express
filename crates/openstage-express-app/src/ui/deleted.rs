@@ -7,6 +7,7 @@ use eframe::egui::{self, RichText};
 
 use super::rows::{steps_words, DeletedRow};
 use super::widgets::{self, palette};
+use crate::i18n::{tr, tt};
 
 /// What the person asked for on this screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,8 +62,8 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
     if super::shell::screen_header(
         ui,
         "deleted-top",
-        "Back to the steps",
-        "Deleted steps",
+        tr("Back to the steps"),
+        tr("Deleted steps"),
         go_to.is_some() && rows.is_empty(),
     ) {
         action = DeletedAction::Back;
@@ -70,7 +71,7 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
         let p = palette(ui);
         if view.asking && !rows.is_empty() {
-            widgets::subheading(ui, "Empty the trash for good?");
+            widgets::subheading(ui, tr("Empty the trash for good?"));
             ui.label(
                 RichText::new(format!(
                     "This deletes {} for good, and their pictures from the guide's folder. It cannot be undone, and Undo will not \
@@ -80,14 +81,14 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
                 .color(p.muted),
             );
             ui.horizontal_wrapped(|ui| {
-                let keep = widgets::button(ui, "Keep them");
+                let keep = widgets::button(ui, tr("Keep them"));
                 if std::mem::take(&mut view.focus_keep) {
                     keep.request_focus();
                 }
                 if keep.clicked() {
                     action = DeletedAction::KeepThem;
                 }
-                if widgets::button(ui, "Empty the trash for good").clicked() {
+                if widgets::button(ui, tr("Empty the trash for good")).clicked() {
                     action = DeletedAction::EmptyForGood;
                 }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -98,18 +99,18 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
         }
         ui.label(
             RichText::new(
-                "Steps you delete are kept with the guide, not erased, until you empty the trash. Restore puts a step back \
-                 where it was. The step deleted last is first.",
+                tr("Steps you delete are kept with the guide, not erased, until you empty the trash. Restore puts a step back \
+                 where it was. The step deleted last is first."),
             )
             .color(p.muted),
         );
         ui.add_space(6.0);
         if rows.is_empty() {
-            ui.label(RichText::new("No steps are deleted.").color(p.text));
+            ui.label(RichText::new(tr("No steps are deleted.")).color(p.text));
             return;
         }
         if rows.len() > 1 {
-            let words = format!("Restore all {}", steps_words(rows.len()));
+            let words = tt(format!("Restore all {}", steps_words(rows.len())));
             if widgets::button(ui, &words).clicked() {
                 action = DeletedAction::RestoreAll;
             }
@@ -120,8 +121,8 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
         egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(ui.available_height() - 52.0).show(ui, |ui| {
             for (index, row) in rows.iter().enumerate() {
                 ui.horizontal_wrapped(|ui| {
-                    let name = format!("Restore {}", row.label());
-                    let restore = widgets::button_named(ui, "Restore", &name);
+                    let name = tt(format!("Restore {}", row.label()));
+                    let restore = widgets::button_named(ui, tr("Restore"), &name);
                     if restore.clicked() {
                         action = DeletedAction::Restore(row.id.clone());
                     }
@@ -134,7 +135,7 @@ pub fn show(ui: &mut egui::Ui, rows: &[DeletedRow], view: &mut DeletedView) -> D
             }
         });
         ui.add_space(8.0);
-        let empty = widgets::button(ui, "Empty the trash");
+        let empty = widgets::button(ui, tr("Empty the trash"));
         if std::mem::take(&mut view.focus_empty) {
             empty.request_focus();
         }

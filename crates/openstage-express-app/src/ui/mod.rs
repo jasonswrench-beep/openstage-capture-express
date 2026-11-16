@@ -10,6 +10,7 @@
 
 pub mod about;
 pub mod app;
+mod welcome;
 pub mod bar;
 pub mod capture;
 pub mod choose_area;
@@ -77,6 +78,8 @@ pub struct DevOptions {
     pub search: Option<String>,
     /// Open the list of keyboard keys, so a picture shows it.
     pub keys: bool,
+    /// Draw the window's words in this language (`en`, `de` or `fr`), so a picture shows it, whatever the settings say.
+    pub language: Option<crate::i18n::Lang>,
 }
 
 impl DevOptions {
@@ -94,6 +97,7 @@ impl DevOptions {
                         "export" => Screen::Export,
                         "settings" => Screen::Settings,
                         "about" => Screen::About,
+                        "welcome" => Screen::Welcome,
                         "trash" => Screen::Trash,
                         "deleted" => Screen::DeletedSteps,
                         "open-copy" => Screen::OpenCopy,
@@ -105,6 +109,14 @@ impl DevOptions {
                                 "--screen is home, editor, export, settings, about, trash, deleted, open-copy, bar, choose-window or choose-area, not {other:?}."
                             ))
                         }
+                    })
+                }
+                "--language" => {
+                    options.language = Some(match value("en, de or fr")?.as_str() {
+                        "en" => crate::i18n::Lang::En,
+                        "de" => crate::i18n::Lang::De,
+                        "fr" => crate::i18n::Lang::Fr,
+                        other => return Err(format!("--language is en, de or fr, not {other:?}.")),
                     })
                 }
                 "--with-marks" => options.with_marks = true,
@@ -513,6 +525,14 @@ pub fn run(options: DevOptions) -> eframe::Result {
                 None,
             );
             let mut app = app;
+            if let Some(lang) = options.language {
+                app.settings.interface_language = lang;
+            }
+            // The first time the program is run it starts on the welcome page, in the language Windows uses.
+            #[cfg(windows)]
+            if options.screen.is_none() && options.screenshot.is_none() && options.close_after.is_none() {
+                app.start_first_run_if_new(&openstage_express_windows::system::user_language());
+            }
             if let Some(y) = options.scroll {
                 app = app.with_settings_scroll(y);
             }

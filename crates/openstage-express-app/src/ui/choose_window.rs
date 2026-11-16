@@ -6,6 +6,7 @@ use eframe::egui::{self, Key, Modifiers, RichText};
 
 use super::capture::WindowRow;
 use super::widgets::{self, palette};
+use crate::i18n::tr;
 
 /// What the list holds between frames.
 #[derive(Debug, Default)]
@@ -40,23 +41,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut WindowList) -> WindowListAction {
     let mut action = WindowListAction::None;
     egui::Panel::top("windows-top").show(ui, |ui| {
         ui.horizontal(|ui| {
-            if widgets::button(ui, "Back").clicked() {
+            if widgets::button(ui, tr("Back")).clicked() {
                 action = WindowListAction::Back;
             }
-            widgets::heading(ui, "Choose a window");
+            widgets::heading(ui, tr("Choose a window"));
         });
     });
     egui::CentralPanel::default().show(ui, |ui| {
         let p = palette(ui);
-        ui.label(RichText::new("The windows that are open now. This program's own windows are not listed.").color(p.muted));
-        if widgets::button(ui, "Refresh the list").clicked() {
+        ui.label(RichText::new(tr("The windows that are open now. This program's own windows are not listed.")).color(p.muted));
+        if widgets::button(ui, tr("Refresh the list")).clicked() {
             action = WindowListAction::Refresh;
         }
         if let Some(problem) = &state.problem {
             ui.label(RichText::new(problem).color(p.text));
         }
         if state.rows.is_empty() && state.problem.is_none() {
-            ui.label(RichText::new("No window is open that can be captured. Open the program you want to explain, then refresh the list.").color(p.text));
+            ui.label(RichText::new(tr("No window is open that can be captured. Open the program you want to explain, then refresh the list.")).color(p.text));
         }
         let take_keyboard = std::mem::take(&mut state.focus_next);
         let mut chosen: Option<usize> = None;
@@ -102,7 +103,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut WindowList) -> WindowListAction {
             state.selected = Some(i);
         }
         ui.add_space(6.0);
-        let go = ui.add_enabled_ui(state.selected.is_some(), |ui| widgets::primary_button(ui, "Use this window"));
+        let go = ui.add_enabled_ui(state.selected.is_some(), |ui| widgets::primary_button(ui, tr("Use this window")));
         if go.inner.clicked() {
             if let Some(i) = state.selected {
                 action = WindowListAction::Use(i);

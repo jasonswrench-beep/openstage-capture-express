@@ -6,6 +6,7 @@ use eframe::egui::{self, RichText};
 use openstage_express_core::updates::{is_release_page, release, spoken, UpdateAnswer};
 
 use super::widgets::{self, palette};
+use crate::i18n::{tr, tt};
 
 const NOTICE: &str = include_str!("../../../../NOTICE");
 const THIRD_PARTY: &str = include_str!("../../../../THIRD-PARTY.md");
@@ -61,16 +62,16 @@ pub enum AboutAction {
 /// The version line: the program's version, and the release it was built as when it was built for one.
 pub fn version_words() -> String {
     if release().is_empty() {
-        format!("Version {}.", version())
+        tt(format!("Version {}.", version()))
     } else {
-        format!("Version {}, release {}.", version(), spoken(release()))
+        tt(format!("Version {}, release {}.", version(), spoken(release())))
     }
 }
 
 /// Draw the screen.
 pub fn show(ui: &mut egui::Ui, view: &AboutView<'_>) -> AboutAction {
     let mut action = AboutAction::None;
-    if super::shell::screen_header(ui, "about-top", "Back to guides", "About OpenStage Capture Express", false) {
+    if super::shell::screen_header(ui, "about-top", tr("Back to guides"), tr("About OpenStage Capture Express"), false) {
         action = AboutAction::Back;
     }
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
@@ -78,35 +79,35 @@ pub fn show(ui: &mut egui::Ui, view: &AboutView<'_>) -> AboutAction {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
             ui.label(version_words());
-            ui.label("A free program that turns what you do on screen into a step-by-step guide. It has no account and sends nothing about you or your guides anywhere. The one network request it makes is Check for updates, and only when you choose it.");
-            ui.label("A typing step says which field was typed in. If you choose, in Settings, to have it say what was typed, the text is read from the field when you finish typing, never recorded key by key, and never for a password field.");
+            ui.label(tr("A free program that turns what you do on screen into a step-by-step guide. It has no account and sends nothing about you or your guides anywhere. The one network request it makes is Check for updates, and only when you choose it."));
+            ui.label(tr("A typing step says which field was typed in. If you choose, in Settings, to have it say what was typed, the text is read from the field when you finish typing, never recorded key by key, and never for a password field."));
             ui.add_space(8.0);
-            widgets::subheading(ui, "Updates");
+            widgets::subheading(ui, tr("Updates"));
             if view.checking {
-                ui.label(RichText::new("Checking for updates. Please wait.").color(p.muted));
+                ui.label(RichText::new(tr("Checking for updates. Please wait.")).color(p.muted));
             } else if let Some(answer) = view.answer {
                 ui.label(RichText::new(&answer.message).color(p.text));
             } else {
-                ui.label(RichText::new("Check for updates asks GitHub, once, whether a newer Express is published. It installs nothing.").color(p.muted));
+                ui.label(RichText::new(tr("Check for updates asks GitHub, once, whether a newer Express is published. It installs nothing.")).color(p.muted));
             }
             ui.horizontal_wrapped(|ui| {
-                if widgets::button_enabled(ui, !view.checking, "Check for updates").clicked() {
+                if widgets::button_enabled(ui, !view.checking, tr("Check for updates")).clicked() {
                     action = AboutAction::Check;
                 }
                 if let Some(url) = view.answer.and_then(|a| a.url.as_deref()).filter(|u| is_release_page(u)) {
-                    if widgets::button(ui, "Open the release page").clicked() {
+                    if widgets::button(ui, tr("Open the release page")).clicked() {
                         action = AboutAction::OpenPage(url.to_string());
                     }
                 }
             });
             ui.add_space(8.0);
-            widgets::subheading(ui, "Licence and notices");
+            widgets::subheading(ui, tr("Licence and notices"));
             for paragraph in notice_paragraphs() {
                 ui.label(RichText::new(paragraph).color(p.text));
             }
             ui.add_space(8.0);
-            widgets::subheading(ui, "Programs and libraries this one is built from");
-            ui.label(RichText::new("Each is used under the licence shown.").color(p.muted));
+            widgets::subheading(ui, tr("Programs and libraries this one is built from"));
+            ui.label(RichText::new(tr("Each is used under the licence shown.")).color(p.muted));
             for line in third_party_lines() {
                 ui.label(RichText::new(line).size(13.5).color(p.muted));
             }

@@ -26,6 +26,7 @@ use openstage_express_export::share::{make_copy, CopyOptions};
 use openstage_express_export::{Export, OutFile};
 
 use crate::export_options::ExportChoices;
+use crate::i18n::{k, tr, tt};
 use crate::settings::DocumentPicturesChoice;
 
 /// One kind of export the person can choose.
@@ -65,34 +66,34 @@ impl Format {
     /// The name on the checkbox.
     pub fn name(self) -> &'static str {
         match self {
-            Format::Html => "Web page",
-            Format::Markdown => "Markdown",
-            Format::Json => "JSON data",
-            Format::Images => "Pictures (PNG)",
-            Format::Jpg => "Pictures (JPG)",
-            Format::Gif => "Animated GIF",
-            Format::Pdf => "PDF",
-            Format::Word => "Word document",
-            Format::PowerPoint => "PowerPoint presentation",
-            Format::OpenExplainer => "OpenExplainer book",
-            Format::Author => "OpenStage Author slides",
+            Format::Html => k("Web page"),
+            Format::Markdown => k("Markdown"),
+            Format::Json => k("JSON data"),
+            Format::Images => k("Pictures (PNG)"),
+            Format::Jpg => k("Pictures (JPG)"),
+            Format::Gif => k("Animated GIF"),
+            Format::Pdf => k("PDF"),
+            Format::Word => k("Word document"),
+            Format::PowerPoint => k("PowerPoint presentation"),
+            Format::OpenExplainer => k("OpenExplainer book"),
+            Format::Author => k("OpenStage Author slides"),
         }
     }
 
     /// A few words on what it is for, read after the name.
     pub fn about(self) -> &'static str {
         match self {
-            Format::Html => "one page that opens in any browser, with the pictures inside",
-            Format::Markdown => "text for a wiki or a help system, with a folder of pictures",
-            Format::Json => "the steps as data for other programs",
-            Format::Images => "one picture file for each step",
-            Format::Jpg => "one smaller picture file for each step",
-            Format::Gif => "a short animation that steps through the guide",
-            Format::Pdf => "a tagged document with contents and bookmarks, made by Microsoft Edge's engine",
-            Format::Word => "an editable document with headings, a contents list and the pictures",
-            Format::PowerPoint => "one slide for each step, with the text in the notes",
-            Format::OpenExplainer => "the steps and pictures as a book to bring into OpenExplainer (its Import an export)",
-            Format::Author => "a PowerPoint file to bring into OpenStage Author (its PowerPoint slides), with the text in the notes",
+            Format::Html => k("one page that opens in any browser, with the pictures inside"),
+            Format::Markdown => k("text for a wiki or a help system, with a folder of pictures"),
+            Format::Json => k("the steps as data for other programs"),
+            Format::Images => k("one picture file for each step"),
+            Format::Jpg => k("one smaller picture file for each step"),
+            Format::Gif => k("a short animation that steps through the guide"),
+            Format::Pdf => k("a tagged document with contents and bookmarks, made by Microsoft Edge's engine"),
+            Format::Word => k("an editable document with headings, a contents list and the pictures"),
+            Format::PowerPoint => k("one slide for each step, with the text in the notes"),
+            Format::OpenExplainer => k("the steps and pictures as a book to bring into OpenExplainer (its Import an export)"),
+            Format::Author => k("a PowerPoint file to bring into OpenStage Author (its PowerPoint slides), with the text in the notes"),
         }
     }
 
@@ -251,7 +252,11 @@ impl Report {
     pub fn sentence(&self) -> String {
         let made = self.made.len();
         let mut words =
-            format!("Exported {} format{} to {}.", made, if made == 1 { "" } else { "s" }, self.folder.display());
+            if made == 1 {
+                format!("Exported 1 format to {}.", self.folder.display())
+            } else {
+                format!("Exported {made} formats to {}.", self.folder.display())
+            };
         if let Some(preview) = &self.preview {
             if preview.is_cut() {
                 let first = if preview.shown == 1 {
@@ -271,7 +276,7 @@ impl Report {
             }
         }
         for (format, why) in &self.skipped {
-            words.push_str(&format!(" {} was not made: {why}", format.name()));
+            words.push_str(&tt(format!(" {} was not made: {why}", tr(format.name()))));
         }
         if !self.warnings.is_empty() {
             let n = self.warnings.len();

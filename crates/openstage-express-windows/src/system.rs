@@ -10,6 +10,18 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 
+/// The language Windows is set to for this person, as a name such as `de-DE` (empty if Windows will not say).
+pub fn user_language() -> String {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+    let mut buffer = [0u16; 85];
+    // SAFETY: the buffer is as long as the call is told.
+    let written = unsafe { GetUserDefaultLocaleName(&mut buffer) };
+    if written <= 1 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..(written as usize - 1)])
+}
+
 /// The person's Documents folder as Windows has it, or `None` if Windows will not say.
 /// Show a folder in File Explorer. Windows is asked to open it (ShellExecuteW), so no program is looked for by its bare name: one
 /// named explorer.exe beside Express, in a folder others can write to, would otherwise run (the security review of 2026-11-13).

@@ -9,6 +9,7 @@ use eframe::egui::{self, RichText};
 use super::icon::UiIcon;
 use super::widgets::{self, palette};
 use crate::target::TargetKind;
+use crate::i18n::{tr, tt};
 
 /// What the bar is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,9 +56,9 @@ impl BarView {
     pub fn headline(&self) -> String {
         match self.phase {
             BarPhase::Ready => "Ready to capture".to_string(),
-            BarPhase::Capturing => format!("Capturing, step {}", self.steps + 1),
-            BarPhase::Paused => format!("Paused, {}", super::rows::steps_words(self.steps)),
-            BarPhase::Saving => format!("Saving your guide, {}", super::rows::steps_words(self.steps)),
+            BarPhase::Capturing => tt(format!("Capturing, step {}", self.steps + 1)),
+            BarPhase::Paused => tt(format!("Paused, {}", super::rows::steps_words(self.steps))),
+            BarPhase::Saving => tt(format!("Saving your guide, {}", super::rows::steps_words(self.steps))),
         }
     }
 }
@@ -104,22 +105,22 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
                 BarPhase::Paused => super::icon::paint(ui.painter(), at, UiIcon::Pause, p.on_shell),
                 BarPhase::Ready | BarPhase::Saving => super::icon::paint(ui.painter(), at, UiIcon::Camera, p.brand),
             }
-            widgets::heading_in(ui, &view.headline(), p.on_shell);
+            widgets::heading_in(ui, view.headline(), p.on_shell);
         });
     });
     let page = egui::Frame::new().fill(p.page).inner_margin(egui::Margin { left: 16, right: 16, top: 10, bottom: 8 });
     egui::CentralPanel::default().frame(page).show(ui, |ui| {
         if view.phase == BarPhase::Ready {
-            ui.label(RichText::new(format!("Captures {}.", view.what)).color(p.muted));
+            ui.label(RichText::new(tt(format!("Captures {}.", view.what))).color(p.muted));
             // A picture is of the screen, so a notification or a pop-up that is showing goes into it (the security review of
             // 2026-11-13).
             ui.label(RichText::new(PICTURES_SHOW_EVERYTHING).color(p.muted));
         }
         if let Some(last) = &view.last {
-            ui.label(RichText::new(format!("Last step: {last}")).color(p.muted));
+            ui.label(RichText::new(tt(format!("Last step: {last}"))).color(p.muted));
         }
         if view.phase == BarPhase::Ready {
-            ui.label(RichText::new("What to capture:").color(p.muted));
+            ui.label(RichText::new(tr("What to capture:")).color(p.muted));
             ui.horizontal_wrapped(|ui| {
                 for kind in TargetKind::ALL {
                     let r = ui.add(egui::RadioButton::new(view.target == kind, kind.name()));
@@ -144,9 +145,9 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
         ui.horizontal(|ui| match view.phase {
             BarPhase::Ready => {
                 let start = if view.can_start {
-                    widgets::primary_icon_button(ui, UiIcon::CircleDot, "Start")
+                    widgets::primary_icon_button(ui, UiIcon::CircleDot, tr("Start"))
                 } else {
-                    widgets::button_enabled(ui, false, "Start")
+                    widgets::button_enabled(ui, false, tr("Start"))
                 };
                 if phase_changed {
                     start.request_focus();
@@ -154,42 +155,42 @@ pub fn show(ui: &mut egui::Ui, view: &BarView) -> BarAction {
                 if start.clicked() {
                     action = BarAction::Start;
                 }
-                if widgets::icon_button(ui, UiIcon::X, "Cancel").clicked() {
+                if widgets::icon_button(ui, UiIcon::X, tr("Cancel")).clicked() {
                     action = BarAction::Cancel;
                 }
-                if widgets::button(ui, "Do not disturb...").clicked() {
+                if widgets::button(ui, tr("Do not disturb...")).clicked() {
                     action = BarAction::DoNotDisturb;
                 }
             }
             BarPhase::Capturing => {
-                let pause = widgets::icon_button(ui, UiIcon::Pause, "Pause");
+                let pause = widgets::icon_button(ui, UiIcon::Pause, tr("Pause"));
                 if phase_changed {
                     pause.request_focus();
                 }
                 if pause.clicked() {
                     action = BarAction::Pause;
                 }
-                if widgets::icon_button(ui, UiIcon::Camera, "Capture now").clicked() {
+                if widgets::icon_button(ui, UiIcon::Camera, tr("Capture now")).clicked() {
                     action = BarAction::CaptureNow;
                 }
-                if widgets::primary_icon_button(ui, UiIcon::CircleStop, "Finish").clicked() {
+                if widgets::primary_icon_button(ui, UiIcon::CircleStop, tr("Finish")).clicked() {
                     action = BarAction::Finish;
                 }
             }
             BarPhase::Paused => {
-                let resume = widgets::primary_icon_button(ui, UiIcon::Play, "Resume");
+                let resume = widgets::primary_icon_button(ui, UiIcon::Play, tr("Resume"));
                 if phase_changed {
                     resume.request_focus();
                 }
                 if resume.clicked() {
                     action = BarAction::Resume;
                 }
-                if widgets::icon_button(ui, UiIcon::CircleStop, "Finish").clicked() {
+                if widgets::icon_button(ui, UiIcon::CircleStop, tr("Finish")).clicked() {
                     action = BarAction::Finish;
                 }
             }
             BarPhase::Saving => {
-                widgets::button_enabled(ui, false, "Saving...");
+                widgets::button_enabled(ui, false, tr("Saving..."));
             }
         });
         if !view.hotkeys.is_empty() {

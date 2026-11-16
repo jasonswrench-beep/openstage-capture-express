@@ -17,6 +17,7 @@ use openstage_express_export::plan::exported_step_count;
 use openstage_express_export::share::CopyOptions;
 
 use super::about;
+use super::welcome;
 use super::bar::{self, BarAction, BarView};
 use super::capture::{
     cannot_capture, CaptureControl, CuePlayer, Desktop, HotkeyAction, NoCues, NoDesktop, Outcome, Starter,
@@ -78,6 +79,8 @@ pub enum Screen {
     DeletedSteps,
     /// A guide saved as one file (a copy), to be opened as a new guide.
     OpenCopy,
+    /// The welcome page, shown once, the first time the program is run.
+    Welcome,
     /// The capture bar: the window is a small strip that stays on top while the person works in other programs.
     Bar,
     /// The list of open windows, to choose the one to capture (still on top, taller than the bar).
@@ -246,6 +249,7 @@ impl App {
                 app.screen = Screen::DeletedSteps;
             }
             Screen::OpenCopy => app.screen = Screen::OpenCopy,
+            Screen::Welcome => app.screen = Screen::Welcome,
             Screen::Home => {}
         }
         app
@@ -370,6 +374,18 @@ impl App {
         self.settings_note = note;
         self.refresh_templates();
         self
+    }
+
+    /// The first time the program is run (the settings file says the welcome page has not been seen), start on the welcome page with the
+    /// language Windows uses chosen. A person who has used the program before is not welcomed again.
+    pub fn start_first_run_if_new(&mut self, windows_language: &str) {
+        if self.settings.first_run_done || self.settings_path.is_none() {
+            return;
+        }
+        self.settings.interface_language = crate::i18n::Lang::from_windows(windows_language);
+        crate::i18n::set_language(self.settings.interface_language);
+        self.screen = Screen::Welcome;
+        self.status.say("Welcome. Choose your language and colours, then press Start.");
     }
 
     /// Look in the templates folder again.
@@ -644,6 +660,7 @@ impl App {
                 | Screen::About
                 | Screen::Trash
                 | Screen::OpenCopy
+                | Screen::Welcome
                 | Screen::DeletedSteps => {
                     self.status.say("Go back to your guides first, then press the hotkey again to start capturing.")
                 }
@@ -714,7 +731,11 @@ impl App {
         self.window_list = WindowList::new(rows, problem);
         self.screen = Screen::ChooseWindow;
         let n = self.window_list.rows.len();
-        self.status.say(format!("Choose a window. {n} {} open.", if n == 1 { "window is" } else { "windows are" }));
+        self.status.say(if n == 1 {
+            "Choose a window. 1 window is open.".to_string()
+        } else {
+            format!("Choose a window. {n} windows are open.")
+        });
     }
 
     fn open_area_screen(&mut self, display: u32) {
@@ -882,7 +903,7 @@ impl App {
         self.export_job = Some(export_run::spawn(job));
         self.export.working = true;
         self.export.said = None;
-        let formats = format!("{n} format{}", if n == 1 { "" } else { "s" });
+        let formats = if n == 1 { "1 format".to_string() } else { format!("{n} formats") };
         let words = if choices.first_steps.is_some() {
             format!("Exporting a preview in {formats}. Please wait.")
         } else {
@@ -944,6 +965,8 @@ impl App {
     /// Draw the window: the navy bar and the menus, the screen, then the status line along the foot. The foot is drawn last so that
     /// a screen reader reaches it last, after everything the screen shows. The command search and the keys list are drawn over it.
     pub fn draw(&mut self, ui: &mut egui::Ui) {
+        // The words are drawn in the language the settings name, so a change in Settings or on the welcome page shows at once.
+        crate::i18n::set_language(self.settings.interface_language);
         self.poll();
         if let Some(editor) = self.editor.as_mut() {
             if let Some(why) = editor.save_if_changed() {
@@ -1061,7 +1084,7 @@ impl App {
             Screen::Home => {
                 view.buttons.push(BarButton {
                     command: Command::StartCapturing,
-                    words: "Start capturing",
+                    words: crate::i18n::k("Start capturing"),
                     primary: true,
                     enabled: true,
                 });
@@ -1069,7 +1092,7 @@ impl App {
             Screen::Editor => {
                 view.back = Some(BarButton {
                     command: Command::BackToGuides,
-                    words: "Back to guides",
+                    words: crate::i18n::k("Back to guides"),
                     primary: false,
                     enabled: true,
                 });
@@ -1078,19 +1101,19 @@ impl App {
                 }
                 view.buttons.push(BarButton {
                     command: Command::Undo,
-                    words: "Undo",
+                    words: crate::i18n::k("Undo"),
                     primary: false,
                     enabled: state(Command::Undo),
                 });
                 view.buttons.push(BarButton {
                     command: Command::Redo,
-                    words: "Redo",
+                    words: crate::i18n::k("Redo"),
                     primary: false,
                     enabled: state(Command::Redo),
                 });
                 view.buttons.push(BarButton {
                     command: Command::ExportScreen,
-                    words: "Export",
+                    words: crate::i18n::k("Export"),
                     primary: true,
                     enabled: state(Command::ExportScreen),
                 });
@@ -1110,7 +1133,7 @@ impl App {
         MENUS
             .iter()
             .map(|plan| Menu {
-                title: plan.title.to_string(),
+                title: crate::i18n::tr(plan.title),
                 lines: plan
                     .items
                     .iter()
@@ -1263,7 +1286,11 @@ impl App {
                 self.status.say(if n == 0 {
                     "The Trash is empty.".to_string()
                 } else {
-                    format!("The Trash has {n} guide{}. Restore brings one back.", if n == 1 { "" } else { "s" })
+                    if n == 1 {
+                        "The Trash has 1 guide. Restore brings one back.".to_string()
+                    } else {
+                        format!("The Trash has {n} guides. Restore brings one back.")
+                    }
                 });
             }
             Action::OpenCopy => {
@@ -1305,7 +1332,7 @@ impl App {
                 self.settings.home_sort = next;
                 self.home.set_sort(next);
                 self.save_settings();
-                self.status.say(format!("Sorted by {}.", next.name()));
+                self.status.say(format!("Sorted by {}.", crate::i18n::tr(next.name())));
             }
         }
     }
@@ -1535,6 +1562,40 @@ impl App {
                             "Capturing {}. Press Start when you are ready.",
                             self.target.words(&self.what)
                         ));
+                    }
+                }
+            }
+            Screen::Welcome => {
+                let view = welcome::WelcomeView {
+                    guides_folder: self.library.display().to_string(),
+                    hotkeys: self.hotkey_words.clone(),
+                };
+                let before = self.settings.clone();
+                let action = welcome::show(ui, &mut self.settings, &view);
+                if self.settings != before {
+                    self.save_settings();
+                }
+                match action {
+                    welcome::WelcomeAction::None => {}
+                    welcome::WelcomeAction::ChooseFolder => {
+                        if let Some(chosen) = (self.chooser)(&self.library).filter(|c| !openstage_express_core::fsutil::is_network_path(c)) {
+                            self.settings.guides_folder = Some(chosen.display().to_string());
+                            self.library = chosen;
+                            self.refresh_home();
+                            self.save_settings();
+                            self.status.say(format!("Guides are now kept in {}.", self.library.display()));
+                        }
+                    }
+                    welcome::WelcomeAction::Start => {
+                        self.settings.first_run_done = true;
+                        self.save_settings();
+                        self.screen = Screen::Home;
+                        self.status.say("Welcome. Press Start capturing, or open the example guide.");
+                    }
+                    welcome::WelcomeAction::OpenExample => {
+                        self.settings.first_run_done = true;
+                        self.save_settings();
+                        self.open_example();
                     }
                 }
             }

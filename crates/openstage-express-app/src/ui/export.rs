@@ -17,6 +17,7 @@ use crate::settings::DocumentPicturesChoice;
 use openstage_express_export::gif::ALLOWED_SECONDS;
 use openstage_express_export::images::{DEFAULT_JPEG_QUALITY, JPEG_QUALITY_CHOICES};
 use openstage_express_export::plan::{DEFAULT_IMAGE_WIDTH, DEFAULT_PREVIEW_STEPS, IMAGE_WIDTH_CHOICES};
+use crate::i18n::{tr, tt};
 
 /// The most steps a preview can be asked for (a guide with more than this is exported whole anyway).
 pub const MAX_PREVIEW_STEPS: usize = 9999;
@@ -33,7 +34,7 @@ pub fn parse_quality(text: &str) -> Result<u8, String> {
 pub fn parse_steps(text: &str) -> Result<usize, String> {
     match text.trim().parse::<usize>() {
         Ok(n) if (1..=MAX_PREVIEW_STEPS).contains(&n) => Ok(n),
-        _ => Err(format!("Type a whole number from 1 to {MAX_PREVIEW_STEPS} for the number of steps, such as 5.")),
+        _ => Err(tt(format!("Type a whole number from 1 to {MAX_PREVIEW_STEPS} for the number of steps, such as 5."))),
     }
 }
 
@@ -192,7 +193,9 @@ impl ExportState {
 
 /// A radio button whose words on the screen are short and whose name for a screen reader says what it is a choice of, because a
 /// screen reader says the name of the button the keyboard is on without the heading above it.
-fn choice(ui: &mut egui::Ui, selected: bool, shown: &str, name: &str) -> egui::Response {
+fn choice(ui: &mut egui::Ui, selected: bool, shown: impl AsRef<str>, name: impl AsRef<str>) -> egui::Response {
+    let shown = shown.as_ref();
+    let name = name.as_ref();
     let response = ui.add(egui::RadioButton::new(selected, shown));
     widgets::ring(ui, &response);
     let name = name.to_string();
@@ -202,7 +205,9 @@ fn choice(ui: &mut egui::Ui, selected: bool, shown: &str, name: &str) -> egui::R
 
 /// A tick box with a name for a screen reader that says which format it belongs to, because the same words (`Contents list`) are on
 /// the PDF's and the Word document's.
-fn option_check(ui: &mut egui::Ui, value: &mut bool, shown: &str, name: &str) {
+fn option_check(ui: &mut egui::Ui, value: &mut bool, shown: impl AsRef<str>, name: impl AsRef<str>) {
+    let shown = shown.as_ref();
+    let name = name.as_ref();
     let response = ui.add(egui::Checkbox::new(value, shown));
     widgets::ring(ui, &response);
     let name = name.to_string();
@@ -211,7 +216,8 @@ fn option_check(ui: &mut egui::Ui, value: &mut bool, shown: &str, name: &str) {
 
 /// A row of radio buttons for one setting: `heading` says what is being chosen, each item is the short words on the button and the
 /// longer name a screen reader says.
-fn option_radios<T: Copy + PartialEq>(ui: &mut egui::Ui, heading: &str, value: &mut T, items: &[(T, String, String)]) {
+fn option_radios<T: Copy + PartialEq>(ui: &mut egui::Ui, heading: impl AsRef<str>, value: &mut T, items: &[(T, String, String)]) {
+    let heading = heading.as_ref();
     let p = palette(ui);
     ui.label(RichText::new(heading).family(super::fonts::bold_family()).color(p.text));
     ui.horizontal_wrapped(|ui| {
@@ -224,7 +230,9 @@ fn option_radios<T: Copy + PartialEq>(ui: &mut egui::Ui, heading: &str, value: &
 }
 
 /// A box for one line of text, labelled, kept to [`MAX_LINE_CHARS`] letters.
-fn option_line(ui: &mut egui::Ui, label: &str, text: &mut String, name: &str) {
+fn option_line(ui: &mut egui::Ui, label: impl AsRef<str>, text: &mut String, name: impl AsRef<str>) {
+    let label = label.as_ref();
+    let name = name.as_ref();
     ui.horizontal_wrapped(|ui| {
         let words = ui.label(label);
         let field = ui.add(egui::TextEdit::singleline(text).desired_width(320.0).char_limit(MAX_LINE_CHARS));
@@ -239,8 +247,8 @@ fn paper_items(format: &str) -> Vec<(Paper, String, String)> {
     Paper::ALL
         .iter()
         .map(|p| {
-            let shown = if *p == Paper::A4 { format!("{} (the usual)", p.name()) } else { p.name().to_string() };
-            (*p, shown, format!("{format} paper size {}", p.name()))
+            let shown = if *p == Paper::A4 { tt(format!("{} (the usual)", p.name())) } else { p.name().to_string() };
+            (*p, shown, tt(format!("{format} paper size {}", p.name())))
         })
         .collect()
 }
@@ -248,7 +256,7 @@ fn paper_items(format: &str) -> Vec<(Paper, String, String)> {
 fn turn_items(format: &str) -> Vec<(Turn, String, String)> {
     [Turn::Portrait, Turn::Landscape]
         .iter()
-        .map(|t| (*t, t.name().to_string(), format!("{format} paper turned: {}", t.name())))
+        .map(|t| (*t, t.name().to_string(), tt(format!("{format} paper turned: {}", t.name()))))
         .collect()
 }
 
@@ -256,14 +264,18 @@ fn margin_items(format: &str, usual: u32) -> Vec<(u32, String, String)> {
     MARGIN_CHOICES
         .iter()
         .map(|m| {
-            let shown = if *m == usual { format!("{m} mm (the usual)") } else { format!("{m} mm") };
-            (*m, shown, format!("{format} margin {m} millimetres"))
+            let shown = if *m == usual { tt(format!("{m} mm (the usual)")) } else { format!("{m} mm") };
+            (*m, shown, tt(format!("{format} margin {m} millimetres")))
         })
         .collect()
 }
 
 fn seconds_words(seconds: u32) -> String {
-    format!("{seconds} second{}", if seconds == 1 { "" } else { "s" })
+    if seconds == 1 {
+        tr("1 second")
+    } else {
+        crate::i18n::trf("{1} seconds", &[&seconds])
+    }
 }
 
 /// The cards for the formats that have choices of their own: one for each of those that is ticked above.
@@ -273,84 +285,84 @@ fn format_option_cards(ui: &mut egui::Ui, state: &mut ExportState) {
         ui.add_space(12.0);
         widgets::card_frame(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Options for the animated GIF");
+            widgets::subheading(ui, tr("Options for the animated GIF"));
             ui.label(
-                RichText::new("A GIF cannot be read by a screen reader. Make the web page too if anyone needs that.")
+                RichText::new(tr("A GIF cannot be read by a screen reader. Make the web page too if anyone needs that."))
                     .color(p.muted),
             );
             let seconds: Vec<(u32, String, String)> = ALLOWED_SECONDS
                 .iter()
                 .map(|s| {
                     let shown = if *s == 3 { "3 seconds (the usual)".to_string() } else { seconds_words(*s) };
-                    (*s, shown, format!("GIF: each step stays {}", seconds_words(*s)))
+                    (*s, shown, tt(format!("GIF: each step stays {}", seconds_words(*s))))
                 })
                 .collect();
-            option_radios(ui, "How long each step stays", &mut state.options.gif.seconds, &seconds);
+            option_radios(ui, tr("How long each step stays"), &mut state.options.gif.seconds, &seconds);
             let widths: Vec<(u32, String, String)> = GIF_WIDTH_CHOICES
                 .iter()
                 .map(|w| {
                     let shown = if *w == 800 { "800 (the usual)".to_string() } else { w.to_string() };
-                    (*w, shown, format!("GIF: {w} pixels across"))
+                    (*w, shown, tt(format!("GIF: {w} pixels across")))
                 })
                 .collect();
-            option_radios(ui, "How wide it is, in pixels", &mut state.options.gif.width, &widths);
+            option_radios(ui, tr("How wide it is, in pixels"), &mut state.options.gif.width, &widths);
             option_check(
                 ui,
                 &mut state.options.gif.title_card,
-                "Start with a picture of the guide's title",
-                "GIF: start with a picture of the guide's title",
+                tr("Start with a picture of the guide's title"),
+                tr("GIF: start with a picture of the guide's title"),
             );
             option_check(
                 ui,
                 &mut state.options.gif.progress_bar,
-                "Show a bar along the bottom that fills as the steps go by",
-                "GIF: a bar along the bottom that fills as the steps go by",
+                tr("Show a bar along the bottom that fills as the steps go by"),
+                tr("GIF: a bar along the bottom that fills as the steps go by"),
             );
-            option_check(ui, &mut state.options.gif.loop_forever, "Play again and again", "GIF: play again and again");
+            option_check(ui, &mut state.options.gif.loop_forever, tr("Play again and again"), tr("GIF: play again and again"));
         });
     }
     if state.selection.contains(Format::Pdf) {
         ui.add_space(12.0);
         widgets::card_frame(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Options for the PDF");
-            option_radios(ui, "Paper", &mut state.options.pdf.paper, &paper_items("PDF"));
-            option_radios(ui, "Which way the paper is turned", &mut state.options.pdf.turn, &turn_items("PDF"));
-            option_radios(ui, "Margins", &mut state.options.pdf.margin_mm, &margin_items("PDF", 20));
+            widgets::subheading(ui, tr("Options for the PDF"));
+            option_radios(ui, tr("Paper"), &mut state.options.pdf.paper, &paper_items("PDF"));
+            option_radios(ui, tr("Which way the paper is turned"), &mut state.options.pdf.turn, &turn_items("PDF"));
+            option_radios(ui, tr("Margins"), &mut state.options.pdf.margin_mm, &margin_items("PDF", 20));
             option_check(
                 ui,
                 &mut state.options.pdf.cover_page,
-                "A cover page with the title and description",
-                "PDF: a cover page with the title and description",
+                tr("A cover page with the title and description"),
+                tr("PDF: a cover page with the title and description"),
             );
             option_check(
                 ui,
                 &mut state.options.pdf.contents,
-                "A contents list that links to each step",
-                "PDF: a contents list that links to each step",
+                tr("A contents list that links to each step"),
+                tr("PDF: a contents list that links to each step"),
             );
-            option_check(ui, &mut state.options.pdf.page_numbers, "Page numbers", "PDF: page numbers");
+            option_check(ui, &mut state.options.pdf.page_numbers, tr("Page numbers"), tr("PDF: page numbers"));
             option_check(
                 ui,
                 &mut state.options.pdf.new_page_per_step,
-                "Start every step on a new page",
-                "PDF: start every step on a new page",
+                tr("Start every step on a new page"),
+                tr("PDF: start every step on a new page"),
             );
             option_line(
                 ui,
-                "A line at the top of every page",
+                tr("A line at the top of every page"),
                 &mut state.options.pdf.header_text,
-                "PDF: the line at the top of every page",
+                tr("PDF: the line at the top of every page"),
             );
             option_line(
                 ui,
-                "A line at the bottom of every page",
+                tr("A line at the bottom of every page"),
                 &mut state.options.pdf.footer_text,
-                "PDF: the line at the bottom of every page",
+                tr("PDF: the line at the bottom of every page"),
             );
             ui.label(
                 RichText::new(
-                    "The page numbers and these two lines are not read by a screen reader, and the export says so when it is done.",
+                    tr("The page numbers and these two lines are not read by a screen reader, and the export says so when it is done."),
                 )
                 .size(13.5)
                 .color(p.muted),
@@ -361,22 +373,22 @@ fn format_option_cards(ui: &mut egui::Ui, state: &mut ExportState) {
         ui.add_space(12.0);
         widgets::card_frame(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Options for the Word document");
-            option_radios(ui, "Paper", &mut state.options.word.paper, &paper_items("Word"));
-            option_radios(ui, "Which way the paper is turned", &mut state.options.word.turn, &turn_items("Word"));
-            option_radios(ui, "Margins", &mut state.options.word.margin_mm, &margin_items("Word", 25));
+            widgets::subheading(ui, tr("Options for the Word document"));
+            option_radios(ui, tr("Paper"), &mut state.options.word.paper, &paper_items("Word"));
+            option_radios(ui, tr("Which way the paper is turned"), &mut state.options.word.turn, &turn_items("Word"));
+            option_radios(ui, tr("Margins"), &mut state.options.word.margin_mm, &margin_items("Word", 25));
             option_check(
                 ui,
                 &mut state.options.word.contents,
-                "A contents list that links to each step",
-                "Word: a contents list that links to each step",
+                tr("A contents list that links to each step"),
+                tr("Word: a contents list that links to each step"),
             );
-            option_check(ui, &mut state.options.word.page_numbers, "Page numbers", "Word: page numbers");
+            option_check(ui, &mut state.options.word.page_numbers, tr("Page numbers"), tr("Word: page numbers"));
             option_check(
                 ui,
                 &mut state.options.word.new_page_per_step,
-                "Start every step on a new page",
-                "Word: start every step on a new page",
+                tr("Start every step on a new page"),
+                tr("Word: start every step on a new page"),
             );
         });
     }
@@ -384,31 +396,31 @@ fn format_option_cards(ui: &mut egui::Ui, state: &mut ExportState) {
         ui.add_space(12.0);
         widgets::card_frame(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Options for the PowerPoint presentation");
+            widgets::subheading(ui, tr("Options for the PowerPoint presentation"));
             option_check(
                 ui,
                 &mut state.options.powerpoint.cover_slide,
-                "A first slide with the title and description",
-                "PowerPoint: a first slide with the title and description",
+                tr("A first slide with the title and description"),
+                tr("PowerPoint: a first slide with the title and description"),
             );
             option_check(
                 ui,
                 &mut state.options.powerpoint.agenda_slide,
-                "A slide that lists the steps",
-                "PowerPoint: a slide that lists the steps",
+                tr("A slide that lists the steps"),
+                tr("PowerPoint: a slide that lists the steps"),
             );
-            option_check(ui, &mut state.options.powerpoint.slide_numbers, "Slide numbers", "PowerPoint: slide numbers");
+            option_check(ui, &mut state.options.powerpoint.slide_numbers, tr("Slide numbers"), tr("PowerPoint: slide numbers"));
             option_check(
                 ui,
                 &mut state.options.powerpoint.speaker_notes,
-                "The whole description of each step in its speaker notes",
-                "PowerPoint: the whole description of each step in its speaker notes",
+                tr("The whole description of each step in its speaker notes"),
+                tr("PowerPoint: the whole description of each step in its speaker notes"),
             );
             option_line(
                 ui,
-                "A line at the foot of every slide",
+                tr("A line at the foot of every slide"),
                 &mut state.options.powerpoint.footer_text,
-                "PowerPoint: the line at the foot of every slide",
+                tr("PowerPoint: the line at the foot of every slide"),
             );
         });
     }
@@ -420,39 +432,39 @@ fn template_card(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
     let mut action = ExportAction::None;
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        widgets::subheading(ui, "Export templates");
+        widgets::subheading(ui, tr("Export templates"));
         ui.label(
             RichText::new(
-                "A template remembers the formats and every choice on this screen, and your logo picture if it is small. It does not \
-                 remember the folder. A template is a small file, so you can send it to someone and they can use it too.",
+                tr("A template remembers the formats and every choice on this screen, and your logo picture if it is small. It does not \
+                 remember the folder. A template is a small file, so you can send it to someone and they can use it too."),
             )
             .color(p.muted),
         );
         if state.templates_folder.is_none() {
-            ui.label(RichText::new("The place for templates is not known on this computer, so none can be saved or listed. You can still use one from a file.").color(p.text));
+            ui.label(RichText::new(tr("The place for templates is not known on this computer, so none can be saved or listed. You can still use one from a file.")).color(p.text));
         } else if state.templates.is_empty() {
-            ui.label(RichText::new("No template is saved yet.").color(p.muted));
+            ui.label(RichText::new(tr("No template is saved yet.")).color(p.muted));
         }
         for (n, entry) in state.templates.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&entry.name).color(p.text));
-                let name = format!("Use the template {}", entry.name);
-                if widgets::button_named(ui, "Use", &name).clicked() {
+                let name = tt(format!("Use the template {}", entry.name));
+                if widgets::button_named(ui, tr("Use"), &name).clicked() {
                     action = ExportAction::UseTemplate(n);
                 }
             });
         }
         if state.templates_more > 0 {
             ui.label(
-                RichText::new(format!("{} more are in the templates folder.", state.templates_more)).color(p.muted),
+                RichText::new(tt(format!("{} more are in the templates folder.", state.templates_more))).color(p.muted),
             );
         }
         ui.horizontal_wrapped(|ui| {
-            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Use a template from a file...").clicked() {
+            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, tr("Use a template from a file...")).clicked() {
                 action = ExportAction::UseTemplateFile;
             }
             let folder = ui.add_enabled_ui(state.templates_folder.is_some(), |ui| {
-                widgets::button(ui, "Open the templates folder")
+                widgets::button(ui, tr("Open the templates folder"))
             });
             if folder.inner.clicked() {
                 action = ExportAction::OpenTemplatesFolder;
@@ -460,7 +472,7 @@ fn template_card(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
         });
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            let label = ui.label("Name for a new template");
+            let label = ui.label(tr("Name for a new template"));
             let field = ui.add(
                 egui::TextEdit::singleline(&mut state.template_name)
                     .desired_width(260.0)
@@ -469,7 +481,7 @@ fn template_card(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
             let field = field.labelled_by(label.id);
             widgets::ring(ui, &field);
             let ready = state.templates_folder.is_some() && !state.template_name.trim().is_empty();
-            let save = ui.add_enabled_ui(ready, |ui| widgets::button(ui, "Save these choices as a template"));
+            let save = ui.add_enabled_ui(ready, |ui| widgets::button(ui, tr("Save these choices as a template")));
             if save.inner.clicked() {
                 action = ExportAction::SaveTemplate;
             }
@@ -484,24 +496,24 @@ fn logo_card(ui: &mut egui::Ui, state: &mut ExportState) -> bool {
     let mut choose = false;
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        widgets::subheading(ui, "A logo or watermark picture");
+        widgets::subheading(ui, tr("A logo or watermark picture"));
         ui.label(
             RichText::new(
-                "A PNG picture of your own. It can be laid over every picture in every format as a watermark, which is drawn into the \
-                 pixels and cannot be taken off afterwards, and it can go in the corner of every PowerPoint slide.",
+                tr("A PNG picture of your own. It can be laid over every picture in every format as a watermark, which is drawn into the \
+                 pixels and cannot be taken off afterwards, and it can go in the corner of every PowerPoint slide."),
             )
             .color(p.muted),
         );
         let file = state.options.logo_file.clone();
         let shown = if file.is_empty() { "No picture is chosen.".to_string() } else { file.clone() };
         let label = ui.label(RichText::new(&shown).color(p.text));
-        let name = if file.is_empty() { "Logo picture: none chosen".to_string() } else { format!("Logo picture: {file}") };
+        let name = if file.is_empty() { "Logo picture: none chosen".to_string() } else { tt(format!("Logo picture: {file}")) };
         ui.ctx().accesskit_node_builder(label.id, |node| node.set_label(name));
         ui.horizontal(|ui| {
-            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Choose a picture...").clicked() {
+            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, tr("Choose a picture...")).clicked() {
                 choose = true;
             }
-            let away = ui.add_enabled_ui(!file.is_empty(), |ui| widgets::button(ui, "Take the picture away"));
+            let away = ui.add_enabled_ui(!file.is_empty(), |ui| widgets::button(ui, tr("Take the picture away")));
             if away.inner.clicked() {
                 state.options.logo_file.clear();
             }
@@ -510,14 +522,14 @@ fn logo_card(ui: &mut egui::Ui, state: &mut ExportState) -> bool {
         option_check(
             ui,
             &mut state.options.watermark.on,
-            "Lay the picture over every picture as a watermark",
-            "Watermark: lay the picture over every picture",
+            tr("Lay the picture over every picture as a watermark"),
+            tr("Watermark: lay the picture over every picture"),
         );
-        ui.label(RichText::new("Where on the picture").family(super::fonts::bold_family()).color(p.text));
+        ui.label(RichText::new(tr("Where on the picture")).family(super::fonts::bold_family()).color(p.text));
         egui::Grid::new("watermark-place").num_columns(3).show(ui, |ui| {
             for (n, spot) in Spot::ALL.iter().enumerate() {
-                let name = format!("Watermark place: {}", spot.name());
-                if choice(ui, state.options.watermark.place == *spot, spot.name(), &name).clicked() {
+                let name = tt(format!("Watermark place: {}", tr(spot.name())));
+                if choice(ui, state.options.watermark.place == *spot, tr(spot.name()), &name).clicked() {
                     state.options.watermark.place = *spot;
                 }
                 if n % 3 == 2 {
@@ -529,26 +541,26 @@ fn logo_card(ui: &mut egui::Ui, state: &mut ExportState) -> bool {
             values
                 .iter()
                 .map(|v| {
-                    let shown = if *v == usual { format!("{v}% (the usual)") } else { format!("{v}%") };
-                    (*v, shown, format!("{what} {v} percent"))
+                    let shown = if *v == usual { tt(format!("{v}% (the usual)")) } else { format!("{v}%") };
+                    (*v, shown, tt(format!("{what} {v} percent")))
                 })
                 .collect()
         };
         option_radios(
             ui,
-            "How solid it is",
+            tr("How solid it is"),
             &mut state.options.watermark.opacity,
             &percent(&OPACITY_CHOICES, 30, "Watermark opacity"),
         );
         option_radios(
             ui,
-            "How wide it is, as a share of the picture's width",
+            tr("How wide it is, as a share of the picture's width"),
             &mut state.options.watermark.size,
             &percent(&SIZE_CHOICES, 20, "Watermark width, as a share of the picture's width:"),
         );
         option_radios(
             ui,
-            "Room between it and the edge",
+            tr("Room between it and the edge"),
             &mut state.options.watermark.padding,
             &percent(&PADDING_CHOICES, 2, "Watermark room from the edge:"),
         );
@@ -556,14 +568,14 @@ fn logo_card(ui: &mut egui::Ui, state: &mut ExportState) -> bool {
         option_check(
             ui,
             &mut state.options.powerpoint.logo,
-            "Put the picture in the corner of every PowerPoint slide",
-            "PowerPoint: put the picture in the corner of every slide",
+            tr("Put the picture in the corner of every PowerPoint slide"),
+            tr("PowerPoint: put the picture in the corner of every slide"),
         );
         option_line(
             ui,
-            "What a screen reader says for it",
+            tr("What a screen reader says for it"),
             &mut state.options.powerpoint.logo_description,
-            "PowerPoint: what a screen reader says for the logo",
+            tr("PowerPoint: what a screen reader says for the logo"),
         );
     });
     choose
@@ -603,7 +615,7 @@ pub enum ExportAction {
 
 pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
     let mut action = ExportAction::None;
-    if super::shell::screen_header(ui, "export-top", "Back to the guide", "Export", false) {
+    if super::shell::screen_header(ui, "export-top", tr("Back to the guide"), tr("Export"), false) {
         action = ExportAction::Back;
     }
     egui::CentralPanel::default().frame(super::shell::page_frame(ui)).show(ui, |ui| {
@@ -617,20 +629,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
             ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Formats");
-            ui.label(RichText::new("Each one you choose goes into a folder of its own.").color(p.muted));
+            widgets::subheading(ui, tr("Formats"));
+            ui.label(RichText::new(tr("Each one you choose goes into a folder of its own.")).color(p.muted));
             ui.add_space(4.0);
             ui.spacing_mut().item_spacing.y = 5.0;
             for format in Format::ALL {
                 let mut on = state.selection.contains(format);
                 let enabled = format != Format::Pdf || state.can_pdf;
                 let about = if enabled {
-                    format.about().to_string()
+                    tr(format.about())
                 } else {
                     "needs the Microsoft Edge WebView2 Runtime, which this computer does not have".to_string()
                 };
                 ui.horizontal(|ui| {
-                    let response = ui.add_enabled(enabled, egui::Checkbox::new(&mut on, format.name()));
+                    let response = ui.add_enabled(enabled, egui::Checkbox::new(&mut on, tr(format.name())));
                     widgets::ring(ui, &response);
                     if response.changed() {
                         state.selection.set(format, on);
@@ -643,33 +655,33 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "How wide the pictures are");
+            widgets::subheading(ui, tr("How wide the pictures are"));
             ui.label(
                 RichText::new(
-                    "Every picture in the exports is made this many pixels across, and its height follows. Wider is sharper and makes \
-                     bigger files.",
+                    tr("Every picture in the exports is made this many pixels across, and its height follows. Wider is sharper and makes \
+                     bigger files."),
                 )
                 .color(p.muted),
             );
             ui.horizontal_wrapped(|ui| {
                 for width in IMAGE_WIDTH_CHOICES {
                     let shown =
-                        if width == DEFAULT_IMAGE_WIDTH { format!("{width} (the usual)") } else { width.to_string() };
-                    let r = choice(ui, state.width == width, &shown, &format!("Picture width {width} pixels"));
+                        if width == DEFAULT_IMAGE_WIDTH { tt(format!("{width} (the usual)")) } else { width.to_string() };
+                    let r = choice(ui, state.width == width, &shown, tt(format!("Picture width {width} pixels")));
                     if r.clicked() {
                         state.width = width;
                     }
                 }
             });
             ui.add_space(6.0);
-            widgets::subheading(ui, "Pictures inside the web page, Word, PowerPoint and PDF");
+            widgets::subheading(ui, tr("Pictures inside the web page, Word, PowerPoint and PDF"));
             ui.label(
                 RichText::new(
-                    "These four hold their pictures inside themselves. PNG keeps every pixel as it is. JPG usually makes the file a good \
+                    tr("These four hold their pictures inside themselves. PNG keeps every pixel as it is. JPG usually makes the file a good \
                      deal smaller for ordinary screenshots and loses a little, as set by the quality below; a plain screen with big \
                      flat areas can be smaller as PNG. Whichever is smaller looks at each picture and keeps the JPG only when it is \
                      smaller than the PNG, so a plain screen stays an exact PNG and a busy one becomes a JPG. The folders of pictures, \
-                     Markdown, JSON and the GIF are not changed by this.",
+                     Markdown, JSON and the GIF are not changed by this."),
                 )
                 .color(p.muted),
             );
@@ -697,11 +709,11 @@ ui.set_width(ui.available_width());
                 }
             });
             ui.add_space(6.0);
-            widgets::subheading(ui, "Quality of the JPG pictures");
+            widgets::subheading(ui, tr("Quality of the JPG pictures"));
             ui.label(
                 RichText::new(
-                    "For Pictures (JPG), and for the pictures inside the web page, Word, PowerPoint and PDF when JPG or whichever is \
-                     smaller is chosen above. A lower number makes a smaller file and a rougher picture.",
+                    tr("For Pictures (JPG), and for the pictures inside the web page, Word, PowerPoint and PDF when JPG or whichever is \
+                     smaller is chosen above. A lower number makes a smaller file and a rougher picture."),
                 )
                 .color(p.muted),
             );
@@ -709,20 +721,20 @@ ui.set_width(ui.available_width());
                 for quality in JPEG_QUALITY_CHOICES {
                     let shown = format!("{quality} ({})", quality_words(quality));
                     let selected = !state.jpg_other && state.jpg_quality == quality;
-                    let r = choice(ui, selected, &shown, &format!("JPG quality {quality}, {}", quality_words(quality)));
+                    let r = choice(ui, selected, &shown, tt(format!("JPG quality {quality}, {}", quality_words(quality))));
                     if r.clicked() {
                         state.jpg_other = false;
                         state.jpg_quality = quality;
                     }
                 }
-                let r = choice(ui, state.jpg_other, "Another number", "JPG quality, another number typed in the box");
+                let r = choice(ui, state.jpg_other, tr("Another number"), tr("JPG quality, another number typed in the box"));
                 if r.clicked() && !state.jpg_other {
                     state.jpg_other = true;
                     state.jpg_text = state.jpg_quality.to_string();
                 }
             });
             ui.horizontal(|ui| {
-                let label = ui.label("Quality, 1 to 100");
+                let label = ui.label(tr("Quality, 1 to 100"));
                 let field =
                     ui.add(egui::TextEdit::singleline(&mut state.jpg_text).desired_width(60.0)).labelled_by(label.id);
                 widgets::ring(ui, &field);
@@ -746,18 +758,18 @@ ui.add_space(12.0);
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Try it on a few steps first");
+            widgets::subheading(ui, tr("Try it on a few steps first"));
             ui.label(
                 RichText::new(
-                    "A preview makes only the first steps, so a long guide shows you how it will look in a moment. Substeps count as \
-                     steps. Its folder and the guide's title say it is a preview, so it is not taken for the whole guide.",
+                    tr("A preview makes only the first steps, so a long guide shows you how it will look in a moment. Substeps count as \
+                     steps. Its folder and the guide's title say it is a preview, so it is not taken for the whole guide."),
                 )
                 .color(p.muted),
             );
-            let preview = ui.add(egui::Checkbox::new(&mut state.preview, "Make a preview of the first steps only"));
+            let preview = ui.add(egui::Checkbox::new(&mut state.preview, tr("Make a preview of the first steps only")));
             widgets::ring(ui, &preview);
             ui.horizontal(|ui| {
-                let label = ui.label("Steps in the preview");
+                let label = ui.label(tr("Steps in the preview"));
                 let field = ui
                     .add(egui::TextEdit::singleline(&mut state.preview_text).desired_width(60.0))
                     .labelled_by(label.id);
@@ -778,17 +790,17 @@ ui.set_width(ui.available_width());
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "Where to put them");
+            widgets::subheading(ui, tr("Where to put them"));
             let folder_words = state.folder.display().to_string();
             let shown = ui.label(RichText::new(&folder_words).color(p.text));
-            let name = format!("Export folder: {folder_words}");
+            let name = tt(format!("Export folder: {folder_words}"));
             ui.ctx().accesskit_node_builder(shown.id, |node| node.set_label(name));
             ui.horizontal(|ui| {
-                if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Choose folder...").clicked() {
+                if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, tr("Choose folder...")).clicked() {
                     action = ExportAction::ChooseFolder;
                 }
             });
-            let open = ui.add(egui::Checkbox::new(&mut state.open_after, "Open the folder when it is done"));
+            let open = ui.add(egui::Checkbox::new(&mut state.open_after, tr("Open the folder when it is done")));
             widgets::ring(ui, &open);
             ui.add_space(12.0);
             let words = if state.working {
@@ -796,7 +808,7 @@ ui.set_width(ui.available_width());
             } else if state.selection.is_empty() {
                 "Export".to_string()
             } else {
-                format!("Export {}", format_count(state.selection.count()))
+                tt(format!("Export {}", format_count(state.selection.count())))
             };
             let go = ui.add_enabled_ui(!state.working && !state.selection.is_empty(), |ui| {
                 widgets::primary_button(ui, &words)
@@ -805,21 +817,21 @@ ui.set_width(ui.available_width());
                 action = ExportAction::Export;
             }
             if state.selection.is_empty() {
-                ui.label(RichText::new("Choose at least one format.").color(p.muted));
+                ui.label(RichText::new(tr("Choose at least one format.")).color(p.muted));
             }
 });
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
-            widgets::subheading(ui, "A copy as one file");
+            widgets::subheading(ui, tr("A copy as one file"));
             ui.label(
                 RichText::new(
-                    "Saves the whole guide as one file ending .osguide.zip, to send to someone or keep. It goes in the same folder as the \
-                     exports. Someone opens it with Open a copy on Home.",
+                    tr("Saves the whole guide as one file ending .osguide.zip, to send to someone or keep. It goes in the same folder as the \
+                     exports. Someone opens it with Open a copy on Home."),
                 )
                 .color(p.muted),
             );
-            let originals = ui.add(egui::Checkbox::new(&mut state.copy_originals, "Include the original pictures"));
+            let originals = ui.add(egui::Checkbox::new(&mut state.copy_originals, tr("Include the original pictures")));
             widgets::ring(ui, &originals);
             let kind = if state.copy_originals {
                 "The original pictures are in the file, and the marks stay marks. A blur can be taken away by whoever opens it, and \
@@ -828,7 +840,7 @@ ui.set_width(ui.available_width());
                 "Each picture has its marks drawn into it, blur included, and the original pictures are not in the file, so a blur \
                  cannot be undone. Steps you skipped are left out."
             };
-            ui.label(RichText::new(format!("{kind} Deleted steps are never included.")).size(13.5).color(p.muted));
+            ui.label(RichText::new(tt(format!("{kind} Deleted steps are never included."))).size(13.5).color(p.muted));
             let copy = ui.add_enabled_ui(!state.working, |ui| {
                 widgets::icon_button(ui, super::icon::UiIcon::Package, if state.working { "Working..." } else { "Save a copy as one file" })
             });
@@ -850,7 +862,7 @@ fn format_count(n: usize) -> String {
     if n == 1 {
         "1 format".to_string()
     } else {
-        format!("{n} formats")
+        tt(format!("{n} formats"))
     }
 }
 

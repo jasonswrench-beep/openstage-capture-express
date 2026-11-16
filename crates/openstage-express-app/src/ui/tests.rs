@@ -649,6 +649,7 @@ fn the_window_works_at_the_smallest_size_and_at_200_percent_in_both_colour_schem
                     Screen::Settings | Screen::About | Screen::Trash | Screen::OpenCopy => {
                         &[(Role::Button, "Back to guides")]
                     }
+                    Screen::Welcome => &[(Role::Button, "Start")],
                     Screen::DeletedSteps => &[
                         (Role::Button, "Back to the steps"),
                         (Role::Button, "Restore all 2 steps"),
@@ -5854,4 +5855,209 @@ fn the_templates_folder_can_be_opened_and_is_made_if_it_is_not_there_yet() {
     h.invoke(Role::Button, "Open the templates folder");
     assert!(dir.path().join("Export templates").is_dir());
     assert_eq!(*opened.borrow(), [dir.path().join("Export templates")]);
+}
+
+// ---- the first run and the language of the program
+
+/// The home screen with settings kept in `dir`, as the program is the first time (a settings file that is not there yet).
+fn first_run_harness(dir: &std::path::Path, windows_language: &str) -> Harness {
+    let mut h = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_settings(AppSettings::default(), Some(dir.join("settings.json")), None);
+    h.app.start_first_run_if_new(windows_language);
+    h.settle();
+    h
+}
+
+#[test]
+fn the_first_run_starts_on_the_welcome_page_in_the_language_windows_uses_and_start_goes_home_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = first_run_harness(dir.path(), "de-DE");
+    assert_eq!(h.app.screen, Screen::Welcome);
+    assert_eq!(h.app.settings.interface_language, crate::i18n::Lang::De, "Windows is set to German");
+    h.find(Role::Heading, "Willkommen bei OpenStage Capture Express");
+    for (words, on) in [("Sprache des Programms: English", false), ("Sprache des Programms: Deutsch", true), ("Sprache des Programms: Fran\u{e7}ais", false)] {
+        assert_eq!(is_on(&h, Role::RadioButton, words), on, "{words}");
+    }
+    h.find(Role::Heading, "Was das Programm tut und nicht tut");
+    h.find(Role::Heading, "Wo Ihre Anleitungen gespeichert werden");
+    h.find(Role::Button, "Anderen Ordner w\u{e4}hlen...");
+    h.find(Role::Button, "Zuerst die Beispielanleitung ansehen");
+    assert!(h.status().starts_with("Willkommen."), "{}", h.status());
+    h.invoke(Role::Button, "Starten");
+    assert_eq!(h.app.screen, Screen::Home);
+    assert!(h.app.settings.first_run_done);
+    let kept = crate::settings::load(&dir.path().join("settings.json")).0;
+    assert!(kept.first_run_done && kept.interface_language == crate::i18n::Lang::De, "what was chosen is kept");
+    // Run again with the saved settings: no welcome.
+    let mut again = Harness::new(Screen::Home);
+    let app = std::mem::replace(&mut again.app, App::new(Screen::Home));
+    again.app = app.with_settings(kept, Some(dir.path().join("settings.json")), None);
+    again.app.start_first_run_if_new("fr-FR");
+    assert_eq!(again.app.screen, Screen::Home);
+}
+
+#[test]
+fn a_language_windows_uses_that_is_not_german_or_french_starts_the_program_in_english_and_nothing_is_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = first_run_harness(dir.path(), "ja-JP");
+    assert_eq!(h.app.settings.interface_language, crate::i18n::Lang::En);
+    assert!(is_on(&h, Role::RadioButton, "Language of the program: English"));
+    // The person can choose another, and it is kept at once.
+    h.invoke(Role::RadioButton, "Language of the program: Fran\u{e7}ais");
+    assert_eq!(h.app.settings.interface_language, crate::i18n::Lang::Fr);
+    assert_eq!(crate::settings::load(&dir.path().join("settings.json")).0.interface_language, crate::i18n::Lang::Fr);
+}
+
+#[test]
+fn the_welcome_page_can_open_the_example_guide_choose_colours_and_is_reachable_by_keyboard() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = first_run_harness(dir.path(), "en-US");
+    h.invoke(Role::RadioButton, "Dark");
+    assert_eq!(h.app.settings.appearance, Appearance::Dark);
+    h.focus_on(Role::RadioButton, "Language of the program: English");
+    let mut seen = Vec::new();
+    for _ in 0..30 {
+        h.key(Key::Tab, NO_MODS);
+        seen.extend(h.focused_words());
+    }
+    for must in ["Language of the program: Deutsch", "Light", "Choose another folder...", "Start", "Look at the example guide first"] {
+        assert!(seen.iter().any(|s| s == must), "the keyboard never reached {must:?}: {seen:?}");
+    }
+    h.invoke(Role::Button, "Look at the example guide first");
+    assert_eq!(h.app.screen, Screen::Editor);
+    assert!(h.app.settings.first_run_done, "the page is not shown again");
+}
+
+#[test]
+fn a_settings_file_from_before_there_was_a_welcome_page_does_not_bring_it_back_and_a_missing_one_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    std::fs::write(&path, br#"{"showCursor": false}"#).unwrap();
+    let (old, _) = crate::settings::load(&path);
+    assert!(old.first_run_done, "an existing settings file means the program has been used");
+    assert_eq!(old.interface_language, crate::i18n::Lang::En);
+    let (fresh, note) = crate::settings::load(&dir.path().join("nothing.json"));
+    assert!(!fresh.first_run_done && note.is_none(), "no file: the first run");
+    std::fs::write(&path, br#"{"firstRunDone": false, "interfaceLanguage": "de"}"#).unwrap();
+    let (saved, _) = crate::settings::load(&path);
+    assert!(!saved.first_run_done && saved.interface_language == crate::i18n::Lang::De);
+    std::fs::write(&path, br#"{"interfaceLanguage": "klingon"}"#).unwrap();
+    assert_eq!(crate::settings::load(&path).0.interface_language, crate::i18n::Lang::En, "an unknown language is English");
+}
+
+#[test]
+fn settings_offer_the_language_of_the_program_and_choosing_one_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = picture_harness(dir.path(), AppSettings { first_run_done: true, ..AppSettings::default() });
+    h.app.screen = Screen::Settings;
+    h.settle();
+    h.find(Role::Heading, "Language of the program");
+    assert!(is_on(&h, Role::RadioButton, "Language of the program: English"));
+    h.invoke(Role::RadioButton, "Language of the program: Deutsch");
+    assert_eq!(h.app.settings.interface_language, crate::i18n::Lang::De);
+    assert_eq!(crate::settings::load(&dir.path().join("settings.json")).0.interface_language, crate::i18n::Lang::De);
+    // The language is the thread's, so another test is not changed by this one.
+    crate::i18n::set_language(crate::i18n::Lang::En);
+}
+
+// ---- the program in German and in French
+
+/// Put the program in `lang` and say what every screen in `screens` shows, then return the texts the catalog did not have.
+fn missing_words_on(lang: crate::i18n::Lang, screens: &[Screen]) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = picture_harness(dir.path(), AppSettings { first_run_done: true, ..AppSettings::default() });
+    h.app.settings.interface_language = lang;
+    let _ = crate::i18n::take_missing();
+    for screen in screens {
+        h.app.screen = *screen;
+        h.settle();
+        h.settle();
+    }
+    let missing = crate::i18n::take_missing();
+    crate::i18n::set_language(crate::i18n::Lang::En);
+    missing
+}
+
+const EVERY_SCREEN: [Screen; 9] = [
+    Screen::Home,
+    Screen::Editor,
+    Screen::Export,
+    Screen::Settings,
+    Screen::About,
+    Screen::Trash,
+    Screen::DeletedSteps,
+    Screen::OpenCopy,
+    Screen::Welcome,
+];
+
+#[test]
+fn every_screen_in_french_and_in_german_is_in_the_catalog_with_no_english_left_in_what_it_says() {
+    for lang in [crate::i18n::Lang::Fr, crate::i18n::Lang::De] {
+        let missing = missing_words_on(lang, &EVERY_SCREEN);
+        assert!(missing.is_empty(), "{lang:?}: {missing:#?}");
+    }
+}
+
+#[test]
+fn the_menus_the_command_search_and_the_keys_list_are_in_the_language_too() {
+    for lang in [crate::i18n::Lang::Fr, crate::i18n::Lang::De] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut h = picture_harness(dir.path(), AppSettings { first_run_done: true, ..AppSettings::default() });
+        h.app.settings.interface_language = lang;
+        let _ = crate::i18n::take_missing();
+        h.settle();
+        for command in crate::ui::commands::MENUS.iter().flat_map(|m| m.items.iter().flatten()) {
+            let _ = command.words();
+            let _ = command.what_for();
+            let _ = command.menu();
+        }
+        h.app.run_command(crate::ui::commands::Command::KeyboardKeys);
+        h.settle();
+        h.app.run_command(crate::ui::commands::Command::SearchCommands);
+        h.settle();
+        let missing = crate::i18n::take_missing();
+        crate::i18n::set_language(crate::i18n::Lang::En);
+        assert!(missing.is_empty(), "{lang:?}: {missing:#?}");
+    }
+}
+
+#[test]
+fn the_words_reach_what_a_screen_reader_reads_and_the_status_line_in_each_language() {
+    use crate::i18n::Lang;
+    for (lang, start, undo, added) in [
+        (Lang::Fr, "D\u{e9}marrer la capture", "Annuler", "Une \u{e9}tape vide a \u{e9}t\u{e9} ajout\u{e9}e. Saisissez son titre."),
+        (Lang::De, "Aufnahme starten", "R\u{fc}ckg\u{e4}ngig", "Ein leerer Schritt wurde hinzugef\u{fc}gt. Geben Sie seinen Titel ein."),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut h = picture_harness(dir.path(), AppSettings { first_run_done: true, ..AppSettings::default() });
+        h.app.settings.interface_language = lang;
+        h.app.screen = Screen::Home;
+        h.settle();
+        h.find(Role::Button, start);
+        assert!(!h.has(Role::Button, "Start capturing"), "{lang:?}: the English name is gone");
+        h.app.screen = Screen::Editor;
+        h.settle();
+        h.find(Role::Button, undo);
+        h.app.run_command(crate::ui::commands::Command::AddStep);
+        h.settle();
+        assert_eq!(h.status(), added, "{lang:?}");
+        crate::i18n::set_language(Lang::En);
+    }
+}
+
+#[test]
+fn english_stays_english_and_a_change_of_language_is_seen_at_once_and_given_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = picture_harness(dir.path(), AppSettings { first_run_done: true, ..AppSettings::default() });
+    h.app.screen = Screen::Home;
+    h.settle();
+    h.find(Role::Button, "Start capturing");
+    h.app.settings.interface_language = crate::i18n::Lang::De;
+    h.settle();
+    h.find(Role::Button, "Aufnahme starten");
+    h.app.settings.interface_language = crate::i18n::Lang::En;
+    h.settle();
+    h.find(Role::Button, "Start capturing");
+    assert!(crate::i18n::take_missing().is_empty());
 }

@@ -2,6 +2,7 @@
 //! What the steps list shows: one row for each step, numbered the way the exports number them, and the words a screen reader is
 //! given for each. No drawing happens here, so all of it is tested on any computer.
 
+use crate::i18n::{tr, trf};
 use std::collections::HashMap;
 
 use openstage_express_core::{Guide, StepKind, Trash};
@@ -24,10 +25,11 @@ pub struct Row {
 impl Row {
     /// The row's words, which are also its name for a screen reader.
     pub fn label(&self) -> String {
-        let title = if self.title.trim().is_empty() { "(no title)" } else { self.title.trim() };
+        let none = tr("(no title)");
+        let title = if self.title.trim().is_empty() { none.as_str() } else { self.title.trim() };
         match (&self.number, self.kind, self.skipped) {
-            (_, _, true) => format!("{title} (skipped)"),
-            (_, StepKind::Block, _) => format!("Note: {title}"),
+            (_, _, true) => trf("{1} (skipped)", &[&title]),
+            (_, StepKind::Block, _) => trf("Note: {1}", &[&title]),
             (Some(number), _, _) => format!("{number}. {title}"),
             (None, _, _) => title.to_string(),
         }
@@ -95,19 +97,20 @@ pub struct DeletedRow {
 impl DeletedRow {
     /// The step's words, which are also what a screen reader says for its Restore button.
     pub fn label(&self) -> String {
-        let title = if self.title.trim().is_empty() { "(no title)" } else { self.title.trim() };
+        let none = tr("(no title)");
+        let title = if self.title.trim().is_empty() { none.as_str() } else { self.title.trim() };
         match self.kind {
-            StepKind::Block => format!("Note: {title}"),
+            StepKind::Block => trf("Note: {1}", &[&title]),
             _ => title.to_string(),
         }
     }
 
     /// What sort of step it was.
-    pub fn kind_words(&self) -> &'static str {
+    pub fn kind_words(&self) -> String {
         match self.kind {
-            StepKind::Image => "Step with a picture",
-            StepKind::Empty => "Step without a picture",
-            StepKind::Block => "Text only, not numbered",
+            StepKind::Image => tr("Step with a picture"),
+            StepKind::Empty => tr("Step without a picture"),
+            StepKind::Block => tr("Text only, not numbered"),
         }
     }
 }
@@ -132,9 +135,9 @@ pub fn step_count(guide: &Guide) -> usize {
 /// "1 step", "5 steps".
 pub fn steps_words(count: usize) -> String {
     if count == 1 {
-        "1 step".to_string()
+        tr("1 step")
     } else {
-        format!("{count} steps")
+        trf("{1} steps", &[&count])
     }
 }
 
