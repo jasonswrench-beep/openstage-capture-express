@@ -30,6 +30,7 @@ pub mod picture;
 pub mod plan;
 pub mod pptx;
 pub mod share;
+pub mod watermark;
 pub mod zip;
 
 use std::fs;

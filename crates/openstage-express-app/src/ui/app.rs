@@ -45,8 +45,19 @@ use openstage_express_core::area::AreaRect;
 /// Asks the person for a folder (Windows' own dialog), starting at the one given; None when they cancel.
 pub type FolderChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
 
+/// What kind of file the person is asked to choose, so that the dialog says so and shows only those files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    /// A copy of a guide (`.osguide.zip`).
+    GuideCopy,
+    /// A PNG picture, for the watermark and the PowerPoint logo.
+    Picture,
+    /// An export template (`.osexport`).
+    Template,
+}
+
 /// Asks the person for a file (Windows' own dialog), starting in the folder given; None when they cancel.
-pub type FileChooser = Box<dyn FnMut(&Path) -> Option<PathBuf>>;
+pub type FileChooser = Box<dyn FnMut(&Path, FileKind) -> Option<PathBuf>>;
 
 /// The height of the line at the foot of the window.
 const STATUS_HEIGHT: f32 = 34.0;
@@ -210,7 +221,7 @@ impl App {
             window_list: WindowList::default(),
             area_screen: None,
             chooser: Box::new(|_| None),
-            file_chooser: Box::new(|_| None),
+            file_chooser: Box::new(|_, _| None),
             open_copy: OpenCopyState::new(),
             opener: Box::new(|_| {}),
             notifications: Box::new(|| {}),
@@ -354,9 +365,48 @@ impl App {
         self.export.options = settings.export_options.normalised();
         self.home.set_sort(settings.home_sort);
         self.settings = settings;
+        self.export.templates_folder = path.as_deref().and_then(crate::export_templates::folder_beside);
         self.settings_path = path;
         self.settings_note = note;
+        self.refresh_templates();
         self
+    }
+
+    /// Look in the templates folder again.
+    fn refresh_templates(&mut self) {
+        let (found, more) = match &self.export.templates_folder {
+            Some(folder) => crate::export_templates::list(folder),
+            None => (Vec::new(), 0),
+        };
+        self.export.templates = found;
+        self.export.templates_more = more;
+    }
+
+    /// Use a template that was read: its choices become the screen's, and the person is told what stayed as it was.
+    fn use_template(&mut self, template: crate::export_templates::Template) {
+        let logo = self
+            .export
+            .templates_folder
+            .as_ref()
+            .and_then(|folder| crate::export_templates::extract_logo(&template, &folder.join("pictures")));
+        let words = if template.name.is_empty() { "the template".to_string() } else { format!("the template {}", template.name) };
+        self.export.apply_template(&template, logo);
+        let said = format!(
+            "Using {words}. The formats and the choices on this screen are now the template's. The folder the exports go into is as it was."
+        );
+        self.export.said = Some(said.clone());
+        self.status.say(said);
+    }
+
+    fn use_template_from(&mut self, path: &Path) {
+        match crate::export_templates::read(path) {
+            Ok(template) => self.use_template(template),
+            Err(why) => {
+                let words = format!("The template was not used. {why}");
+                self.export.said = Some(words.clone());
+                self.status.say(words);
+            }
+        }
     }
 
     /// The colour scheme the person chose.
@@ -792,6 +842,24 @@ impl App {
                 return;
             }
         };
+        // The picture for the watermark or the PowerPoint logo is read now, so that a file that cannot be used stops the export before it
+        // starts and says why, rather than being left out without a word.
+        let options = self.export.options.normalised();
+        let logo = if options.needs_logo_file(self.export.selection.contains(export_run::Format::PowerPoint)) {
+            match crate::export_options::load_logo(&options.logo_file) {
+                Ok(file) => Some(file),
+                Err(why) => {
+                    let words = format!(
+                        "Nothing was exported. The picture for the watermark or the PowerPoint logo cannot be used: {why} Choose another, or turn them off."
+                    );
+                    self.export.said = Some(words.clone());
+                    self.status.say(words);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let Some(editor) = self.editor.as_ref() else { return };
         let guide = editor.doc().guide.clone();
         // A preview that leaves steps out says so in the name of its folder.
@@ -806,7 +874,8 @@ impl App {
             pictures: editor.pictures(),
             selection: self.export.selection.clone(),
             choices,
-            options: self.export.options.normalised(),
+            options,
+            logo,
             folder,
         };
         let n = job.selection.count();
@@ -1151,6 +1220,7 @@ impl App {
                     editor.commit_pending();
                 }
                 self.screen = Screen::Export;
+                self.refresh_templates();
                 self.status.say("Export. Choose the formats and the folder, then press Export.");
             }
             Command::DeletedSteps => self.open_deleted_steps(),
@@ -1346,7 +1416,7 @@ impl App {
                         .filter(|p| p.is_dir())
                         .map(Path::to_path_buf)
                         .unwrap_or(self.export.folder.clone());
-                    if let Some(chosen) = (self.file_chooser)(&start) {
+                    if let Some(chosen) = (self.file_chooser)(&start, FileKind::GuideCopy) {
                         self.open_copy.path = chosen.display().to_string();
                         self.open_copy.said = None;
                         self.status.say(format!("Chosen: {}. Press Open the copy.", chosen.display()));
@@ -1567,6 +1637,55 @@ impl App {
                     }
                     ExportAction::Export => self.start_export(),
                     ExportAction::SaveCopy => self.start_copy(),
+                    ExportAction::UseTemplate(n) => {
+                        if let Some(entry) = self.export.templates.get(n).cloned() {
+                            self.use_template_from(&entry.path);
+                        }
+                    }
+                    ExportAction::UseTemplateFile => {
+                        let start = self.export.templates_folder.clone().filter(|p| p.is_dir()).unwrap_or(self.export.folder.clone());
+                        if let Some(chosen) = (self.file_chooser)(&start, FileKind::Template) {
+                            self.use_template_from(&chosen);
+                        }
+                    }
+                    ExportAction::SaveTemplate => {
+                        let name = self.export.template_name.clone();
+                        let template = self.export.to_template(&name);
+                        let saved = match &self.export.templates_folder {
+                            Some(folder) => crate::export_templates::save(folder, &template),
+                            None => Err("There is no place to keep templates on this computer.".to_string()),
+                        };
+                        let words = match saved {
+                            Ok(path) => {
+                                self.export.template_name.clear();
+                                self.refresh_templates();
+                                let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                                format!("Saved the template as {file} in {}. To share it, send that file.", path.parent().map(|p| p.display().to_string()).unwrap_or_default())
+                            }
+                            Err(why) => format!("The template was not saved. {why}"),
+                        };
+                        self.export.said = Some(words.clone());
+                        self.status.say(words);
+                    }
+                    ExportAction::OpenTemplatesFolder => {
+                        if let Some(folder) = self.export.templates_folder.clone() {
+                            match std::fs::create_dir_all(&folder) {
+                                Ok(()) => {
+                                    (self.opener)(&folder);
+                                    self.status.say(format!("Opening {}.", folder.display()));
+                                }
+                                Err(e) => self.status.say(format!("The templates folder could not be made ({e}).")),
+                            }
+                        }
+                    }
+                    ExportAction::ChooseLogo => {
+                        let named = PathBuf::from(&self.export.options.logo_file);
+                        let start = named.parent().filter(|p| p.is_dir()).map(Path::to_path_buf).unwrap_or(self.export.folder.clone());
+                        if let Some(chosen) = (self.file_chooser)(&start, FileKind::Picture) {
+                            self.export.options.logo_file = chosen.display().to_string();
+                            self.status.say(format!("Chosen: {}. Tick the watermark or the PowerPoint logo to use it.", chosen.display()));
+                        }
+                    }
                 }
                 self.sync_export_settings();
             }

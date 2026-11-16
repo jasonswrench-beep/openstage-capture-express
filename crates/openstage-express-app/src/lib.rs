@@ -17,6 +17,7 @@ mod clicks_test;
 mod demo_run;
 mod export_options;
 mod export_run;
+mod export_templates;
 mod guide_writer;
 mod library;
 mod settings;

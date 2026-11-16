@@ -206,6 +206,7 @@ impl PictureChoices {
                 DocumentPicturesChoice::Jpg => DocumentPictures::Jpg { quality },
                 DocumentPicturesChoice::Smaller => DocumentPictures::Smaller { quality },
             },
+            watermark: None,
         }
     }
 }
@@ -221,12 +222,12 @@ pub struct FormatOptions {
 
 impl FormatOptions {
     /// What the Export screen chose.
-    pub fn from_choices(choices: &ExportChoices) -> FormatOptions {
+    pub fn from_choices(choices: &ExportChoices, logo: Option<&crate::export_options::LogoFile>) -> FormatOptions {
         FormatOptions {
             gif: choices.gif_options(),
             pdf: choices.pdf_options(),
             docx: choices.docx_options(),
-            pptx: choices.pptx_options(),
+            pptx: choices.pptx_options(logo),
         }
     }
 }
@@ -366,8 +367,10 @@ pub struct Job {
     pub selection: Selection,
     /// How wide the pictures are, how good the JPGs are, and whether this is a preview.
     pub choices: PictureChoices,
-    /// What was chosen for the GIF, the PDF, Word and PowerPoint.
+    /// What was chosen for the GIF, the PDF, Word and PowerPoint, and for the watermark.
     pub options: ExportChoices,
+    /// The picture for the watermark and the PowerPoint logo, read when the export was started (when either is on).
+    pub logo: Option<crate::export_options::LogoFile>,
     /// The new folder everything goes into.
     pub folder: PathBuf,
 }
@@ -389,12 +392,14 @@ pub fn spawn(job: Job) -> Receiver<Result<Report, String>> {
     let (tx, rx) = mpsc::channel();
     let started = std::thread::Builder::new().name("express-export".into()).spawn(move || {
         let text = crate::text::renderer();
-        let the_plan = make_plan(&job.guide, &*job.pictures, text, &job.choices.export_options());
+        let mut plan_options = job.choices.export_options();
+        plan_options.watermark = job.options.watermark_options(job.logo.as_ref());
+        let the_plan = make_plan(&job.guide, &*job.pictures, text, &plan_options);
         let pdf = if job.selection.contains(Format::Pdf) { system_pdf() } else { None };
         let result = make_with(
             &the_plan,
             &job.selection,
-            &FormatOptions::from_choices(&job.options),
+            &FormatOptions::from_choices(&job.options, job.logo.as_ref()),
             job.choices.jpg_quality,
             text,
             pdf.as_deref().map(|p| p as &dyn PdfRenderer),
@@ -546,7 +551,7 @@ mod tests {
         let report = make_with(
             &the_plan(),
             &selection,
-            &FormatOptions::from_choices(&choices),
+            &FormatOptions::from_choices(&choices, None),
             DEFAULT_JPEG_QUALITY,
             &BlockText,
             Some(&recording),
@@ -643,6 +648,7 @@ mod tests {
             selection: Selection::none_then(&[Format::Images]),
             choices: PictureChoices::default(),
             options: ExportChoices::default(),
+            logo: None,
             folder: dir.path().to_path_buf(),
         };
         spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -819,6 +825,7 @@ mod tests {
             selection: Selection::none_then(&[Format::Images]),
             choices: PictureChoices { width: 800, jpg_quality: 90, first_steps: Some(2), ..Default::default() },
             options: ExportChoices::default(),
+            logo: None,
             folder: dir.path().to_path_buf(),
         };
         let report = spawn(job).recv_timeout(std::time::Duration::from_secs(60)).unwrap().unwrap();
@@ -857,6 +864,7 @@ mod tests {
             selection: Selection::none_then(formats),
             choices,
             options: ExportChoices::default(),
+            logo: None,
             folder: dir.path().to_path_buf(),
         };
         let report = spawn(job).recv_timeout(std::time::Duration::from_secs(120)).unwrap().unwrap();

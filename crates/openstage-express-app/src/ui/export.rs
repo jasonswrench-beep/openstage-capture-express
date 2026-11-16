@@ -7,8 +7,12 @@ use std::path::PathBuf;
 use eframe::egui::{self, RichText};
 
 use super::widgets::{self, palette};
-use crate::export_options::{ExportChoices, Paper, Turn, GIF_WIDTH_CHOICES, MARGIN_CHOICES, MAX_LINE_CHARS};
+use crate::export_options::{
+    ExportChoices, Paper, Spot, Turn, GIF_WIDTH_CHOICES, MARGIN_CHOICES, MAX_LINE_CHARS, OPACITY_CHOICES,
+    PADDING_CHOICES, SIZE_CHOICES,
+};
 use crate::export_run::{Format, PictureChoices, Selection};
+use crate::export_templates::{Entry, Template};
 use crate::settings::DocumentPicturesChoice;
 use openstage_express_export::gif::ALLOWED_SECONDS;
 use openstage_express_export::images::{DEFAULT_JPEG_QUALITY, JPEG_QUALITY_CHOICES};
@@ -66,6 +70,13 @@ pub struct ExportState {
     pub preview_text: String,
     /// What is chosen for the GIF, the PDF, Word and PowerPoint (kept in the settings).
     pub options: ExportChoices,
+    /// Where templates are kept, if this computer has a place for them.
+    pub templates_folder: Option<PathBuf>,
+    /// The templates in that folder, and how many more there are than are listed.
+    pub templates: Vec<Entry>,
+    pub templates_more: usize,
+    /// What is typed in the box for the name of a new template.
+    pub template_name: String,
 }
 
 impl ExportState {
@@ -92,6 +103,10 @@ impl ExportState {
             preview_steps: DEFAULT_PREVIEW_STEPS,
             preview_text: String::new(),
             options: ExportChoices::default(),
+            templates_folder: None,
+            templates: Vec::new(),
+            templates_more: 0,
+            template_name: String::new(),
         };
         state.set_pictures(DEFAULT_IMAGE_WIDTH, u32::from(DEFAULT_JPEG_QUALITY), DEFAULT_PREVIEW_STEPS);
         state
@@ -107,6 +122,43 @@ impl ExportState {
         self.jpg_text = self.jpg_quality.to_string();
         self.preview_steps = preview_steps.clamp(1, MAX_PREVIEW_STEPS);
         self.preview_text = self.preview_steps.to_string();
+    }
+
+    /// Everything chosen now that a template keeps, named `name`. The logo picture goes inside it when it is small enough; the path of
+    /// the picture on this computer never does.
+    pub fn to_template(&self, name: &str) -> Template {
+        let mut options = self.options.normalised();
+        let logo_png = crate::export_templates::embed_logo(&options.logo_file);
+        options.logo_file.clear();
+        Template {
+            name: name.to_string(),
+            formats: self.selection.formats().iter().map(|f| f.folder().to_string()).collect(),
+            picture_width: self.width,
+            jpg_quality: u32::from(self.jpg_quality_now().unwrap_or(self.jpg_quality)),
+            document_pictures: self.documents,
+            options,
+            logo_png,
+            ..Template::default()
+        }
+    }
+
+    /// Use a template: its formats (a PDF only where this computer can make one), its picture width, quality and kind of picture, and every
+    /// option of every format. The folder, whether to open it afterwards and a preview are left as they are. `logo` is the template's
+    /// picture as a file on this computer; without one, the picture already chosen stays.
+    pub fn apply_template(&mut self, template: &Template, logo: Option<PathBuf>) {
+        let formats: Vec<Format> = Format::ALL
+            .into_iter()
+            .filter(|f| template.formats.iter().any(|name| name == f.folder()))
+            .filter(|f| *f != Format::Pdf || self.can_pdf)
+            .collect();
+        if !template.formats.is_empty() {
+            self.selection = Selection::none_then(&formats);
+        }
+        self.set_pictures(template.picture_width, template.jpg_quality, self.preview_steps);
+        self.documents = template.document_pictures;
+        let kept_logo = self.options.logo_file.clone();
+        self.options = template.options.normalised();
+        self.options.logo_file = logo.map(|p| p.display().to_string()).unwrap_or(kept_logo);
     }
 
     /// The JPG quality as chosen now: a preset, or what is typed in the box (which must be a number from 1 to 100).
@@ -362,6 +414,161 @@ fn format_option_cards(ui: &mut egui::Ui, state: &mut ExportState) {
     }
 }
 
+/// The card for export templates: the ones saved, a way to use one from a file, and a way to save what is chosen now.
+fn template_card(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
+    let p = palette(ui);
+    let mut action = ExportAction::None;
+    widgets::card_frame(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        widgets::subheading(ui, "Export templates");
+        ui.label(
+            RichText::new(
+                "A template remembers the formats and every choice on this screen, and your logo picture if it is small. It does not \
+                 remember the folder. A template is a small file, so you can send it to someone and they can use it too.",
+            )
+            .color(p.muted),
+        );
+        if state.templates_folder.is_none() {
+            ui.label(RichText::new("The place for templates is not known on this computer, so none can be saved or listed. You can still use one from a file.").color(p.text));
+        } else if state.templates.is_empty() {
+            ui.label(RichText::new("No template is saved yet.").color(p.muted));
+        }
+        for (n, entry) in state.templates.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&entry.name).color(p.text));
+                let name = format!("Use the template {}", entry.name);
+                if widgets::button_named(ui, "Use", &name).clicked() {
+                    action = ExportAction::UseTemplate(n);
+                }
+            });
+        }
+        if state.templates_more > 0 {
+            ui.label(
+                RichText::new(format!("{} more are in the templates folder.", state.templates_more)).color(p.muted),
+            );
+        }
+        ui.horizontal_wrapped(|ui| {
+            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Use a template from a file...").clicked() {
+                action = ExportAction::UseTemplateFile;
+            }
+            let folder = ui.add_enabled_ui(state.templates_folder.is_some(), |ui| {
+                widgets::button(ui, "Open the templates folder")
+            });
+            if folder.inner.clicked() {
+                action = ExportAction::OpenTemplatesFolder;
+            }
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let label = ui.label("Name for a new template");
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut state.template_name)
+                    .desired_width(260.0)
+                    .char_limit(crate::export_templates::MAX_NAME_CHARS),
+            );
+            let field = field.labelled_by(label.id);
+            widgets::ring(ui, &field);
+            let ready = state.templates_folder.is_some() && !state.template_name.trim().is_empty();
+            let save = ui.add_enabled_ui(ready, |ui| widgets::button(ui, "Save these choices as a template"));
+            if save.inner.clicked() {
+                action = ExportAction::SaveTemplate;
+            }
+        });
+    });
+    action
+}
+
+/// The card for the logo or watermark picture: which file, whether it is a watermark and how, and whether PowerPoint puts it in a corner.
+fn logo_card(ui: &mut egui::Ui, state: &mut ExportState) -> bool {
+    let p = palette(ui);
+    let mut choose = false;
+    widgets::card_frame(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        widgets::subheading(ui, "A logo or watermark picture");
+        ui.label(
+            RichText::new(
+                "A PNG picture of your own. It can be laid over every picture in every format as a watermark, which is drawn into the \
+                 pixels and cannot be taken off afterwards, and it can go in the corner of every PowerPoint slide.",
+            )
+            .color(p.muted),
+        );
+        let file = state.options.logo_file.clone();
+        let shown = if file.is_empty() { "No picture is chosen.".to_string() } else { file.clone() };
+        let label = ui.label(RichText::new(&shown).color(p.text));
+        let name = if file.is_empty() { "Logo picture: none chosen".to_string() } else { format!("Logo picture: {file}") };
+        ui.ctx().accesskit_node_builder(label.id, |node| node.set_label(name));
+        ui.horizontal(|ui| {
+            if widgets::icon_button(ui, super::icon::UiIcon::FolderOpen, "Choose a picture...").clicked() {
+                choose = true;
+            }
+            let away = ui.add_enabled_ui(!file.is_empty(), |ui| widgets::button(ui, "Take the picture away"));
+            if away.inner.clicked() {
+                state.options.logo_file.clear();
+            }
+        });
+        ui.add_space(6.0);
+        option_check(
+            ui,
+            &mut state.options.watermark.on,
+            "Lay the picture over every picture as a watermark",
+            "Watermark: lay the picture over every picture",
+        );
+        ui.label(RichText::new("Where on the picture").family(super::fonts::bold_family()).color(p.text));
+        egui::Grid::new("watermark-place").num_columns(3).show(ui, |ui| {
+            for (n, spot) in Spot::ALL.iter().enumerate() {
+                let name = format!("Watermark place: {}", spot.name());
+                if choice(ui, state.options.watermark.place == *spot, spot.name(), &name).clicked() {
+                    state.options.watermark.place = *spot;
+                }
+                if n % 3 == 2 {
+                    ui.end_row();
+                }
+            }
+        });
+        let percent = |values: &[u32], usual: u32, what: &str| -> Vec<(u32, String, String)> {
+            values
+                .iter()
+                .map(|v| {
+                    let shown = if *v == usual { format!("{v}% (the usual)") } else { format!("{v}%") };
+                    (*v, shown, format!("{what} {v} percent"))
+                })
+                .collect()
+        };
+        option_radios(
+            ui,
+            "How solid it is",
+            &mut state.options.watermark.opacity,
+            &percent(&OPACITY_CHOICES, 30, "Watermark opacity"),
+        );
+        option_radios(
+            ui,
+            "How wide it is, as a share of the picture's width",
+            &mut state.options.watermark.size,
+            &percent(&SIZE_CHOICES, 20, "Watermark width, as a share of the picture's width:"),
+        );
+        option_radios(
+            ui,
+            "Room between it and the edge",
+            &mut state.options.watermark.padding,
+            &percent(&PADDING_CHOICES, 2, "Watermark room from the edge:"),
+        );
+        ui.add_space(6.0);
+        option_check(
+            ui,
+            &mut state.options.powerpoint.logo,
+            "Put the picture in the corner of every PowerPoint slide",
+            "PowerPoint: put the picture in the corner of every slide",
+        );
+        option_line(
+            ui,
+            "What a screen reader says for it",
+            &mut state.options.powerpoint.logo_description,
+            "PowerPoint: what a screen reader says for the logo",
+        );
+    });
+    choose
+}
+
 /// What a quality number means in words.
 fn quality_words(quality: u8) -> &'static str {
     match quality {
@@ -382,6 +589,16 @@ pub enum ExportAction {
     Export,
     /// Save the guide as one file, a copy to send or keep.
     SaveCopy,
+    /// Choose the picture for the watermark and the PowerPoint logo.
+    ChooseLogo,
+    /// Use the template that is the nth in the list.
+    UseTemplate(usize),
+    /// Use a template from a file anywhere on this computer.
+    UseTemplateFile,
+    /// Save what is chosen as a new template.
+    SaveTemplate,
+    /// Open the folder the templates are kept in.
+    OpenTemplatesFolder,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
@@ -393,6 +610,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut ExportState) -> ExportAction {
         let p = palette(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.set_max_width(ui.available_width().min(super::shell::PAGE_WIDTH));
+            let from_templates = template_card(ui, state);
+            if from_templates != ExportAction::None {
+                action = from_templates;
+            }
+            ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());
             widgets::subheading(ui, "Formats");
@@ -517,6 +739,10 @@ ui.set_width(ui.available_width());
                 }
             }
 });
+ui.add_space(12.0);
+            if logo_card(ui, state) {
+                action = ExportAction::ChooseLogo;
+            }
 ui.add_space(12.0);
 widgets::card_frame(ui).show(ui, |ui| {
 ui.set_width(ui.available_width());

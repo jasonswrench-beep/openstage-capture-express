@@ -42,6 +42,34 @@ const PICTURE_H_ALONE: i64 = 4_937_760; // 5.4 inch
 const TEXT_Y: i64 = 5_669_280; // 6.2 inch
 const TEXT_H: i64 = 685_800; // 0.75 inch
 
+/// The logo put in the corner of every slide (spec 10.2): a PNG file, its size in pixels and what a screen reader says for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogoPicture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// What a screen reader says for the logo; the person writes it, and it is never left empty (a picture with no words is one that
+    /// is hidden from a screen reader, which is right for decoration and wrong for a name).
+    pub description: String,
+}
+
+/// The room a logo has at the foot of a slide, between the footer line and the slide number, and where its right edge is, in EMU.
+const LOGO_MAX_W: i64 = 1_300_000;
+const LOGO_MAX_H: i64 = 330_000;
+const LOGO_RIGHT: i64 = 9_226_880;
+const LOGO_Y: i64 = 6_400_800;
+const LOGO_ROW_H: i64 = 365_760;
+
+fn logo_shape(logo: &LogoPicture, rel: &str) -> String {
+    let (cx, cy) = fit_picture(logo.width, logo.height, LOGO_MAX_W, LOGO_MAX_H);
+    let (x, y) = (LOGO_RIGHT - cx, LOGO_Y + (LOGO_ROW_H - cy) / 2);
+    let words = if logo.description.trim().is_empty() { "Logo" } else { logo.description.trim() };
+    let alt = xml_escape(words);
+    format!(
+        "<p:pic><p:nvPicPr><p:cNvPr id=\"99\" name=\"Logo\" descr=\"{alt}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"{rel}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>"
+    )
+}
+
 /// What the person chose in the PowerPoint export dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PptxOptions {
@@ -54,6 +82,8 @@ pub struct PptxOptions {
     pub slide_numbers: bool,
     /// The full description of each step in its speaker notes.
     pub speaker_notes: bool,
+    /// A logo at the foot of every slide.
+    pub logo: Option<LogoPicture>,
 }
 
 impl Default for PptxOptions {
@@ -64,6 +94,7 @@ impl Default for PptxOptions {
             footer_text: String::new(),
             slide_numbers: true,
             speaker_notes: true,
+            logo: None,
         }
     }
 }
@@ -452,6 +483,10 @@ pub fn pptx_parts(plan: &Plan, options: &PptxOptions) -> Vec<ZipEntry> {
         let mut rels = Rels::default();
         rels.add("slideLayout", &format!("../slideLayouts/slideLayout{}.xml", spec.layout), false);
         let mut shapes = spec.shapes.clone();
+        if let Some(logo) = &options.logo {
+            let id = rels.add("image", "../media/logo.png", false);
+            shapes.push_str(&logo_shape(logo, &id));
+        }
         if let Some((path, bytes)) = &spec.image {
             let id = rels.add("image", &format!("../media/{}", path.trim_start_matches("ppt/media/")), false);
             // Only the picture's own attribute: a title or a description that says @IMAGE@ is escaped text and is never touched
@@ -476,6 +511,10 @@ pub fn pptx_parts(plan: &Plan, options: &PptxOptions) -> Vec<ZipEntry> {
         }
         slide_parts.push(ZipEntry::text(format!("ppt/slides/slide{n}.xml"), slide_xml(&shapes)));
         slide_parts.push(ZipEntry::text(format!("ppt/slides/_rels/slide{n}.xml.rels"), rels.xml()));
+    }
+
+    if let Some(logo) = &options.logo {
+        slide_parts.push(ZipEntry::stored("ppt/media/logo.png", logo.png.clone()));
     }
 
     let presentation = format!(
@@ -536,6 +575,7 @@ pub fn author_options() -> PptxOptions {
         footer_text: String::new(),
         slide_numbers: false,
         speaker_notes: true,
+        logo: None,
     }
 }
 
@@ -675,6 +715,52 @@ mod tests {
             assert!(z.names.iter().any(|n| n == part), "{part} in {:?}", z.names);
         }
         assert_eq!(slide_names(&z).len(), 7, "a cover and one slide for each of the six steps and notes");
+    }
+
+    fn a_logo() -> LogoPicture {
+        let canvas = openstage_capture_render::Canvas::new(400, 120);
+        LogoPicture {
+            png: crate::picture::encode_png(&canvas),
+            width: 400,
+            height: 120,
+            description: "The \"Acme\" logo".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_logo_is_at_the_foot_of_every_slide_with_its_words_and_one_copy_of_its_file() {
+        let logo = a_logo();
+        let z = make(&PptxOptions { agenda_slide: true, logo: Some(logo.clone()), ..PptxOptions::default() });
+        let slides = slide_names(&z);
+        assert_eq!(slides.len(), 8, "a cover, an agenda and one slide for each step and note");
+        for name in &slides {
+            let xml = z.text(name);
+            assert!(xml.contains("name=\"Logo\" descr=\"The &quot;Acme&quot; logo\""), "{name}");
+            let n = name.trim_start_matches("ppt/slides/slide").trim_end_matches(".xml");
+            let rels = z.text(&format!("ppt/slides/_rels/slide{n}.xml.rels"));
+            assert!(rels.contains("../media/logo.png"), "{name}: {rels}");
+        }
+        assert_eq!(z.names.iter().filter(|n| *n == "ppt/media/logo.png").count(), 1, "one file, used by every slide");
+        assert_eq!(z.get("ppt/media/logo.png"), Some(&logo.png[..]));
+        // It sits at the foot, left of the slide number, and no bigger than the room for it.
+        let cover = z.text(&slides[0]);
+        let heights = attributes(&cover, "a:ext", "cy");
+        assert!(heights.iter().any(|h| h == "330000"), "as tall as the room allows: {heights:?}");
+        let widths: Vec<i64> = attributes(&cover, "a:ext", "cx").iter().filter_map(|w| w.parse().ok()).collect();
+        assert!(widths.iter().any(|w| (1_090_000..=1_110_000).contains(w)), "400 by 120 shrunk to 330000 tall: {widths:?}");
+        for name in z.names.iter().filter(|n| n.ends_with(".xml") || n.ends_with(".rels")) {
+            well_formed(name, &z.text(name));
+        }
+        let none = make(&PptxOptions::default());
+        assert!(none.get("ppt/media/logo.png").is_none());
+        assert!(!none.text(&slide_names(&none)[0]).contains("name=\"Logo\""));
+    }
+
+    #[test]
+    fn a_logo_with_no_words_is_still_named_for_a_screen_reader() {
+        let logo = LogoPicture { description: "  ".to_string(), ..a_logo() };
+        let z = make(&PptxOptions { logo: Some(logo), ..PptxOptions::default() });
+        assert!(z.text(&slide_names(&z)[0]).contains("descr=\"Logo\""));
     }
 
     #[test]

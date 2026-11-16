@@ -15,6 +15,7 @@ use openstage_express_core::{AnnotationKind, Guide, Step, StepKind};
 
 use crate::jpeg;
 use crate::picture::{encode_png, PictureSource};
+use crate::watermark::Watermark;
 
 /// The picture widths the Export screen offers, in pixels. The usual one is `DEFAULT_IMAGE_WIDTH`.
 pub const IMAGE_WIDTH_CHOICES: [u32; 6] = [640, 800, 1024, 1280, 1600, 1920];
@@ -49,11 +50,18 @@ pub struct ExportOptions {
     pub first_steps: Option<usize>,
     /// How the pictures inside the documents are stored.
     pub document_pictures: DocumentPictures,
+    /// A picture laid over every step's picture, after it is scaled and before it is encoded, so it is in every format.
+    pub watermark: Option<Watermark>,
 }
 
 impl Default for ExportOptions {
     fn default() -> ExportOptions {
-        ExportOptions { image_width: DEFAULT_IMAGE_WIDTH, first_steps: None, document_pictures: DocumentPictures::Png }
+        ExportOptions {
+            image_width: DEFAULT_IMAGE_WIDTH,
+            first_steps: None,
+            document_pictures: DocumentPictures::Png,
+            watermark: None,
+        }
     }
 }
 
@@ -239,7 +247,7 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                 for problem in &rendered.report.text_errors {
                     warnings.push(format!("Step {label}: a text mark could not be drawn ({problem})."));
                 }
-                let scaled = scale_to_width(&rendered.canvas, image_width);
+                let mut scaled = scale_to_width(&rendered.canvas, image_width);
                 // Said only of a picture shown at under a quarter of the width asked for: one that small was made so on purpose
                 // by nobody, and the person should know why it looks small.
                 if scaled.width.saturating_mul(4) < image_width && rendered.canvas.width < image_width {
@@ -247,6 +255,9 @@ pub fn plan(guide: &Guide, pictures: &dyn PictureSource, text: &dyn TextRenderer
                         "Step {label}: its picture is only {} pixels across, so it is shown {} pixels across, not {image_width}.",
                         rendered.canvas.width, scaled.width
                     ));
+                }
+                if let Some(watermark) = &options.watermark {
+                    watermark.apply(&mut scaled);
                 }
                 let png = encode_png(&scaled);
                 let jpg = match options.document_pictures {
@@ -345,6 +356,40 @@ mod tests {
             let decoded = decode_png(&picture.png).unwrap();
             assert_eq!((decoded.width, decoded.height), (picture.width, picture.height));
         }
+    }
+
+    #[test]
+    fn a_watermark_is_drawn_into_every_picture_before_it_is_encoded_so_every_format_has_it() {
+        use crate::watermark::{Place, Watermark};
+        use openstage_capture_render::{Picture, Rgb};
+        let d = demo();
+        let plain = plan_of(&d.document.guide, &d.pictures);
+        let mark = Watermark {
+            picture: Picture::solid(40, 20, Rgb(255, 0, 255)),
+            place: Place::BottomRight,
+            opacity_percent: 100,
+            size_percent: 10,
+            padding_percent: 0,
+        };
+        let options = ExportOptions {
+            watermark: Some(mark),
+            document_pictures: DocumentPictures::Jpg { quality: 90 },
+            ..ExportOptions::default()
+        };
+        let marked = plan(&d.document.guide, &d.pictures, &BlockText, &options);
+        let mut seen = 0;
+        for (a, b) in plain.steps.iter().zip(&marked.steps) {
+            let (Some(a), Some(b)) = (&a.picture, &b.picture) else { continue };
+            seen += 1;
+            assert_eq!((a.width, a.height), (b.width, b.height), "the watermark does not change the size");
+            let (before, after) = (decode_png(&a.png).unwrap(), decode_png(&b.png).unwrap());
+            let last = ((after.height - 1) * after.width + after.width - 1) as usize * 4;
+            assert_eq!(&after.bgra[last..last + 3], &[255, 0, 255], "the corner is the watermark");
+            assert_eq!(&after.bgra[..4], &before.bgra[..4], "the far corner is as it was");
+            assert_ne!(a.png, b.png);
+            assert!(b.jpg.is_some(), "the picture inside documents is made from the marked one too");
+        }
+        assert!(seen >= 5);
     }
 
     #[test]

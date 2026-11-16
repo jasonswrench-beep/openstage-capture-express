@@ -4788,7 +4788,7 @@ fn enter_in_the_box_opens_the_copy_and_browse_fills_the_box_from_the_dialog() {
     let answers = Rc::new(RefCell::new(vec![None, Some(chosen)]));
     let record = Rc::clone(&answers);
     let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
-    h.app = app.with_file_chooser(Box::new(move |_| record.borrow_mut().remove(0)));
+    h.app = app.with_file_chooser(Box::new(move |_, _| record.borrow_mut().remove(0)));
     h.settle();
     h.press("Open a copy...");
     h.invoke(Role::Button, "Browse...");
@@ -5531,4 +5531,327 @@ fn the_options_chosen_are_kept_in_the_settings_and_are_there_the_next_time() {
     assert!(!is_on(&again, Role::RadioButton, "GIF: each step stays 3 seconds"));
     assert!(is_on(&again, Role::CheckBox, "PowerPoint: a slide that lists the steps"));
     assert_eq!(again.node(again.find(Role::TextInput, "PowerPoint: the line at the foot of every slide")).value(), Some("Team"));
+}
+
+// ---- the logo and the watermark
+
+/// A PNG file of one colour in `folder`.
+fn write_logo(folder: &std::path::Path, name: &str, colour: openstage_capture_render::Rgb) -> PathBuf {
+    let mut canvas = openstage_capture_render::Canvas::new(60, 30);
+    canvas.clear(colour);
+    let path = folder.join(name);
+    std::fs::write(&path, openstage_express_export::picture::encode_png(&canvas)).unwrap();
+    path
+}
+
+/// The export screen over the example guide, with a stand-in for the picture dialog that answers with `chosen`.
+fn logo_harness(dir: &std::path::Path, chosen: Option<PathBuf>) -> Harness {
+    let (mut h, _) = export_harness(&dir.join("exports"), None);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_file_chooser(Box::new(move |_, kind| {
+        assert_eq!(kind, crate::ui::app::FileKind::Picture, "the dialog asks for a picture");
+        chosen.clone()
+    }));
+    h.app.screen = Screen::Editor;
+    h.settle();
+    h.invoke(Role::Button, "Export");
+    h
+}
+
+#[test]
+fn the_logo_card_offers_a_picture_a_watermark_and_a_powerpoint_logo_each_named_for_what_it_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = logo_harness(dir.path(), None);
+    h.find(Role::Heading, "A logo or watermark picture");
+    h.find(Role::Label, "Logo picture: none chosen");
+    assert!(h.node(h.find(Role::Button, "Take the picture away")).is_disabled(), "nothing to take away");
+    assert!(!is_on(&h, Role::CheckBox, "Watermark: lay the picture over every picture"));
+    for spot in crate::export_options::Spot::ALL {
+        assert_eq!(
+            is_on(&h, Role::RadioButton, &format!("Watermark place: {}", spot.name())),
+            spot == crate::export_options::Spot::BottomRight,
+            "{}",
+            spot.name()
+        );
+    }
+    assert!(is_on(&h, Role::RadioButton, "Watermark opacity 30 percent"));
+    assert!(is_on(&h, Role::RadioButton, "Watermark width, as a share of the picture's width: 20 percent"));
+    assert!(is_on(&h, Role::RadioButton, "Watermark room from the edge: 2 percent"));
+    assert!(!is_on(&h, Role::CheckBox, "PowerPoint: put the picture in the corner of every slide"));
+    assert_eq!(
+        h.node(h.find(Role::TextInput, "PowerPoint: what a screen reader says for the logo")).value(),
+        Some("Logo")
+    );
+    // The nine places are in reading order, row by row.
+    let at = |words: &str| h.order.iter().position(|id| *id == h.find(Role::RadioButton, words)).unwrap();
+    let places: Vec<usize> =
+        crate::export_options::Spot::ALL.iter().map(|s| at(&format!("Watermark place: {}", s.name()))).collect();
+    assert!(places.windows(2).all(|w| w[0] < w[1]), "{places:?}");
+}
+
+#[test]
+fn a_chosen_picture_is_shown_and_can_be_taken_away_and_cancelling_the_dialog_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let logo = write_logo(dir.path(), "logo.png", openstage_capture_render::Rgb(255, 0, 255));
+    let mut h = logo_harness(dir.path(), Some(logo.clone()));
+    h.invoke(Role::Button, "Choose a picture...");
+    h.find(Role::Label, &format!("Logo picture: {}", logo.display()));
+    assert!(h.status().starts_with("Chosen: "), "{}", h.status());
+    assert!(!h.node(h.find(Role::Button, "Take the picture away")).is_disabled());
+    h.invoke(Role::Button, "Take the picture away");
+    h.find(Role::Label, "Logo picture: none chosen");
+    let mut cancelled = logo_harness(dir.path(), None);
+    cancelled.invoke(Role::Button, "Choose a picture...");
+    cancelled.find(Role::Label, "Logo picture: none chosen");
+}
+
+#[test]
+fn a_watermark_chosen_on_the_screen_is_drawn_into_the_pictures_the_export_makes() {
+    use openstage_express_export::picture::decode_png;
+    let dir = tempfile::tempdir().unwrap();
+    let logo = write_logo(dir.path(), "logo.png", openstage_capture_render::Rgb(255, 0, 255));
+    let mut h = logo_harness(dir.path(), Some(logo));
+    for name in ["Web page", "Word document"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::CheckBox, "Pictures (PNG)");
+    h.invoke(Role::Button, "Choose a picture...");
+    h.invoke(Role::CheckBox, "Watermark: lay the picture over every picture");
+    h.invoke(Role::RadioButton, "Watermark place: Top left");
+    h.invoke(Role::RadioButton, "Watermark opacity 100 percent");
+    h.invoke(Role::RadioButton, "Watermark room from the edge: 0 percent");
+    h.invoke(Role::Button, "Export 1 format");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 1 format to "), "{}", h.status());
+    let run = only_run(&dir.path().join("exports"));
+    let first = files_in(&run.join("images")).remove(0);
+    let picture = decode_png(&std::fs::read(first).unwrap()).unwrap();
+    assert_eq!(&picture.bgra[..3], &[255, 0, 255], "the top left corner is the watermark");
+    let last = picture.bgra.len() - 4;
+    assert_ne!(&picture.bgra[last..last + 3], &[255, 0, 255], "and the far corner is not");
+    // The choices are kept for next time.
+    let kept = &h.app.settings.export_options;
+    assert!(kept.watermark.on && kept.watermark.place == crate::export_options::Spot::TopLeft && kept.watermark.opacity == 100);
+}
+
+#[test]
+fn a_watermark_with_no_usable_picture_stops_the_export_and_says_why_and_nothing_is_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = logo_harness(dir.path(), None);
+    h.invoke(Role::CheckBox, "Watermark: lay the picture over every picture");
+    h.invoke(Role::Button, "Export 2 formats");
+    let said = h.status();
+    assert!(
+        said.starts_with(
+            "Nothing was exported. The picture for the watermark or the PowerPoint logo cannot be used: No picture is chosen."
+        ),
+        "{said}"
+    );
+    assert!(!h.app.is_exporting());
+    assert!(!dir.path().join("exports").join("How to submit an assignment").exists(), "no folder was made");
+    // A file that is not a PNG, and one that is not there.
+    let text = dir.path().join("logo.png");
+    std::fs::write(&text, b"not a picture").unwrap();
+    h.app.export.options.logo_file = text.display().to_string();
+    h.invoke(Role::Button, "Export 2 formats");
+    assert!(h.status().contains("is not a PNG file"), "{}", h.status());
+    h.app.export.options.logo_file = dir.path().join("gone.png").display().to_string();
+    h.invoke(Role::Button, "Export 2 formats");
+    assert!(h.status().contains("could not be found"), "{}", h.status());
+    // Turned off, the picture is not read at all: a bad file is no trouble.
+    h.invoke(Role::CheckBox, "Watermark: lay the picture over every picture");
+    h.invoke(Role::Button, "Export 2 formats");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 2 formats"), "{}", h.status());
+}
+
+#[test]
+fn the_powerpoint_logo_puts_the_picture_on_every_slide_with_the_words_that_were_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let logo = write_logo(dir.path(), "logo.png", openstage_capture_render::Rgb(10, 20, 200));
+    let mut h = logo_harness(dir.path(), Some(logo));
+    for name in ["Web page", "Word document", "PowerPoint presentation"] {
+        h.invoke(Role::CheckBox, name);
+    }
+    h.invoke(Role::Button, "Choose a picture...");
+    h.invoke(Role::CheckBox, "PowerPoint: put the picture in the corner of every slide");
+    type_in_box(&mut h, "PowerPoint: what a screen reader says for the logo", "The Acme logo");
+    h.invoke(Role::Button, "Export 1 format");
+    wait_for_export(&mut h);
+    assert!(h.status().starts_with("Exported 1 format to "), "{}", h.status());
+    let deck = only_file(&only_run(&dir.path().join("exports")), "powerpoint");
+    let slide = part_of(&deck, "ppt/slides/slide2.xml");
+    assert!(slide.contains("name=\"Logo\" descr=\"The Acme logo\""), "{slide}");
+    let cover = part_of(&deck, "ppt/slides/slide1.xml");
+    assert!(cover.contains("name=\"Logo\""), "the cover too");
+}
+
+// ---- export templates
+
+/// The Export screen over the example guide with settings kept in `dir` (so templates are in `dir/Export templates`), and a stand-in
+/// for the file dialog that answers with `chosen`.
+fn template_harness(dir: &std::path::Path, chosen: Option<PathBuf>) -> Harness {
+    let mut h = picture_harness(dir, AppSettings::default());
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app.with_file_chooser(Box::new(move |_, kind| {
+        assert_eq!(kind, crate::ui::app::FileKind::Template, "the dialog asks for a template");
+        chosen.clone()
+    }));
+    h.app.screen = Screen::Editor;
+    h.settle();
+    h.invoke(Role::Button, "Export");
+    h
+}
+
+const TEMPLATE_NAME_BOX: &str = "Name for a new template";
+const SAVE_TEMPLATE: &str = "Save these choices as a template";
+
+#[test]
+fn the_template_card_says_there_are_none_and_will_not_save_without_a_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = template_harness(dir.path(), None);
+    h.find(Role::Heading, "Export templates");
+    h.find(Role::Label, "No template is saved yet.");
+    assert!(h.node(h.find(Role::Button, SAVE_TEMPLATE)).is_disabled(), "no name, no template");
+    h.find(Role::Button, "Use a template from a file...");
+    assert!(!h.node(h.find(Role::Button, "Open the templates folder")).is_disabled());
+    type_in_box(&mut h, TEMPLATE_NAME_BOX, "Handout");
+    assert!(!h.node(h.find(Role::Button, SAVE_TEMPLATE)).is_disabled());
+    type_in_box(&mut h, TEMPLATE_NAME_BOX, "   ");
+    assert!(h.node(h.find(Role::Button, SAVE_TEMPLATE)).is_disabled(), "spaces are not a name");
+    // The card is the first thing on the screen, above the formats.
+    let at = |role: Role, words: &str| h.order.iter().position(|id| *id == h.find(role, words)).unwrap();
+    assert!(at(Role::Heading, "Export templates") < at(Role::Heading, "Formats"));
+}
+
+#[test]
+fn a_template_is_saved_in_its_folder_listed_and_used_to_bring_the_choices_back_but_not_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = template_harness(dir.path(), None);
+    // Choose things: a GIF and Word as well, a narrower picture, Letter paper in Word, a line in the PowerPoint footer.
+    h.invoke(Role::CheckBox, "Word document");
+    h.invoke(Role::CheckBox, "Animated GIF");
+    h.invoke(Role::CheckBox, "PowerPoint presentation");
+    h.invoke(Role::RadioButton, "Picture width 800 pixels");
+    h.invoke(Role::RadioButton, "Word paper size Letter");
+    h.invoke(Role::RadioButton, "GIF: each step stays 8 seconds");
+    type_in_box(&mut h, "PowerPoint: the line at the foot of every slide", "Team");
+    type_in_box(&mut h, TEMPLATE_NAME_BOX, "  My   handout ");
+    h.invoke(Role::Button, SAVE_TEMPLATE);
+    let saved = dir.path().join("Export templates").join("My handout.osexport");
+    assert!(saved.is_file(), "{:?}", std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.path()).collect::<Vec<_>>());
+    assert!(h.status().starts_with("Saved the template as My handout.osexport in "), "{}", h.status());
+    h.find(Role::Button, "Use the template My handout");
+    assert_eq!(h.node(h.find(Role::TextInput, TEMPLATE_NAME_BOX)).value(), Some(""), "the box is empty again");
+    let text = std::fs::read_to_string(&saved).unwrap();
+    assert!(text.contains("\"pictureWidth\": 800") && text.contains("\"footerText\": \"Team\""), "{text}");
+    assert!(!text.contains("exports") && !text.contains("openFolder"), "the folder is not in it: {text}");
+    // Change everything, then use the template: the choices are the saved ones again.
+    h.invoke(Role::CheckBox, "Animated GIF");
+    h.invoke(Role::CheckBox, "PowerPoint presentation");
+    h.invoke(Role::RadioButton, "Picture width 1920 pixels");
+    h.invoke(Role::RadioButton, "Word paper size A4");
+    h.invoke(Role::CheckBox, "Word document");
+    let folder_before = h.app.export.folder.clone();
+    h.app.export.open_after = false;
+    h.invoke(Role::Button, "Use the template My handout");
+    assert!(h.status().starts_with("Using the template My handout."), "{}", h.status());
+    assert!(is_on(&h, Role::RadioButton, "Picture width 800 pixels"));
+    assert!(is_on(&h, Role::RadioButton, "Word paper size Letter"));
+    assert!(is_on(&h, Role::RadioButton, "GIF: each step stays 8 seconds"));
+    assert!(is_on(&h, Role::CheckBox, "Animated GIF") && is_on(&h, Role::CheckBox, "PowerPoint presentation"));
+    assert!(is_on(&h, Role::CheckBox, "Word document"));
+    assert_eq!(h.node(h.find(Role::TextInput, "PowerPoint: the line at the foot of every slide")).value(), Some("Team"));
+    assert_eq!(h.app.export.folder, folder_before, "where exports go is not the template's");
+    assert!(!h.app.export.open_after, "nor is whether to open the folder");
+    // A second template with the same name does not replace the first.
+    type_in_box(&mut h, TEMPLATE_NAME_BOX, "My handout");
+    h.invoke(Role::Button, SAVE_TEMPLATE);
+    assert!(dir.path().join("Export templates").join("My handout (2).osexport").is_file());
+    h.find(Role::Button, "Use the template My handout (2)");
+}
+
+#[test]
+fn a_template_chosen_from_a_file_is_used_and_one_that_cannot_be_read_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    // Make a template with one app, then use it from its file with another, as if it had been sent.
+    let mut maker = template_harness(dir.path(), None);
+    maker.invoke(Role::RadioButton, "Picture width 640 pixels");
+    type_in_box(&mut maker, TEMPLATE_NAME_BOX, "Sent");
+    maker.invoke(Role::Button, SAVE_TEMPLATE);
+    let file = dir.path().join("Export templates").join("Sent.osexport");
+    let other = tempfile::tempdir().unwrap();
+    let mut h = template_harness(other.path(), Some(file));
+    assert!(is_on(&h, Role::RadioButton, "Picture width 1280 pixels"));
+    h.invoke(Role::Button, "Use a template from a file...");
+    assert!(is_on(&h, Role::RadioButton, "Picture width 640 pixels"), "{}", h.status());
+    assert!(h.status().starts_with("Using the template Sent."), "{}", h.status());
+    // Something that is not a template: refused in words, nothing changed.
+    let junk = other.path().join("junk.osexport");
+    std::fs::write(&junk, "{ not json").unwrap();
+    let mut bad = template_harness(other.path(), Some(junk));
+    bad.invoke(Role::RadioButton, "Picture width 1600 pixels");
+    bad.invoke(Role::Button, "Use a template from a file...");
+    assert!(bad.status().starts_with("The template was not used. That file is not a template"), "{}", bad.status());
+    assert!(is_on(&bad, Role::RadioButton, "Picture width 1600 pixels"), "nothing changed");
+    // Cancelling the dialog does nothing at all.
+    let mut cancelled = template_harness(other.path(), None);
+    cancelled.invoke(Role::RadioButton, "Picture width 1600 pixels");
+    cancelled.invoke(Role::Button, "Use a template from a file...");
+    assert!(is_on(&cancelled, Role::RadioButton, "Picture width 1600 pixels"));
+}
+
+#[test]
+fn a_templates_logo_goes_with_it_to_another_computer_and_a_pdf_is_left_out_where_none_can_be_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let logo = write_logo(dir.path(), "mine.png", openstage_capture_render::Rgb(5, 6, 7));
+    let mut maker = template_harness(dir.path(), None);
+    maker.app.export.can_pdf = true;
+    maker.invoke(Role::CheckBox, "PDF");
+    maker.app.export.options.logo_file = logo.display().to_string();
+    maker.app.export.options.watermark.on = true;
+    maker.app.export.options.watermark.place = crate::export_options::Spot::Centre;
+    type_in_box(&mut maker, TEMPLATE_NAME_BOX, "Branded");
+    maker.invoke(Role::Button, SAVE_TEMPLATE);
+    let file = dir.path().join("Export templates").join("Branded.osexport");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"logoPng\": \""), "the picture is inside the template");
+    assert!(!text.contains("mine.png") && !text.contains(&dir.path().display().to_string().replace('\\', "\\\\")), "and not its place on this computer: {text}");
+    // Another computer: no such picture, and no PDF engine.
+    let other = tempfile::tempdir().unwrap();
+    let mut h = template_harness(other.path(), Some(file));
+    assert!(!h.app.export.can_pdf);
+    h.invoke(Role::Button, "Use a template from a file...");
+    let used = &h.app.export.options;
+    assert!(used.watermark.on && used.watermark.place == crate::export_options::Spot::Centre);
+    let extracted = PathBuf::from(&used.logo_file);
+    assert!(extracted.starts_with(other.path().join("Export templates").join("pictures")), "{extracted:?}");
+    assert_eq!(std::fs::read(&extracted).unwrap(), std::fs::read(&logo).unwrap());
+    assert!(!h.app.export.selection.contains(crate::export_run::Format::Pdf), "no PDF engine here, so no PDF");
+    assert!(h.app.export.selection.contains(crate::export_run::Format::Html));
+    h.find(Role::Label, &format!("Logo picture: {}", extracted.display()));
+}
+
+#[test]
+fn the_templates_folder_can_be_opened_and_is_made_if_it_is_not_there_yet() {
+    let dir = tempfile::tempdir().unwrap();
+    let opened: Opened = Rc::default();
+    let mut h = Harness::new(Screen::Editor);
+    let record = Rc::clone(&opened);
+    let app = std::mem::replace(&mut h.app, App::new(Screen::Home));
+    h.app = app
+        .with_system(
+            dir.path().join("exports"),
+            false,
+            Box::new(|_| None),
+            Box::new(move |folder| record.borrow_mut().push(folder.to_path_buf())),
+        )
+        .with_settings(AppSettings::default(), Some(dir.path().join("settings.json")), None);
+    h.app.screen = Screen::Editor;
+    h.settle();
+    h.invoke(Role::Button, "Export");
+    assert!(!dir.path().join("Export templates").exists());
+    h.invoke(Role::Button, "Open the templates folder");
+    assert!(dir.path().join("Export templates").is_dir());
+    assert_eq!(*opened.borrow(), [dir.path().join("Export templates")]);
 }

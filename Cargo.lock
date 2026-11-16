@@ -1996,6 +1996,7 @@ dependencies = [
 name = "openstage-express-app"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "eframe",
  "openstage-capture-project",
  "openstage-capture-render",
@@ -2005,6 +2006,7 @@ dependencies = [
  "png 0.17.16",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

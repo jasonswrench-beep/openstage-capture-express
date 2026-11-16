@@ -478,13 +478,25 @@ pub fn run(options: DevOptions) -> eframe::Result {
                             let _ = openstage_express_windows::updates::open_release_page(url);
                         }),
                     )
-                    .with_file_chooser(Box::new(|start| {
-                        openstage_express_windows::dialogs::choose_file(
+                    .with_file_chooser(Box::new(|start, kind| match kind {
+                        app::FileKind::GuideCopy => openstage_express_windows::dialogs::choose_file(
                             start,
                             "Choose a copy of a guide",
                             "Copies of guides (*.zip)",
                             "*.zip",
-                        )
+                        ),
+                        app::FileKind::Picture => openstage_express_windows::dialogs::choose_file(
+                            start,
+                            "Choose a logo or watermark picture",
+                            "PNG pictures (*.png)",
+                            "*.png",
+                        ),
+                        app::FileKind::Template => openstage_express_windows::dialogs::choose_file(
+                            start,
+                            "Choose an export template",
+                            "Export templates (*.osexport)",
+                            "*.osexport",
+                        ),
                     }));
                 app.set_hotkey_words(&words);
                 (app.with_settings(settings, settings_path, settings_note), hotkeys, hotkey_changes)
