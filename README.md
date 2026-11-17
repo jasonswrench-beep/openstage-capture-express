@@ -458,7 +458,7 @@ build fetches it with the other libraries, after asking.
    (`OpenStage-Capture-Express-<version>-x64-setup.exe`) with Inno Setup, a free program that must be installed first (see
    `docs/installer.md`). The setup file, the program file it installs, its shortcuts and its entry in Windows' list of installed
    programs all use the product icon (`assets/icon/OpenCapture_Express.ico`). It installs for one person without needing an
-   administrator, and removing it never deletes guides or settings. Both are signed when they are made with `sign` (`MAKE EXPRESS INSTALLER.bat sign`, `PACK EXPRESS.bat sign`; see `docs/installer.md`).
+   administrator, and removing it never deletes guides or settings. Double-click **`MAKE SIGNED EXPRESS INSTALLER.bat`** to make the signed setup file in its own folder, `dist\<release label>`; it checks first that signing can work. Typing `sign` after `MAKE EXPRESS INSTALLER.bat` or `PACK EXPRESS.bat` signs those too (see `docs/installer.md`).
 
 ## Decisions
 

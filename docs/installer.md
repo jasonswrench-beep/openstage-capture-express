@@ -57,8 +57,13 @@ to choose the folder, `/TASKS="desktopicon"` for the desktop shortcut, and `/LOG
 
 ## Signing
 
-`MAKE EXPRESS INSTALLER.bat sign` (or `tools/make-installer.ps1 -Sign`) signs the program, then the uninstaller and the setup file,
-with Azure Artifact Signing, each signature timestamped by Microsoft's timestamp service (`tools/sign_windows.py`). The program is
+Double-click `MAKE SIGNED EXPRESS INSTALLER.bat` to make the signed setup file. It first runs `python tools/sign_windows.py --ready`
+(so a missing sign-in is found in seconds, before the program is built), then runs `MAKE EXPRESS INSTALLER.bat sign` with the folder
+`dist\<release label>` (the label is in `installer/release.txt`, for example `dist\0.1.0-alpha.5`). The folder is named after the
+label because the setup file's own name holds only the version from `Cargo.toml` (0.1.0), and nothing in `dist` is ever replaced, so
+each release needs a folder of its own. Typing `MAKE EXPRESS INSTALLER.bat sign` (or `tools/make-installer.ps1 -Sign`) does the same
+into `dist` itself, or into the folder named in the `EXPRESS_OUTDIR` setting. Signing signs the program, then the uninstaller and the
+setup file, with Azure Artifact Signing, each signature timestamped by Microsoft's timestamp service (`tools/sign_windows.py`). The program is
 signed after its icon is added, because changing a program file breaks its signature, and the SHA-256 is worked out last, so it is
 the hash of the signed setup file. `python tools/sign_windows.py --ready` says what signing needs: the three `OPENSTAGE_SIGN_`
 settings (account, profile and endpoint, kept in the person's own Windows environment and never in the repository), SignTool from

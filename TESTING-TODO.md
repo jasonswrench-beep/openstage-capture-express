@@ -421,10 +421,16 @@ Built and checked by the tests (1,008 passing, and the rule checks) and by the c
       Microsoft; its properties say 0.1.0-alpha.5 and it has a 32-pixel icon; it ran `--version` and exited cleanly; the five files
       are the ones named, and `START-HERE.txt` says the program is signed. `PACK EXPRESS.bat sign` itself was not double-clicked:
       `tools\pack.ps1 -Sign` was run.)
-- [ ] Publishing alpha.5: a draft release is on GitHub with only the signed setup file. The rule is that GitHub carries signed
-      installers and nothing else, so the zip and the checksum file are not there (the checksum is in the notes). The notes are
-      `dist\0.1.0-alpha.5\notes-v0.1.0-alpha.5.md`. Read them and the draft, then publish it: that makes the tag `v0.1.0-alpha.5` and
-      tells alpha.4 users, through Check for updates, that a newer release exists.
+- [ ] alpha.5 is published on GitHub as a pre-release (tag `v0.1.0-alpha.5`) with only the signed setup file. The rule is that GitHub
+      carries signed installers and nothing else, so the zip and the checksum file are not there (the checksum is in the notes, kept
+      in `dist\0.1.0-alpha.5\notes-v0.1.0-alpha.5.md`). Download the setup file from the release page, not from `dist`, and check its
+      SHA-256 against the notes and Properties > Digital Signatures. alpha.4 users should now be told, through Check for updates, that a
+      newer release exists: look at that from an alpha.4 install if you still have one.
+- [ ] `MAKE SIGNED EXPRESS INSTALLER.bat` (new): double-click it for the next release. It should check signing first (the four `ok` lines),
+      build, and put the signed setup file in `dist\<label>`. It has only been run with the keyboard unattended, and it stopped, as it
+      should, at the alpha.5 setup file that is already in `dist\0.1.0-alpha.5` (nothing was replaced). The signing itself is the
+      same code as `MAKE EXPRESS INSTALLER.bat sign`, which made alpha.5. If the sign-in has run out, it should say so and stop before
+      the build.
 
 ### The options of each format
 

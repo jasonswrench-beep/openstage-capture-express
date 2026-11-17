@@ -29,18 +29,21 @@ if errorlevel 1 goto failed
 echo.
 echo Making the setup file. Please wait...
 rem MAKE EXPRESS INSTALLER.bat sign signs the program and the setup (tools\sign_windows.py says what signing needs).
+rem MAKE SIGNED EXPRESS INSTALLER.bat does that with a double-click, and names its own folder in EXPRESS_OUTDIR.
+set "OUTDIR=%~dp0dist"
+if defined EXPRESS_OUTDIR set "OUTDIR=%EXPRESS_OUTDIR%"
 set "SIGNARG="
 if /i "%~1"=="sign" set "SIGNARG=-Sign"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make-installer.ps1" -OutDir "%~dp0dist" %SIGNARG% >> "%~dp0installer-log.txt" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make-installer.ps1" -OutDir "%OUTDIR%" %SIGNARG% >> "%~dp0installer-log.txt" 2>&1
 set "RESULT=%ERRORLEVEL%"
 type "%~dp0installer-log.txt" | findstr /i /c:"Made the installer" /c:"SHA-256" /c:"names this computer" /c:"already in" /c:"is missing" /c:"Inno Setup was not found"
 if not "%RESULT%"=="0" goto failed
 
 echo.
 echo ------------------------------------------------------------
-echo   Done. The setup file is in the folder dist.
+echo   Done. The setup file is in %OUTDIR%
 echo ------------------------------------------------------------
-if not defined EXPRESS_NO_OPEN start "" "%~dp0dist"
+if not defined EXPRESS_NO_OPEN start "" "%OUTDIR%"
 goto done
 
 :no_rust
